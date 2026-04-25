@@ -63,9 +63,14 @@ def register_engine_backend(
 # ---------------------------------------------------------------------------
 
 def _duckdb_factory(*, dsn: str | None = None, duckdb_path: str = ":memory:", **_kw: Any) -> SpatialEngine:
-    from persistence.duckdb_engine import DuckDBSession
+    # Lot 3: return the change-log adapter (subclass of DuckDBSession)
+    # so the lifespan can wire it into WatcherRegistry without further
+    # branching. All DuckDBSession behaviour is preserved via inheritance;
+    # the adapter only adds get_pending_changes / mark_changes_processed
+    # and a DML-proxy ``execute``.
+    from persistence.duckdb_engine_adapter import DuckDBSpatialEngine
 
-    return DuckDBSession(database=duckdb_path)
+    return DuckDBSpatialEngine(database=duckdb_path)
 
 
 def _postgis_factory(*, dsn: str | None = None, duckdb_path: str = ":memory:", **_kw: Any) -> SpatialEngine:

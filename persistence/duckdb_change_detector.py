@@ -121,18 +121,38 @@ class DuckDBChangeDetector:
 
         Returns:
             The DuckDB result object.
+
+        Thread-safety
+        -------------
+        ``DuckDBPyConnection.execute`` binds its result set to the
+        connection object — a second ``execute`` on the same conn
+        (even from the same thread) invalidates the prior result, and
+        cross-thread access can corrupt the connection's internal
+        state. The lifespan-bound watcher polls
+        :meth:`DuckDBSpatialEngine.get_pending_changes` (which uses
+        ``conn.cursor()``) from a daemon thread while
+        :class:`DuckDBSpatialEngine.execute` (the proxy) is called
+        from the main / HTTP-worker threads. We use a thread-local
+        ``cursor()`` here too so the original statement and the
+        ``_change_log`` insert share an isolated result handle that
+        won't be clobbered by the watcher's polling cursor.
         """
+        cur = self._conn.cursor()
         # Execute the original statement
         if params is not None:
-            result = self._conn.execute(sql, params)
+            result = cur.execute(sql, params)
         else:
-            result = self._conn.execute(sql)
+            result = cur.execute(sql)
 
         # Detect DML and log the change
         dml_info = self._detect_dml(sql)
         if dml_info:
             table_name, operation = dml_info
-            self._log_change(table_name, operation)
+            # Re-use the same cursor — DuckDB handles sequential
+            # ``execute`` calls on a cursor without invalidating the
+            # prior result up to the next fetch (and we don't fetch
+            # the original DML's result here).
+            self._log_change(table_name, operation, cursor=cur)
 
         return result
 
@@ -156,9 +176,23 @@ class DuckDBChangeDetector:
 
         return None
 
-    def _log_change(self, table_name: str, operation: str) -> None:
-        """Insert a change record into _change_log."""
-        self._conn.execute(
+    def _log_change(
+        self, table_name: str, operation: str, cursor: Any | None = None
+    ) -> None:
+        """Insert a change record into _change_log.
+
+        Args:
+            table_name: The DML target table.
+            operation:  ``INSERT`` / ``UPDATE`` / ``DELETE``.
+            cursor:     Optional thread-local cursor reused by
+                ``execute()`` so the change-log insert is co-located
+                with the DML on the same handle. When *None* (legacy
+                callers / start_polling path), a fresh cursor is
+                created so the write doesn't race with concurrent
+                reads on the bare connection.
+        """
+        target = cursor if cursor is not None else self._conn.cursor()
+        target.execute(
             "INSERT INTO _change_log(id, table_name, operation) "
             "VALUES (nextval('_change_log_seq'), ?, ?)",
             [table_name, operation],
@@ -215,7 +249,11 @@ class DuckDBChangeDetector:
         Returns:
             List of FiredTrigger generated in this cycle.
         """
-        rows = self._conn.execute(
+        # Thread-local cursor: this method runs on the polling daemon
+        # thread spawned by ``start_polling``. See :meth:`execute` for
+        # the cross-thread rationale.
+        cur = self._conn.cursor()
+        rows = cur.execute(
             "SELECT id, table_name, operation, row_pk "
             "FROM _change_log WHERE processed = 0 ORDER BY id"
         ).fetchall()
@@ -256,7 +294,7 @@ class DuckDBChangeDetector:
 
         if ids_to_mark:
             placeholders = ",".join(str(i) for i in ids_to_mark)
-            self._conn.execute(
+            cur.execute(
                 f"UPDATE _change_log SET processed = 1 WHERE id IN ({placeholders})"
             )
 

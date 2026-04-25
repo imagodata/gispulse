@@ -293,7 +293,20 @@ def create_app(
             app.state.change_log_watcher = None  # back-compat sentinel
 
             backend = getattr(spatial_engine, "backend_name", "")
-            if backend == "gpkg" and hasattr(
+            # Lot 3: extend Lot 2 v2 wiring to DuckDB. The Lot 2 v2 GPKG
+            # branch only checked ``backend == "gpkg"``. DuckDB uses a
+            # different change-detection mechanism (application-level
+            # via :class:`DuckDBChangeDetector` instead of native SQLite
+            # triggers), but the ``DuckDBSpatialEngine`` adapter exposes
+            # the same ``get_pending_changes`` /
+            # ``mark_changes_processed`` shape, so the same watcher
+            # plumbing works once we widen the gate.
+            #
+            # The structural check (``hasattr(... "get_pending_changes")``)
+            # is preserved as a defensive guard against custom
+            # SpatialEngine subclasses that ship without the change-log
+            # surface.
+            if backend in ("gpkg", "duckdb") and hasattr(
                 spatial_engine, "get_pending_changes"
             ):
                 try:
@@ -309,9 +322,11 @@ def create_app(
                         return [t for t in items if getattr(t, "enabled", True)]
 
                     # The registry would normally open its own engine on
-                    # the project GPKG, but the SpatialEngine factory has
+                    # the project file, but the SpatialEngine factory has
                     # already opened the project engine. Reuse it directly
-                    # to avoid a second SQLite handle on the same WAL.
+                    # to avoid a second handle on the same database
+                    # (SQLite WAL contention for GPKG; duplicated
+                    # _change_log polling for DuckDB).
                     watcher = ChangeLogWatcher(
                         engine=spatial_engine,
                         event_hub=app.state.event_hub,
@@ -335,6 +350,20 @@ def create_app(
                         backend=backend,
                         dataset_id="__project__",
                     )
+                    if backend == "duckdb":
+                        # Lot 3: surface the limitation loudly at boot so
+                        # operators don't expect external-write capture.
+                        log.warning(
+                            "duckdb_change_detection_app_level",
+                            detail=(
+                                "DuckDB has no native triggers. Only DML "
+                                "routed through the engine's execute() proxy "
+                                "is captured by /ws/events. External "
+                                "duckdb.connect() writes bypass detection. "
+                                "Use the gpkg backend or PostGIS (Pro) for "
+                                "full external-write capture."
+                            ),
+                        )
                 except Exception as exc:
                     log.warning("change_log_watcher_failed", error=str(exc))
 

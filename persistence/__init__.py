@@ -28,11 +28,14 @@ except ImportError:
 # DuckDB session engine (Phase 1 default).
 try:
     from persistence.duckdb_engine import DuckDBSession
+    # Lot 3: change-log adapter wrapping DuckDBSession for live-sync.
+    from persistence.duckdb_engine_adapter import DuckDBSpatialEngine
 
     _DUCKDB_AVAILABLE = True
 except ImportError:
     _DUCKDB_AVAILABLE = False
     DuckDBSession = None  # type: ignore[assignment,misc]
+    DuckDBSpatialEngine = None  # type: ignore[assignment,misc]
 
 # DuckDB-PostGIS hybrid bridge (Phase 4).
 try:
@@ -143,6 +146,7 @@ __all__ = [
     "_RASTER_IO_AVAILABLE",
     # DuckDB (Phase 1)
     "DuckDBSession",
+    "DuckDBSpatialEngine",
     "_DUCKDB_AVAILABLE",
     # Hybrid bridge (Phase 4)
     "DuckDBPostGISBridge",

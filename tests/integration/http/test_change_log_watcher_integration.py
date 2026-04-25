@@ -126,16 +126,58 @@ def test_dml_change_arrives_on_websocket(gpkg_app_client) -> None:
     assert not (forbidden & set(data.keys()))
 
 
-def test_watcher_skipped_for_non_gpkg_backend(tmp_path, monkeypatch) -> None:
-    """When the active engine is not GPKG, the watcher must not start."""
-    monkeypatch.setenv("GISPULSE_ENGINE", "duckdb")
+def test_watcher_skipped_for_unsupported_backend(tmp_path, monkeypatch) -> None:
+    """When the active engine has no change-log surface, no watcher starts.
+
+    Lot 3 widened the lifespan guard from ``backend == "gpkg"`` to
+    ``backend in ("gpkg", "duckdb")`` because both ship a
+    ``get_pending_changes`` surface. Backends without that surface
+    (postgis, hybrid, or any third-party engine plugin) must NOT spawn
+    a watcher — the polling loop would raise on every tick.
+
+    We can't use a real built-in here:
+      - ``postgis``/``hybrid`` need a live DSN at lifespan start;
+      - ``gpkg``/``duckdb`` are now both supported.
+
+    So we register a fake ``memory`` backend that returns a
+    ``SpatialEngine`` lacking ``get_pending_changes``. The lifespan's
+    structural ``hasattr`` guard is the contract this test pins.
+    """
+    monkeypatch.setenv("GISPULSE_ENGINE", "memory")
     monkeypatch.setenv("GISPULSE_STORAGE", "memory")
     monkeypatch.setenv("GISPULSE_TIER", "community")
     monkeypatch.setenv("GISPULSE_API_KEYS", "")
     monkeypatch.setenv("GISPULSE_CORS_ORIGINS", "http://test")
 
+    # Register the fake backend. The factory is a no-op engine: open()
+    # / close() succeed but it deliberately omits the change-log
+    # surface so the lifespan guard skips watcher creation. We also
+    # skip tier gating by piggy-backing on an unknown name (community
+    # tier rejects only postgis/hybrid).
+    from persistence import engine_factory as ef
+
+    class _NoTrackingEngine:
+        backend_name = "memory"
+
+        def open(self) -> None:  # noqa: D401
+            return None
+
+        def close(self) -> None:  # noqa: D401
+            return None
+
+        # Intentionally no get_pending_changes / mark_changes_processed.
+
+    def _factory(*, dsn=None, duckdb_path=":memory:", **_kw):
+        return _NoTrackingEngine()
+
+    monkeypatch.setitem(ef._BACKENDS, "memory", _factory)
+
     from gispulse.adapters.http.app import create_app
 
     app = create_app()
     with TestClient(app):
+        # Back-compat sentinel + multi-tenant registry both empty.
         assert getattr(app.state, "change_log_watcher", None) is None
+        registry = getattr(app.state, "watcher_registry", None)
+        assert registry is not None
+        assert "__project__" not in registry.list_registered()

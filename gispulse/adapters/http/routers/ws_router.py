@@ -31,6 +31,21 @@ operation) across them.
 For multi-tenant deployment, use Pro tier (``pro_tenant_isolation``,
 V1.2+).
 
+## DuckDB backend limitations (Lot 3)
+
+When ``GISPULSE_ENGINE=duckdb``:
+
+- Change detection is **application-level** (no native triggers).
+- Only INSERTs/UPDATEs/DELETEs that go through GISPulse's HTTP API or
+  CLI (i.e. routed through the engine's ``execute()`` proxy) are
+  captured. Direct ``duckdb.connect()`` from external tools bypasses
+  the detector.
+- For full external-write capture, use the ``gpkg`` backend (native
+  SQLite triggers) or PostGIS (Pro tier, ``pg_notify``).
+- With ``database=":memory:"`` (the lifespan default), the
+  ``_change_log`` is lost on shutdown. Configure a persistent DuckDB
+  path to survive restarts.
+
 Protocol (server -> client)::
 
     {"type": "layer_updated", "data": {"table": "public.parcelles"}, "timestamp": "..."}
