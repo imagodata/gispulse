@@ -504,8 +504,18 @@ def execute_pipeline_steps(
             if persist:
                 full_gdfs.append((step.id, current_gdf.copy()))
 
-            # Prepare GeoJSON output (simplified/truncated for response)
-            truncated = current_gdf.head(limit) if len(current_gdf) > limit else current_gdf
+            # Prepare GeoJSON output (simplified/truncated for response).
+            # When the step output exceeds ``limit``, fall back to a uniform
+            # random sample (deterministic seed) instead of ``head(limit)``.
+            # ``head`` was biasing previews on multi-source layers like S6
+            # ``dvf_ventes``: rows are ordered commune-by-commune in the source
+            # GPKG, so the first 3 000 hits were 100 % Versailles even when
+            # the layer covered 8 communes — making the truncated preview
+            # look like the pre-extension dataset.
+            if len(current_gdf) > limit:
+                truncated = current_gdf.sample(n=limit, random_state=42).sort_index()
+            else:
+                truncated = current_gdf
             if simplify > 0 and not truncated.empty:
                 truncated = truncated.copy()
                 truncated.geometry = truncated.geometry.simplify(simplify)
