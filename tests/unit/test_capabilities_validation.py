@@ -454,6 +454,31 @@ class TestCompletenessCheck:
         assert result["null_ratio"].iloc[0] == 1.0
         assert bool(result["is_complete"].iloc[0]) is False
 
+    def test_geometry_only_gdf_no_attrs(self):
+        """Beta P1 (2026-04-24): a GeoDataFrame with only the geometry column
+        and no attribute columns used to crash with
+        ``ValueError: Unknown column geometry`` because the empty rows list
+        produced a frame with no columns at all. Return an empty result with
+        the contract schema instead.
+        """
+        gdf = gpd.GeoDataFrame(
+            geometry=[Point(0, 0), Point(1, 1)], crs="EPSG:4326"
+        )
+        cap = CompletenessCheckCapability()
+        result = cap.execute(gdf)
+        assert isinstance(result, gpd.GeoDataFrame)
+        assert len(result) == 0
+        for col in (
+            "column",
+            "total",
+            "null_count",
+            "null_ratio",
+            "is_complete",
+            "coverage_ratio",
+            "geometry",
+        ):
+            assert col in result.columns
+
     def test_spatial_coverage_with_reference(self):
         """Coverage should be ~1.0 when reference equals input extent."""
         from shapely.geometry import box

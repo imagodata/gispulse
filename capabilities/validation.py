@@ -652,6 +652,27 @@ class CompletenessCheckCapability(Capability):
             except Exception:
                 pass  # Spatial coverage is best-effort
 
+        # P1 (beta-test 2026-04-24): a GeoDataFrame with only the geometry
+        # column (and no reference_gdf) leaves ``rows`` empty. Constructing
+        # ``GeoDataFrame([], geometry="geometry")`` raises
+        # ``ValueError: Unknown column geometry`` because the underlying
+        # DataFrame has no columns at all. Build an empty frame with the
+        # full expected schema so callers can still introspect the contract.
+        if not rows:
+            return gpd.GeoDataFrame(
+                {
+                    "column": pd.Series([], dtype="object"),
+                    "total": pd.Series([], dtype="int64"),
+                    "null_count": pd.Series([], dtype="int64"),
+                    "null_ratio": pd.Series([], dtype="float64"),
+                    "is_complete": pd.Series([], dtype="bool"),
+                    "coverage_ratio": pd.Series([], dtype="float64"),
+                    "geometry": gpd.GeoSeries([], crs=gdf.crs),
+                },
+                geometry="geometry",
+                crs=gdf.crs,
+            )
+
         result = gpd.GeoDataFrame(rows, geometry="geometry", crs=gdf.crs)
         return result.reset_index(drop=True)
 
