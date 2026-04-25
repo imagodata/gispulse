@@ -309,16 +309,19 @@ async function runPipeline(): Promise<boolean> {
       steps: pipelineSteps,
       ref_layers: refLayers,
       simplify: 0.00001,
-      // Cap per-step GeoJSON return at 100 000 features. S3 accessibility
-      // classify_by_ring runs over ~77k batiments — at the previous 10k cap
-      // the user saw a 1-in-8 sample of classified buildings and the layer
-      // read as "missing buildings". Backend uses the full set internally
-      // regardless; above this cap, it falls back to a deterministic random
-      // sample so previews stay representative on multi-source layers (see
-      // pipelines_router truncate path). Measured payload at S3 full size:
-      // ~25 MB, well under the 30 s pipeline timeout on residential
-      // connections.
-      limit: 100000,
+      // Cap per-step GeoJSON return at 30 000 features. S3 accessibility's
+      // classify_by_ring on the full 77k Clermont batiments would emit
+      // ~62 MB of GeoJSON (props-dominated; simplify barely helps on 4-vertex
+      // building polygons), and Cloud Run drops responses above its 32 MB
+      // per-request cap intermittently — surfaces as HTTP 500 in the browser
+      // even though the same call succeeds via curl. 30k holds the response
+      // around 25 MB and still ships ~3.8× more classified features than the
+      // old 8k cap. Backend uses the full source internally; above this cap
+      // it falls back to a deterministic random sample (see pipelines_router
+      // truncate path). The 77k base batiments still load full from the
+      // static bundle, so the user sees every building — only the coloured
+      // overlay is sampled.
+      limit: 30000,
     })
 
     for (let i = 0; i < response.steps.length; i++) {
