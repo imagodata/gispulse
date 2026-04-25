@@ -232,6 +232,7 @@ class JobCreate(BaseModel):
     """Payload to create and run a new Job."""
 
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
                 "name": "batch_buffer",
@@ -323,6 +324,7 @@ class OGCDatasetCreate(BaseModel):
     """Payload to register a remote OGC service as a dataset (lazy, no download)."""
 
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
                 "name": "cadastre_wfs",
@@ -396,6 +398,7 @@ class ScenarioCreate(BaseModel):
     """Payload to create a new Scenario."""
 
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
                 "name": "flood_risk_assessment",
@@ -549,6 +552,7 @@ class FeatureCreate(BaseModel):
     """GeoJSON Feature to add to a layer."""
 
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
                 "type": "Feature",
@@ -597,6 +601,7 @@ class RelationCreate(BaseModel):
     """Payload to create a new table relation."""
 
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
                 "source_layer_name": "batiments",
@@ -694,6 +699,7 @@ class SessionCreate(BaseModel):
     """Payload pour créer une session PostGIS éphémère."""
 
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
                 "source_client": "portal",
