@@ -150,12 +150,12 @@
           "file": "green-spaces/vegetation.geojson.gz"
         },
         "batiments": {
-          "features": 596,
-          "size_bytes": 29619,
+          "features": 7145,
+          "size_bytes": 250542,
           "file": "green-spaces/batiments.geojson.gz"
         }
       },
-      "total_size_bytes": 69774
+      "total_size_bytes": 290697
     },
     {
       "slug": "real-estate",
