@@ -47,27 +47,15 @@ jobs:
       - name: Verify package metadata
         run: twine check dist/*
 
-      - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
-
-      - name: Smoke test from TestPyPI
+      - name: Local install smoke test
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          # Allow TestPyPI index to settle
-          sleep 20
           python -m venv /tmp/smoke
           /tmp/smoke/bin/pip install --upgrade pip
-          /tmp/smoke/bin/pip install \
-            --index-url https://test.pypi.org/simple/ \
-            --extra-index-url https://pypi.org/simple/ \
-            "gispulse==$VERSION"
+          /tmp/smoke/bin/pip install dist/*.whl
           /tmp/smoke/bin/python -c "import gispulse; print('import ok')"
           /tmp/smoke/bin/gispulse --help >/dev/null
 
-      - name: Publish to PyPI (production)
+      - name: Publish to PyPI (production, trusted publisher OIDC)
         uses: pypa/gh-action-pypi-publish@release/v1
 
   # ── 2. Create GitHub Release with sdist + wheel attached ────────────
