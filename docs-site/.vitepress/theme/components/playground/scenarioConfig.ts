@@ -173,7 +173,11 @@ export const scenarios: Record<string, ScenarioConfig> = {
   // S4 — Clermont Auvergne Metropole : Reseau Routier + recul urbanisme (BD TOPO)
   'road-setback': {
     datasetName: 'clermont_ferrand_bdtopo',
-    layers: ['routes', 'batiments'],
+    // No batiments base layer: the scenario is about the user *drawing* a
+    // hypothetical residential footprint and seeing the recul trigger fire.
+    // Showing 800 existing footprints adds visual noise and competes with the
+    // setback rings + drawn polygon for attention.
+    layers: ['routes'],
     center: [3.100, 45.785],
     // zoom 12 (~6 km span): the importance 1-2 network is sparse, so we zoom
     // out to keep both the autoroute ring and the central nationale ribbons
@@ -194,7 +198,9 @@ export const scenarios: Record<string, ScenarioConfig> = {
     mode: 'CLI + Map',
     drawMode: 'polygon',
     drawAction: 'Dessinez un batiment residentiel (polygone ou point) — rouge si <= 200 m d\'un axe (autoroute / nationale), orange entre 200 et 250 m, vert au-dela. Cascade du trigger DML declenchee dans la zone d\'alerte.',
-    drawTargetLayer: 'batiments',
+    // Drawn polygons land in client-side `drawn_batiments_polys` /
+    // `drawn_batiments_pts` (clientSideDraw=true), so no real backend layer
+    // is mutated — drawTargetLayer is irrelevant on this scenario.
     // usage_1 = Residentiel satisfies the attr predicate of the DML trigger
     // (see scenario-4-trigger.json). Without this, a drawn polygon would
     // always miss the trigger regardless of its position.

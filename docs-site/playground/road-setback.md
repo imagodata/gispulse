@@ -13,7 +13,8 @@ Un service urbanisme veut illustrer la regle de recul L111-6 sur les axes struct
 | Couche | Contenu | Features | Attributs cles | Source |
 |--------|---------|----------|----------------|--------|
 | `routes` | Troncons de route BD TOPO | 2 272 | nature, importance, nom_1_gauche | [data.geopf.fr](https://data.geopf.fr) — BDTOPO_V3:troncon_de_route |
-| `batiments` | Empreintes batiments BD TOPO | ~800 | usage_1, hauteur | [data.geopf.fr](https://data.geopf.fr) — BDTOPO_V3:batiment |
+
+> Pas de couche `batiments` chargee : le scenario evalue le recul d'un **batiment dessine en direct par l'utilisateur** (cf. mode dessin plus bas), pas d'un parc existant.
 
 ```bash
 python examples/prepare_playground_data.py --city clermont-ferrand

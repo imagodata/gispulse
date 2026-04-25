@@ -309,15 +309,16 @@ async function runPipeline(): Promise<boolean> {
       steps: pipelineSteps,
       ref_layers: refLayers,
       simplify: 0.00001,
-      // Cap per-step GeoJSON return at 10 000 features. Covers every current
-      // scenario without truncation (S6 max step = 6 859, S3 batiments cap =
-      // 7 747) so the user sees the full point cloud. Backend uses the full
-      // set internally regardless — only the response is capped. Above 10 k,
-      // the backend falls back to a deterministic random sample so previews
-      // stay representative on multi-source layers (see pipelines_router
-      // truncate path). Measured payload at this cap: ~13 MB on S6, well
-      // under the 30 s pipeline timeout on residential connections.
-      limit: 10000,
+      // Cap per-step GeoJSON return at 100 000 features. S3 accessibility
+      // classify_by_ring runs over ~77k batiments — at the previous 10k cap
+      // the user saw a 1-in-8 sample of classified buildings and the layer
+      // read as "missing buildings". Backend uses the full set internally
+      // regardless; above this cap, it falls back to a deterministic random
+      // sample so previews stay representative on multi-source layers (see
+      // pipelines_router truncate path). Measured payload at S3 full size:
+      // ~25 MB, well under the 30 s pipeline timeout on residential
+      // connections.
+      limit: 100000,
     })
 
     for (let i = 0; i < response.steps.length; i++) {

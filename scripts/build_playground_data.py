@@ -131,7 +131,13 @@ SCENARIOS: list[ScenarioSpec] = [
         layers={
             "batiments": LayerSpec(
                 source_layer="batiments",
-                max_features=1200,
+                # Full bbox set — ~31k buildings over the 5×3 km Toulouse
+                # window. The 1.2k cap (1-in-26 decimation) left the map
+                # nearly empty; users perceived the layer as missing. Cap
+                # raised so every footprint ships, simplify 5e-5 ≈ 5 m at 45N
+                # keeps the gzipped size reasonable.
+                max_features=40000,
+                simplify=5e-5,
                 keep_fields=(
                     "usage_1", "hauteur",
                     "altitude_minimale_sol", "altitude_maximale_toit",
@@ -162,7 +168,11 @@ SCENARIOS: list[ScenarioSpec] = [
         layers={
             "batiments": LayerSpec(
                 source_layer="batiments",
-                max_features=800,
+                # Full bbox set — ~13k buildings over the tighter 3×2 km
+                # central Toulouse window. Cap raised from 800 (1-in-17
+                # decimation, layer barely visible) to ship every footprint.
+                max_features=20000,
+                simplify=5e-5,
                 keep_fields=("usage_1", "hauteur"),
             ),
             "routes": LayerSpec(
@@ -209,16 +219,15 @@ SCENARIOS: list[ScenarioSpec] = [
             ),
             "batiments": LayerSpec(
                 source_layer="batiments",
-                # Cap at ~8k via deterministic every-k-th decimation (k≈10):
-                # the source bbox holds ~77k batiments which gzip to 2.4 MB
-                # — 24× over the 100 kB scenario budget and a guaranteed
-                # browser freeze on mobile / GitHub Pages.
-                # The pipeline (server side) still operates on the full
-                # dataset; classify_by_ring overlays the decimated subset on
-                # top of the same isochrone rings, so the user keeps a
-                # representative spatial sample without the bandwidth cost.
-                # 5e-5 deg ≈ 5 m at 45 N — invisible at zoom ≤ 14.
-                max_features=8000,
+                # Full Clermont metropole bbox — ~77k batiments. Previous
+                # 8k cap (1-in-10 decimation) left the classify_by_ring
+                # output visibly sparse: large sectors of the city showed
+                # no buildings at all. The 5e-5 deg ≈ 5 m simplify is
+                # imperceptible at zoom ≤ 14 and keeps the gzipped payload
+                # tractable (~2.5 MB). Pipeline limit raised in
+                # PipelinePanel to match (was capping the classify_by_ring
+                # response well below the source size).
+                max_features=100000,
                 simplify=5e-5,
                 keep_fields=("usage_1",),
             ),
@@ -242,11 +251,11 @@ SCENARIOS: list[ScenarioSpec] = [
                 # ribbons the 250 m outer ring would saturate the viewport.
                 where="importance in ['1', '2']",
             ),
-            "batiments": LayerSpec(
-                source_layer="batiments",
-                max_features=800,
-                keep_fields=("usage_1", "hauteur"),
-            ),
+            # No `batiments` here: the road-setback playground demonstrates a
+            # DML trigger fired by a *user-drawn* footprint. Real BDTOPO
+            # batiments compete with the drawn polygon for attention and
+            # don't contribute to the trigger evaluation (client-side draw
+            # lands in `drawn_batiments_polys` / `drawn_batiments_pts`).
         },
         derived_layers={
             # 5 concentric annuli (50/100/150/200/250 m) around importance 1-2

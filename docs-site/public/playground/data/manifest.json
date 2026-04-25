@@ -18,8 +18,8 @@
       ],
       "layers": {
         "batiments": {
-          "features": 1198,
-          "size_bytes": 66372,
+          "features": 31144,
+          "size_bytes": 1184446,
           "file": "flood-risk/batiments.geojson.gz"
         },
         "cours_eau": {
@@ -33,7 +33,7 @@
           "file": "flood-risk/surfaces_eau.geojson.gz"
         }
       },
-      "total_size_bytes": 70234
+      "total_size_bytes": 1188308
     },
     {
       "slug": "data-quality",
@@ -51,8 +51,8 @@
       ],
       "layers": {
         "batiments": {
-          "features": 788,
-          "size_bytes": 38075,
+          "features": 13380,
+          "size_bytes": 426950,
           "file": "data-quality/batiments.geojson.gz"
         },
         "routes": {
@@ -61,7 +61,7 @@
           "file": "data-quality/routes.geojson.gz"
         }
       },
-      "total_size_bytes": 48096
+      "total_size_bytes": 436971
     },
     {
       "slug": "accessibility",
@@ -89,12 +89,12 @@
           "file": "accessibility/routes.geojson.gz"
         },
         "batiments": {
-          "features": 7747,
-          "size_bytes": 252491,
+          "features": 77465,
+          "size_bytes": 2263873,
           "file": "accessibility/batiments.geojson.gz"
         }
       },
-      "total_size_bytes": 282177
+      "total_size_bytes": 2293559
     },
     {
       "slug": "road-setback",
@@ -116,18 +116,13 @@
           "size_bytes": 19227,
           "file": "road-setback/routes.geojson.gz"
         },
-        "batiments": {
-          "features": 799,
-          "size_bytes": 38292,
-          "file": "road-setback/batiments.geojson.gz"
-        },
         "setback_zone": {
           "features": 5,
           "size_bytes": 36197,
           "file": "road-setback/setback_zone.geojson.gz"
         }
       },
-      "total_size_bytes": 93716
+      "total_size_bytes": 55424
     },
     {
       "slug": "green-spaces",
