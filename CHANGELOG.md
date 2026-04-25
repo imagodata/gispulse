@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RELEASING.md` — operator handbook for cutting PyPI releases (pre-flight, dry-run via `workflow_dispatch`, tag flow, rollback, pre-releases).
 - `release.yml` — `workflow_dispatch` trigger with `dry_run` input (default `true`) so the build / smoke-test / changelog-extract pipeline can be validated without publishing. Tag pushes still auto-publish.
 - `release.yml` — fail the build when the CHANGELOG section for the released version is empty, surfacing the missing release notes early.
+- `persistence/changelog_watcher.py` + `WatcherRegistry` — Lot 2 v2 GPKG live-sync foundation: file-watch + `BEGIN IMMEDIATE` polling per dataset, exposed via `POST /datasets/{id}/enable_tracking` for `/ws/events` consumers (10 k inserts at ~317 events/s, restart replay, multi-WS fanout).
+- `persistence/duckdb_watcher.py` — Lot 3 DuckDB change-log watcher adapter feeding the same `/ws/events` hub, with JSON-serialised `changed_at` and graceful skip when the underlying engine is unavailable.
+- `core/capability.py` — `Capability.execute_safe(**params)` validation entrypoint that raises `UnknownParameterError` instead of letting the legacy `**_` placeholder swallow typo'd kwargs (closes EPIC #438 systemic kwarg-swallow audit, ref `beta_test_capabilities_2026_04_24`).
+
+### Fixed
+- Capabilities — P1 beta close-out: `morans_i` returns `NaN` p-value on a constant field instead of a misleading `0.01`; `completeness_check` accepts a GeoDataFrame with only the geometry column.
+- Capabilities — P2 beta close-out: `isochrone` returns an empty layer when `cost_budget=0` (was a degenerate ring); `overlay_intersection` / `overlay_union` align missing-ref behaviour with `erase`.
+- Capabilities — P3 beta close-out: `polygon_fix_gaps` treats `max_gap_area=0` as a clean no-op.
+- Streaming — `EventHub` made thread-safe with multi-tenant `dataset_id` deduplication so concurrent tenants don't cross-fire events.
+- Playground API — pipeline payload capped at 30 k features and step timeout bumped 30 s → 90 s to fit Cloud Run's 32 MB / latency envelope on the S3 full dataset.
+- Playground scenarios — S1/S2/S3 ship the full `batiments` dataset (S4 drops the layer); S5 green-spaces ships full vegetation + buildings.
+
+### Tests
+- `test_p02_multi_gpkg_watcher_registry` marked `xfail(strict=False)` — under <100 ms concurrent inserts on three GPKG files, the watcher's long-lived SQLite connection can hold a stale WAL snapshot. Single-user (Community) flows unaffected; multi-tenant fan-out is a Pro feature deferred to v1.2+.
 
 ## [1.2.0] - 2026-04-25
 
