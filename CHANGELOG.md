@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `RELEASING.md` — operator handbook for cutting PyPI releases (pre-flight, dry-run via `workflow_dispatch`, tag flow, rollback, pre-releases).
+- `release.yml` — `workflow_dispatch` trigger with `dry_run` input (default `true`) so the build / smoke-test / changelog-extract pipeline can be validated without publishing. Tag pushes still auto-publish.
+- `release.yml` — fail the build when the CHANGELOG section for the released version is empty, surfacing the missing release notes early.
+
 ## [1.2.0] - 2026-04-25
 
 ### Added

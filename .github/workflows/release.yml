@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build + smoke-test only; skip PyPI publish and GH Release."
+        type: boolean
+        default: true
+      version:
+        description: "Version to dry-run against (defaults to pyproject.toml)."
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -31,6 +41,7 @@ jobs:
         run: pip install build twine
 
       - name: Verify version matches tag
+        if: github.event_name == 'push'
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           PYPROJECT_VERSION=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/version = "(.*)"/\1/')
@@ -56,6 +67,7 @@ jobs:
           /tmp/smoke/bin/gispulse --help >/dev/null
 
       - name: Publish to PyPI (production, trusted publisher OIDC)
+        if: github.event_name == 'push' || inputs.dry_run == false
         uses: pypa/gh-action-pypi-publish@release/v1
 
   # ── 2. Create GitHub Release with sdist + wheel attached ────────────
@@ -85,7 +97,12 @@ jobs:
       - name: Extract changelog section
         id: changelog
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ inputs.version }}"
+            [ -z "$VERSION" ] && VERSION=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/version = "(.*)"/\1/')
+          fi
           # Pull the section between "## [VERSION]" and the next "## [" header
           awk -v v="$VERSION" '
             /^## \[/ {
@@ -95,10 +112,15 @@ jobs:
             }
             in_section { print }
           ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "ERROR: no CHANGELOG section found for version $VERSION"
+            exit 1
+          fi
           echo "Notes :"
           cat release-notes.md
 
       - name: Create GitHub Release
+        if: github.event_name == 'push' || inputs.dry_run == false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
