@@ -226,9 +226,9 @@ export const scenarios: Record<string, ScenarioConfig> = {
   'green-spaces': {
     datasetName: 'versailles_bdtopo',
     layers: ['vegetation', 'batiments'],
-    center: [2.095, 48.82],
+    center: [2.142, 48.80],
     zoom: 12,
-    bbox: '1.960,48.770,2.170,48.870',
+    bbox: '2.050,48.755,2.235,48.845',
     pipelineRules: [
       'compute_veg_area',
       'filter_parks_1ha',
@@ -262,9 +262,9 @@ export const scenarios: Record<string, ScenarioConfig> = {
   'real-estate': {
     datasetName: 'versailles_bdtopo',
     layers: ['dvf_ventes'],
-    center: [2.095, 48.82],
+    center: [2.142, 48.80],
     zoom: 12,
-    bbox: '1.960,48.770,2.170,48.870',
+    bbox: '2.050,48.755,2.235,48.845',
     pipelineRules: [
       'filter_residential_sales',
       'compute_price_per_m2',

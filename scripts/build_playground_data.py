@@ -60,7 +60,12 @@ SCENARIO_BUDGET_BYTES = 100 * 1024
 @dataclass
 class LayerSpec:
     source_layer: str
-    max_features: int = 800
+    # 0 (default) disables the cap entirely — every source feature in the
+    # scenario bbox ships. Caps were originally a freeze-safety knob (100 kB
+    # gzip target) but ended up shipping a 1-in-26 sample of buildings; we
+    # now ship full datasets and let the browser handle 50k-class layers.
+    # Override only when a layer must be intentionally subsampled.
+    max_features: int = 0
     simplify: float = DEFAULT_TOLERANCE
     keep_fields: tuple[str, ...] = ()
     where: str | None = None  # pandas query expression applied after load
@@ -131,12 +136,8 @@ SCENARIOS: list[ScenarioSpec] = [
         layers={
             "batiments": LayerSpec(
                 source_layer="batiments",
-                # Full bbox set — ~31k buildings over the 5×3 km Toulouse
-                # window. The 1.2k cap (1-in-26 decimation) left the map
-                # nearly empty; users perceived the layer as missing. Cap
-                # raised so every footprint ships, simplify 5e-5 ≈ 5 m at 45N
-                # keeps the gzipped size reasonable.
-                max_features=40000,
+                # simplify 5e-5 ≈ 5 m at 45N — invisible at zoom <= 14, keeps
+                # the ~31k Toulouse footprints under 1.2 MB gzipped.
                 simplify=5e-5,
                 keep_fields=(
                     "usage_1", "hauteur",
@@ -146,13 +147,11 @@ SCENARIOS: list[ScenarioSpec] = [
             ),
             "cours_eau": LayerSpec(
                 source_layer="cours_eau",
-                max_features=50,
                 simplify=5e-5,
                 keep_fields=("toponyme", "largeur"),
             ),
             "surfaces_eau": LayerSpec(
                 source_layer="surfaces_eau",
-                max_features=80,
                 simplify=5e-5,
                 keep_fields=("toponyme", "nature"),
             ),
@@ -168,16 +167,13 @@ SCENARIOS: list[ScenarioSpec] = [
         layers={
             "batiments": LayerSpec(
                 source_layer="batiments",
-                # Full bbox set — ~13k buildings over the tighter 3×2 km
-                # central Toulouse window. Cap raised from 800 (1-in-17
-                # decimation, layer barely visible) to ship every footprint.
-                max_features=20000,
+                # ~13k buildings over the tighter 3×2 km central Toulouse
+                # window — full source ships.
                 simplify=5e-5,
                 keep_fields=("usage_1", "hauteur"),
             ),
             "routes": LayerSpec(
                 source_layer="routes",
-                max_features=600,
                 simplify=2e-5,
                 keep_fields=("nom_1_gauche", "importance", "nature"),
                 where="importance in ['5', '6']",
@@ -203,7 +199,6 @@ SCENARIOS: list[ScenarioSpec] = [
                 # ``python scripts/fetch_health_pois_osm.py --city clermont-ferrand --force``
                 source_layer="equipements",
                 source_file="clermont_ferrand_health_osm.geojson",
-                max_features=300,
                 # Already tagged categorie='Santé' by the fetcher; pre-filter
                 # remains explicit so the pipeline's first step is a no-op on
                 # the static bundle.
@@ -212,22 +207,18 @@ SCENARIOS: list[ScenarioSpec] = [
             ),
             "routes": LayerSpec(
                 source_layer="routes",
-                max_features=1500,
                 simplify=5e-5,
                 keep_fields=("nature", "importance"),
                 where="importance in ['1', '2', '3', '4']",
             ),
             "batiments": LayerSpec(
                 source_layer="batiments",
-                # Full Clermont metropole bbox — ~77k batiments. Previous
-                # 8k cap (1-in-10 decimation) left the classify_by_ring
-                # output visibly sparse: large sectors of the city showed
-                # no buildings at all. The 5e-5 deg ≈ 5 m simplify is
-                # imperceptible at zoom ≤ 14 and keeps the gzipped payload
-                # tractable (~2.5 MB). Pipeline limit raised in
-                # PipelinePanel to match (was capping the classify_by_ring
-                # response well below the source size).
-                max_features=100000,
+                # ~77k batiments over the full Clermont metropole bbox — full
+                # source ships. simplify 5e-5 ≈ 5 m at 45N keeps the gzipped
+                # payload tractable (~2.5 MB). Pipeline `limit` in
+                # PipelinePanel must match (raised to 100k for the same
+                # reason — the API otherwise re-trims classify_by_ring
+                # output below the source size).
                 simplify=5e-5,
                 keep_fields=("usage_1",),
             ),
@@ -243,7 +234,6 @@ SCENARIOS: list[ScenarioSpec] = [
         layers={
             "routes": LayerSpec(
                 source_layer="routes",
-                max_features=1500,
                 simplify=5e-5,
                 keep_fields=("nom_1_gauche", "importance", "nature"),
                 # Narrowed to top-tier axes (autoroutes + nationales) — matches
@@ -287,22 +277,21 @@ SCENARIOS: list[ScenarioSpec] = [
         slug="green-spaces",
         title="S5 - Versailles / Accessibilite parcs par batiment",
         source_gpkg="versailles_bdtopo.gpkg",
-        # Wide bbox: covers Versailles commune + Foret de Fausses-Reposes (west)
-        # and Foret de Versailles (south). Required by the pipeline — the
-        # nearest-park distance would be wrong if large parks sat outside the
-        # reference vegetation layer.
-        bbox_4326=(1.960, 48.770, 2.170, 48.870),
-        center=(2.095, 48.820),
+        # bbox extended east to source extent (was 1.960-2.170): the previous
+        # cap dropped the entire eastern half of versailles_bdtopo (~18k
+        # batiments + ~200 vegetation patches), so nearest_park measurements
+        # at the east border of Versailles fell back on parks outside the
+        # supplied reference layer. Source bounds: batiments 2.060-2.213,
+        # vegetation 2.059-2.230 → clip a hair beyond to keep edge polygons.
+        bbox_4326=(2.050, 48.755, 2.235, 48.845),
+        center=(2.142, 48.800),
         zoom=12,
         layers={
             "vegetation": LayerSpec(
                 source_layer="vegetation",
-                # Full bbox set — ~1.2k vegetation polygons over the wider
-                # Versailles cadre. The 600 cap dropped half the patches and
-                # broke the nearest-park query at the periphery. 1e-4 deg
-                # (~11 m) simplify is invisible at zoom 12 where Fausses-
-                # Reposes spans dozens of kilometers.
-                max_features=2000,
+                # Full source — ~1.4k vegetation polygons over the wider
+                # Versailles cadre. 1e-4 deg (~11 m) simplify is invisible
+                # at zoom 12 where Fausses-Reposes spans dozens of km.
                 simplify=1e-4,
                 # BD TOPO zone_de_vegetation has no toponyme field — cleabs is
                 # the only stable identifier (IGN pivot). Used in the popup as
@@ -311,12 +300,7 @@ SCENARIOS: list[ScenarioSpec] = [
             ),
             "batiments": LayerSpec(
                 source_layer="batiments",
-                # Full Versailles bbox set — ~28k batiments. Previous 8k cap
-                # (1-in-3 decimation) showed only a third of the residential
-                # tissue and made filter_residential return a sparse subset.
-                # 5e-5 deg ≈ 5 m simplify is invisible at zoom 12 and keeps
-                # the gzipped payload tractable.
-                max_features=40000,
+                # ~47k batiments — full Versailles source ships.
                 simplify=5e-5,
                 keep_fields=("usage_1", "hauteur"),
             ),
@@ -326,23 +310,18 @@ SCENARIOS: list[ScenarioSpec] = [
         slug="real-estate",
         title="S6 - Versailles / Carte prix au m2 DVF",
         source_gpkg="versailles_bdtopo.gpkg",
-        # Aligned on S5 green-spaces extent: covers Versailles commune + Le
-        # Chesnay-Rocquencourt + Viroflay + Buc + Jouy-en-Josas. The forested
-        # west/south stays in-bbox but yields ~no DVF mutations, so the
-        # choropleth concentrates naturally on the urban tissue.
-        bbox_4326=(1.960, 48.770, 2.170, 48.870),
-        center=(2.095, 48.820),
+        # Aligned on S5 green-spaces extended extent: covers Versailles
+        # commune + Le Chesnay-Rocquencourt + Viroflay + Buc + Jouy-en-Josas.
+        # The forested west/south stays in-bbox but yields ~no DVF mutations,
+        # so the choropleth concentrates naturally on the urban tissue.
+        bbox_4326=(2.050, 48.755, 2.235, 48.845),
+        center=(2.142, 48.800),
         zoom=12,
         layers={
             "dvf_ventes": LayerSpec(
                 source_layer="dvf_ventes",
-                # ~14× wider bbox than the original 5 × 3 km cadre + 8
-                # surrounding communes (Versailles + Le Chesnay-Rocquencourt +
-                # Viroflay + Velizy + Jouy-en-Josas + Buc + Saint-Cyr + Bailly).
-                # Source GPKG holds ~8.9k mutations 2022-2024; 12000 leaves
-                # headroom for a future 4th year without re-tuning while staying
-                # well under the gzip budget.
-                max_features=12000,
+                # ~8.9k mutations 2022-2024 over Versailles + 8 surrounding
+                # communes — full source ships.
                 simplify=0,  # points — nothing to simplify
                 keep_fields=(
                     "id_mutation",
@@ -510,8 +489,9 @@ def _process_layer(
         gdf = gdf.set_geometry(gpd.GeoSeries(projected, crs=spec.point_crs_meters).to_crs(4326))
         gdf = gdf[~gdf.geometry.is_empty & gdf.geometry.notna()]
 
-    if len(gdf) > spec.max_features:
+    if spec.max_features > 0 and len(gdf) > spec.max_features:
         # Deterministic decimation: keep every k-th feature.
+        # Skipped when max_features == 0 (the default) — full dataset ships.
         k = len(gdf) // spec.max_features + 1
         gdf = gdf.iloc[::k].head(spec.max_features)
         print(f"    decimated -> {len(gdf)} (cap {spec.max_features})")

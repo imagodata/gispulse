@@ -3,32 +3,177 @@
   "crs": "EPSG:4326",
   "scenarios": [
     {
-      "slug": "green-spaces",
-      "title": "S5 - Versailles / Accessibilite parcs par batiment",
+      "slug": "flood-risk",
+      "title": "S1 - Toulouse / Risque inondation Garonne",
       "center": [
-        2.095,
-        48.82
+        1.445,
+        43.605
+      ],
+      "zoom": 15,
+      "bbox": [
+        1.42,
+        43.59,
+        1.47,
+        43.62
+      ],
+      "layers": {
+        "batiments": {
+          "features": 31144,
+          "size_bytes": 1184446,
+          "file": "flood-risk/batiments.geojson.gz"
+        },
+        "cours_eau": {
+          "features": 8,
+          "size_bytes": 900,
+          "file": "flood-risk/cours_eau.geojson.gz"
+        },
+        "surfaces_eau": {
+          "features": 22,
+          "size_bytes": 2962,
+          "file": "flood-risk/surfaces_eau.geojson.gz"
+        }
+      },
+      "total_size_bytes": 1188308
+    },
+    {
+      "slug": "data-quality",
+      "title": "S2 - Toulouse / Batiments pres voies locales",
+      "center": [
+        1.445,
+        43.605
+      ],
+      "zoom": 15,
+      "bbox": [
+        1.43,
+        43.595,
+        1.46,
+        43.615
+      ],
+      "layers": {
+        "batiments": {
+          "features": 13380,
+          "size_bytes": 426950,
+          "file": "data-quality/batiments.geojson.gz"
+        },
+        "routes": {
+          "features": 1922,
+          "size_bytes": 29675,
+          "file": "data-quality/routes.geojson.gz"
+        }
+      },
+      "total_size_bytes": 456625
+    },
+    {
+      "slug": "accessibility",
+      "title": "S3 - Clermont Auvergne Metropole / Ecoles-sante isochrones",
+      "center": [
+        3.1,
+        45.785
       ],
       "zoom": 12,
       "bbox": [
-        1.96,
-        48.77,
-        2.17,
-        48.87
+        3.02,
+        45.74,
+        3.18,
+        45.83
+      ],
+      "layers": {
+        "equipements": {
+          "features": 223,
+          "size_bytes": 5373,
+          "file": "accessibility/equipements.geojson.gz"
+        },
+        "routes": {
+          "features": 3269,
+          "size_bytes": 55257,
+          "file": "accessibility/routes.geojson.gz"
+        },
+        "batiments": {
+          "features": 77465,
+          "size_bytes": 2263873,
+          "file": "accessibility/batiments.geojson.gz"
+        }
+      },
+      "total_size_bytes": 2324503
+    },
+    {
+      "slug": "road-setback",
+      "title": "S4 - Clermont Auvergne Metropole / Reseau principal + recul urbanisme",
+      "center": [
+        3.1,
+        45.785
+      ],
+      "zoom": 12,
+      "bbox": [
+        3.02,
+        45.74,
+        3.18,
+        45.83
+      ],
+      "layers": {
+        "routes": {
+          "features": 1105,
+          "size_bytes": 19227,
+          "file": "road-setback/routes.geojson.gz"
+        },
+        "setback_zone": {
+          "features": 5,
+          "size_bytes": 36197,
+          "file": "road-setback/setback_zone.geojson.gz"
+        }
+      },
+      "total_size_bytes": 55424
+    },
+    {
+      "slug": "green-spaces",
+      "title": "S5 - Versailles / Accessibilite parcs par batiment",
+      "center": [
+        2.142,
+        48.8
+      ],
+      "zoom": 12,
+      "bbox": [
+        2.05,
+        48.755,
+        2.235,
+        48.845
       ],
       "layers": {
         "vegetation": {
-          "features": 1155,
-          "size_bytes": 74526,
+          "features": 1379,
+          "size_bytes": 103373,
           "file": "green-spaces/vegetation.geojson.gz"
         },
         "batiments": {
-          "features": 28579,
-          "size_bytes": 928143,
+          "features": 47003,
+          "size_bytes": 1521971,
           "file": "green-spaces/batiments.geojson.gz"
         }
       },
-      "total_size_bytes": 1002669
+      "total_size_bytes": 1625344
+    },
+    {
+      "slug": "real-estate",
+      "title": "S6 - Versailles / Carte prix au m2 DVF",
+      "center": [
+        2.142,
+        48.8
+      ],
+      "zoom": 12,
+      "bbox": [
+        2.05,
+        48.755,
+        2.235,
+        48.845
+      ],
+      "layers": {
+        "dvf_ventes": {
+          "features": 8862,
+          "size_bytes": 143370,
+          "file": "real-estate/dvf_ventes.geojson.gz"
+        }
+      },
+      "total_size_bytes": 143370
     }
   ]
 }
