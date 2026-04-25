@@ -241,6 +241,48 @@ class TestFilterCapability:
         )
         assert list(result["id"]) == [1]
 
+    def test_invalid_spatial_predicate_raises_python(self, point_gdf):
+        """Python strategy: invalid predicate raises via geopandas method lookup."""
+        cap = FilterCapability()
+        ref = gpd.GeoDataFrame(
+            {"geometry": [Point(10.0, 10.0).buffer(50)]},
+            crs=point_gdf.crs,
+        )
+        with pytest.raises(ValueError, match="Unknown spatial predicate: contians"):
+            cap.execute(point_gdf, spatial_predicate="contians", ref_gdf=ref)
+
+    def test_invalid_spatial_predicate_raises_duckdb(self):
+        """DuckDB strategy: invalid predicate raises with valid list (no silent INTERSECTS fallback)."""
+        from capabilities.strategy import ExecutionContext
+        from capabilities.vector.filter import _FilterDuckDBStrategy
+
+        ctx = ExecutionContext(
+            engine=type("E", (), {"backend_name": "duckdb"})(),
+            feature_count=1,
+            params={"spatial_predicate": "contians", "ref_wkt": "POINT(0 0)"},
+        )
+        gdf = gpd.GeoDataFrame({"geometry": [Point(0, 0)]}, crs="EPSG:4326")
+        with pytest.raises(ValueError, match="Invalid spatial_predicate: 'contians'"):
+            _FilterDuckDBStrategy().execute(gdf, ctx)
+
+    def test_invalid_spatial_predicate_raises_postgis(self):
+        """PostGIS strategy: invalid predicate raises with valid list (no silent INTERSECTS fallback)."""
+        from capabilities.strategy import ExecutionContext
+        from capabilities.vector.filter import _FilterPostGISStrategy
+
+        ctx = ExecutionContext(
+            engine=type("E", (), {"backend_name": "postgis"})(),
+            feature_count=1,
+            params={
+                "spatial_predicate": "covered_by_wrong",
+                "ref_wkt": "POINT(0 0)",
+                "table_name": "t",
+            },
+        )
+        gdf = gpd.GeoDataFrame({"geometry": [Point(0, 0)]}, crs="EPSG:4326")
+        with pytest.raises(ValueError, match="Invalid spatial_predicate: 'covered_by_wrong'"):
+            _FilterPostGISStrategy().execute(gdf, ctx)
+
 
 # ---------------------------------------------------------------------------
 # ClipCapability

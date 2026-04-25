@@ -87,7 +87,10 @@ class _FilterDuckDBStrategy(ExecutionStrategy):
             try:
                 pred = SpatialPredicate(spatial_predicate)
             except ValueError:
-                pred = SpatialPredicate.INTERSECTS
+                valid = [p.value for p in SpatialPredicate]
+                raise ValueError(
+                    f"Invalid spatial_predicate: {spatial_predicate!r}. Valid: {valid}"
+                ) from None
             expr = FilterExpression.create_spatial(
                 [pred],
                 buffer_value=buffer_distance or 0,
@@ -156,7 +159,10 @@ class _FilterPostGISStrategy(ExecutionStrategy):
             try:
                 pred = SpatialPredicate(spatial_predicate)
             except ValueError:
-                pred = SpatialPredicate.INTERSECTS
+                valid = [p.value for p in SpatialPredicate]
+                raise ValueError(
+                    f"Invalid spatial_predicate: {spatial_predicate!r}. Valid: {valid}"
+                ) from None
             expr = FilterExpression(
                 raw=expression or f"Spatial filter: {spatial_predicate}",
                 sql="",
