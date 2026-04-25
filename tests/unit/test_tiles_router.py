@@ -167,3 +167,77 @@ class TestTilesPostgisPath:
 
         resp = client.get(f"/tiles/{ds.id}/5/10/10.mvt")
         assert "cache-control" in resp.headers
+
+
+# ---------------------------------------------------------------------------
+# GET /tiles/{collection_id}/tilejson.json — TileJSON 3.0 (#452 OSSi-C2)
+# ---------------------------------------------------------------------------
+
+
+class TestTileJSON:
+    def test_returns_valid_tilejson_3_with_metadata_bounds(self):
+        from core.models import Dataset
+        from gispulse.adapters.http.routers.tiles_router import _bounds_cache
+
+        _bounds_cache.clear()
+        client, _ = _make_tiles_client("postgis")
+        ds = Dataset(
+            name="parcels",
+            source_path="public.parcels",
+            metadata={
+                "bounds": [2.0, 48.0, 3.0, 49.0],
+                "description": "Cadastre parcels",
+                "attribution": "IGN",
+                "layers": [{"name": "parcels", "fields": {"area": "float"}}],
+            },
+        )
+        client.app.state.dataset_repo.save(ds)
+
+        resp = client.get(f"/tiles/{ds.id}/tilejson.json")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["tilejson"] == "3.0.0"
+        assert body["name"] == "parcels"
+        assert body["description"] == "Cadastre parcels"
+        assert body["bounds"] == [2.0, 48.0, 3.0, 49.0]
+        assert body["center"] == [2.5, 48.5, 6]
+        assert body["scheme"] == "xyz"
+        assert body["format"] == "pbf"
+        assert body["attribution"] == "IGN"
+        assert body["vector_layers"] == [
+            {"id": "parcels", "fields": {"area": "float"}}
+        ]
+        # Tiles URL must be absolute and templated for {z}/{x}/{y}
+        assert len(body["tiles"]) == 1
+        assert body["tiles"][0].endswith(f"/tiles/{ds.id}/{{z}}/{{x}}/{{y}}.mvt")
+        assert body["tiles"][0].startswith("http")
+
+    def test_404_on_unknown_dataset(self):
+        client, _ = _make_tiles_client("postgis")
+        fake_id = uuid4()
+        resp = client.get(f"/tiles/{fake_id}/tilejson.json")
+        assert resp.status_code == 404
+
+    def test_respects_x_forwarded_proto_and_host(self):
+        from core.models import Dataset
+        from gispulse.adapters.http.routers.tiles_router import _bounds_cache
+
+        _bounds_cache.clear()
+        client, _ = _make_tiles_client("postgis")
+        ds = Dataset(
+            name="ds",
+            source_path="public.ds",
+            metadata={"bounds": [0.0, 0.0, 1.0, 1.0]},
+        )
+        client.app.state.dataset_repo.save(ds)
+
+        resp = client.get(
+            f"/tiles/{ds.id}/tilejson.json",
+            headers={
+                "x-forwarded-proto": "https",
+                "x-forwarded-host": "tiles.gispulse.dev",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["tiles"][0].startswith("https://tiles.gispulse.dev/")
