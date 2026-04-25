@@ -14,7 +14,7 @@ On construit ensuite un **quadrillage regulier 100 m × 100 m** (`grid_create`, 
 
 | Source | Contenu | Features (Versailles 2022-2024) | Attributs cles |
 |--------|---------|---------------------------------|----------------|
-| [geo-dvf Etalab](https://files.data.gouv.fr/geo-dvf/latest/csv/) | Mutations immobilieres geolocalisees | ~3 900 brutes (Versailles elargi 2022-2024, bbox ~21 × 11 km) → ~3 000 residentielles apres filtrage | `valeur_fonciere`, `surface_reelle_bati`, `type_local`, `nature_mutation`, `date_mutation` |
+| [geo-dvf Etalab](https://files.data.gouv.fr/geo-dvf/latest/csv/) | Mutations immobilieres geolocalisees | ~7 000 brutes sur 8 communes (Versailles + Le Chesnay-Rocquencourt + Viroflay + Velizy + Jouy + Buc + Saint-Cyr + Bailly, 2022-2024) → ~5 100 residentielles apres filtrage | `valeur_fonciere`, `surface_reelle_bati`, `type_local`, `nature_mutation`, `date_mutation` |
 
 Les CSV sont publies par annee et par commune :
 `https://files.data.gouv.fr/geo-dvf/latest/csv/{year}/communes/{dept}/{insee}.csv`
@@ -66,7 +66,7 @@ dvf_ventes ──► filter (nature_mutation=='Vente' AND type_local in ['Maison
 
 **Etapes 1-4 (points)** — palette ColorBrewer `YlOrRd` 5 classes (`#ffffb2`, `#fecc5c`, `#fd8d3c`, `#f03b20`, `#bd0026`) ecrite feature par feature dans `price_color` ; chaque quintile contient ~20 % des mutations.
 
-**Etapes 5-8 (tuiles)** — `grid_create` genere un fishnet 100 m × 100 m en Lambert93 (metrique exact) sur l'emprise des ventes filtrees (~500 tuiles non vides) ; `spatial_aggregate` calcule `mean_price_per_m2`, `max_price_per_m2` et `tx_count` par tuile en comptant les points DVF contenus ; les tuiles vides sont droppees ; la derniere `classify` peint la **choroplethe finale** — heatmap 100 m haute resolution, lecture thematique fine, pret pour export QGIS / cartographie print. Note : a 100 m sur l'emprise S5 elargie ~20 % des tuiles portent une seule transaction (vs ~35 % au precedent maillage 50 m sur Versailles centre), donc les quintiles sont plus stables tout en gardant une lecture thematique fine.
+**Etapes 5-8 (tuiles)** — `grid_create` genere un fishnet 100 m × 100 m en Lambert93 (metrique exact) sur l'emprise des ventes filtrees (~950 tuiles non vides) ; `spatial_aggregate` calcule `mean_price_per_m2`, `max_price_per_m2` et `tx_count` par tuile en comptant les points DVF contenus ; les tuiles vides sont droppees ; la derniere `classify` peint la **choroplethe finale** — heatmap 100 m haute resolution, lecture thematique fine, pret pour export QGIS / cartographie print. Note : a 100 m sur l'emprise S5 elargie ~25 % des tuiles portent une seule transaction (vs ~35 % au precedent maillage 50 m sur Versailles centre seul), donc les quintiles sont plus stables tout en gardant une lecture thematique fine.
 
 ## Rules
 
@@ -224,7 +224,7 @@ Pipeline live 8 etapes (necessite backend demo).
 
 **Choroplethe (tuiles) — heatmap 100 m**
 
-5. `create_price_grid` (turquoise) — fishnet 100 m × 100 m en Lambert93 sur l'emprise DVF (~500 tuiles non vides)
+5. `create_price_grid` (turquoise) — fishnet 100 m × 100 m en Lambert93 sur l'emprise DVF (~950 tuiles non vides)
 6. `aggregate_price_to_grid` (violet) — `spatial_aggregate` : par tuile, moyenne des `price_per_m2` DVF contenus (+ max, + count)
 7. `keep_cells_with_sales` (orange) — filtre `tx_count > 0` pour drop tuiles orphelines
 8. `classify_grid_choropleth` (rouge) — quintiles sur `mean_price_per_m2` + palette `YlOrRd` → **choroplethe heatmap**

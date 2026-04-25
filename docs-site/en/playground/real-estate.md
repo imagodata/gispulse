@@ -14,7 +14,7 @@ We then lay a **regular 100 m × 100 m fishnet** over the sales extent (`grid_cr
 
 | Source | Content | Features (Versailles 2022-2024) | Key attributes |
 |--------|---------|---------------------------------|----------------|
-| [geo-dvf Etalab](https://files.data.gouv.fr/geo-dvf/latest/csv/) | Geolocated real-estate transactions | ~3,900 raw (greater Versailles 2022-2024, bbox ~21 × 11 km) → ~3,000 residential after filter | `valeur_fonciere`, `surface_reelle_bati`, `type_local`, `nature_mutation`, `date_mutation` |
+| [geo-dvf Etalab](https://files.data.gouv.fr/geo-dvf/latest/csv/) | Geolocated real-estate transactions | ~7,000 raw across 8 communes (Versailles + Le Chesnay-Rocquencourt + Viroflay + Vélizy + Jouy + Buc + Saint-Cyr + Bailly, 2022-2024) → ~5,100 residential after filter | `valeur_fonciere`, `surface_reelle_bati`, `type_local`, `nature_mutation`, `date_mutation` |
 
 CSV files are published per year + commune:
 `https://files.data.gouv.fr/geo-dvf/latest/csv/{year}/communes/{dept}/{insee}.csv`
@@ -66,7 +66,7 @@ dvf_ventes ──► filter (nature_mutation=='Vente' AND type_local in ['Maison
 
 **Steps 1–4 (points)** — ColorBrewer `YlOrRd` 5-class palette (`#ffffb2`, `#fecc5c`, `#fd8d3c`, `#f03b20`, `#bd0026`) attached per feature in `price_color`; each quintile holds ~20% of mutations.
 
-**Steps 5–8 (tiles)** — `grid_create` emits a 100 m × 100 m fishnet in Lambert93 (exact metric) over the filtered-sales extent (~500 non-empty tiles); `spatial_aggregate` computes `mean_price_per_m2`, `max_price_per_m2`, `tx_count` per tile from the DVF points it contains; empty tiles are dropped; the final `classify` paints the **choropleth** as a high-resolution heatmap — fine-grained 100 m cells, easy thematic read, print-ready for QGIS export. Note: at 100 m on the wider S5 extent ~20 % of tiles carry a single transaction (vs ~35 % at the previous 50 m mesh on Versailles centre), so quintiles are more statistically stable while still keeping a fine-grained thematic read.
+**Steps 5–8 (tiles)** — `grid_create` emits a 100 m × 100 m fishnet in Lambert93 (exact metric) over the filtered-sales extent (~950 non-empty tiles); `spatial_aggregate` computes `mean_price_per_m2`, `max_price_per_m2`, `tx_count` per tile from the DVF points it contains; empty tiles are dropped; the final `classify` paints the **choropleth** as a high-resolution heatmap — fine-grained 100 m cells, easy thematic read, print-ready for QGIS export. Note: at 100 m on the wider S5 extent ~25 % of tiles carry a single transaction (vs ~35 % at the previous 50 m mesh on Versailles centre alone), so quintiles are more statistically stable while still keeping a fine-grained thematic read.
 
 ## Rules
 
@@ -224,7 +224,7 @@ Live 8-step pipeline (requires demo backend).
 
 **Choropleth (tiles) — 50 m heatmap**
 
-5. `create_price_grid` (teal) — 100 m × 100 m fishnet in Lambert93 clipped to the DVF extent (~500 non-empty tiles)
+5. `create_price_grid` (teal) — 100 m × 100 m fishnet in Lambert93 clipped to the DVF extent (~950 non-empty tiles)
 6. `aggregate_price_to_grid` (purple) — `spatial_aggregate`: per tile, mean `price_per_m2` of contained DVF points (+ max, + count)
 7. `keep_cells_with_sales` (orange) — drop empty tiles (`tx_count > 0`)
 8. `classify_grid_choropleth` (red) — quintiles on `mean_price_per_m2` + `YlOrRd` → **heatmap choropleth**

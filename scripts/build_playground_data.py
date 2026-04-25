@@ -324,11 +324,13 @@ SCENARIOS: list[ScenarioSpec] = [
         layers={
             "dvf_ventes": LayerSpec(
                 source_layer="dvf_ventes",
-                # ~14× wider bbox than the original 5 × 3 km cadre. DVF density
-                # on greater Versailles (residential mutations 2022-2024) caps
-                # at ~6-8k after filter; 8000 leaves headroom without blowing
-                # the gzip budget.
-                max_features=8000,
+                # ~14× wider bbox than the original 5 × 3 km cadre + 8
+                # surrounding communes (Versailles + Le Chesnay-Rocquencourt +
+                # Viroflay + Velizy + Jouy-en-Josas + Buc + Saint-Cyr + Bailly).
+                # Source GPKG holds ~8.9k mutations 2022-2024; 12000 leaves
+                # headroom for a future 4th year without re-tuning while staying
+                # well under the gzip budget.
+                max_features=12000,
                 simplify=0,  # points — nothing to simplify
                 keep_fields=(
                     "id_mutation",

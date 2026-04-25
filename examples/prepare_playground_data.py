@@ -131,10 +131,23 @@ CITIES = {
                 "use_veg_bbox": True,
             },
         },
-        # DVF (Demandes de Valeurs Foncieres) — Etalab open data, INSEE 78646.
-        # S6 playground uses these points to build a price/m² map.
+        # DVF (Demandes de Valeurs Foncieres) — Etalab open data.
+        # S6 playground uses these points to build a price/m² map. Eight
+        # communes covered to fill the wider S5-aligned bbox
+        # (1.96/48.77/2.17/48.87) — Versailles centre, Le Chesnay-Rocquencourt
+        # (north of A86), Viroflay (NE), Velizy-Villacoublay (E), Jouy-en-Josas
+        # / Buc (S), Saint-Cyr-l'Ecole / Bailly (W). All in dept 78.
         "dvf": {
-            "insee": "78646",
+            "insees": [
+                "78646",  # Versailles
+                "78158",  # Le Chesnay-Rocquencourt (merger code, post-2019)
+                "78686",  # Viroflay
+                "78640",  # Velizy-Villacoublay
+                "78322",  # Jouy-en-Josas
+                "78117",  # Buc
+                "78545",  # Saint-Cyr-l'Ecole
+                "78043",  # Bailly
+            ],
             "dept": "78",
             "years": ["2022", "2023", "2024"],
         },
@@ -382,30 +395,41 @@ DVF_URL_TEMPLATE = (
 )
 
 
-def download_dvf(insee: str, dept: str, years: list[str]) -> gpd.GeoDataFrame | None:
-    """Download DVF mutations for a commune across the requested years.
+def download_dvf(
+    insees: str | list[str], dept: str, years: list[str]
+) -> gpd.GeoDataFrame | None:
+    """Download DVF mutations across one or many communes / years.
 
     Etalab publishes one CSV per year + commune with WGS84 longitude/latitude
-    columns. We concat, geom-build from the coordinate pair, drop rows without
-    coordinates (some DVF rows are unlocatable).
+    columns. We concat the cartesian product of (insees x years), geom-build
+    from the coordinate pair, drop rows without coordinates (some DVF rows
+    are unlocatable). A single string is accepted for backward compat with
+    older configs.
     """
-    frames: list[pd.DataFrame] = []
-    for year in years:
-        url = DVF_URL_TEMPLATE.format(year=year, dept=dept, insee=insee)
-        print(f"    DVF {year}: {url}")
-        try:
-            resp = requests.get(url, timeout=120)
-            resp.raise_for_status()
-        except requests.RequestException as e:
-            print(f"    DVF {year} failed: {e}")
-            continue
-        from io import BytesIO
+    if isinstance(insees, str):
+        insees = [insees]
 
-        # Etalab serves the CSV as UTF-8 bytes but without a charset hint; read
-        # from raw content to avoid requests' fallback to ISO-8859-1 on resp.text.
-        df = pd.read_csv(BytesIO(resp.content), encoding="utf-8", low_memory=False)
-        print(f"    DVF {year}: {len(df)} rows")
-        frames.append(df)
+    frames: list[pd.DataFrame] = []
+    for insee in insees:
+        for year in years:
+            url = DVF_URL_TEMPLATE.format(year=year, dept=dept, insee=insee)
+            print(f"    DVF {insee} {year}: {url}")
+            try:
+                resp = requests.get(url, timeout=120)
+                resp.raise_for_status()
+            except requests.RequestException as e:
+                print(f"    DVF {insee} {year} failed: {e}")
+                continue
+            from io import BytesIO
+
+            # Etalab serves the CSV as UTF-8 bytes but without a charset hint;
+            # read from raw content to avoid requests' fallback to ISO-8859-1
+            # on resp.text.
+            df = pd.read_csv(
+                BytesIO(resp.content), encoding="utf-8", low_memory=False
+            )
+            print(f"    DVF {insee} {year}: {len(df)} rows")
+            frames.append(df)
 
     if not frames:
         return None
@@ -506,8 +530,11 @@ def prepare_city(city_key: str) -> None:
     # DVF (optional, city-specific) — Etalab mutations for price/m² analysis
     if "dvf" in city:
         dvf_cfg = city["dvf"]
-        print(f"\n  [dvf_ventes] DVF Etalab — commune {dvf_cfg['insee']}")
-        dvf_gdf = download_dvf(dvf_cfg["insee"], dvf_cfg["dept"], dvf_cfg["years"])
+        # Backward compat: legacy "insee" (single string) or new "insees" (list).
+        insees = dvf_cfg.get("insees") or dvf_cfg["insee"]
+        label_communes = ", ".join(insees) if isinstance(insees, list) else insees
+        print(f"\n  [dvf_ventes] DVF Etalab — commune(s) {label_communes}")
+        dvf_gdf = download_dvf(insees, dvf_cfg["dept"], dvf_cfg["years"])
         if dvf_gdf is not None and not dvf_gdf.empty:
             dvf_gdf = clean_dvf(dvf_gdf)
             dvf_gdf.to_file(out_path, driver="GPKG", layer="dvf_ventes")

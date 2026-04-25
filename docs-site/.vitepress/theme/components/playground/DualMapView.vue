@@ -648,6 +648,24 @@ function handleStepView(viewStepIndex: number) {
   const currentLayer = store.state.layers.get(currentKey)
   const currentType = currentLayer?.type
 
+  // Solo mode for the final step: choropleth/heatmap scenarios (e.g. S6
+  // real-estate) opt into hiding every other layer once the painted tiles
+  // cover the area, since any ghost or base context only adds visual noise.
+  const isFinalStep = viewStepIndex === stepKeys.length - 1
+  const soloFinalStep = !!config.value?.soloFinalStep && isFinalStep
+  if (soloFinalStep) {
+    for (const [key] of store.state.layers) {
+      if (key === currentKey) {
+        store.setLayerVisibility(key, true)
+        store.setLayerOpacity(key, 1)
+      } else {
+        store.setLayerVisibility(key, false)
+      }
+    }
+    store.commitVisibility()
+    return
+  }
+
   // Ghost = most recent prior step layer of a DIFFERENT geometry type.
   // Same-type ghost is suppressed — it's just a larger superset of the current
   // step (e.g. filter_in_flood_zone vs filter_in_flood_altitude both polygons).

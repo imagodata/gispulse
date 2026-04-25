@@ -73,6 +73,15 @@ export interface ScenarioConfig {
    * and pushed into the trigger list verbatim.
    */
   clientTriggerUrl?: string
+  /**
+   * When true, the final pipeline step is rendered alone — no ghost from the
+   * previous step, no base layer context. Use this on choropleth / heatmap
+   * scenarios where the last step's geometry tiles the whole area and any
+   * ghost overlay just adds visual noise (e.g. S6 real-estate: the 100 m
+   * choropleth covers the bbox so the underlying DVF point cloud is
+   * redundant once the heatmap is painted).
+   */
+  soloFinalStep?: boolean
 }
 
 export const scenarios: Record<string, ScenarioConfig> = {
@@ -278,5 +287,6 @@ export const scenarios: Record<string, ScenarioConfig> = {
     ],
     difficulty: 'intermediaire',
     mode: 'CLI + Map',
+    soloFinalStep: true,
   },
 }
