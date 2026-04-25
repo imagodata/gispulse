@@ -170,6 +170,34 @@ GISPulse uses a tier system controlled by the `GISPULSE_TIER` environment variab
 
 Pro and Enterprise require a `GISPULSE_LICENSE_KEY`. See `pricing.yml` for full details.
 
+## Integrations
+
+GISPulse exposes its data and live events through standard protocols so any GIS client can consume them — no custom plugin required.
+
+### What you can do today (v1.2)
+
+| Client | Mode | Setup |
+|---|---|---|
+| **QGIS** | Drag-and-drop GPKG output | Run a pipeline → drop the resulting `.gpkg` into QGIS |
+| **QGIS** | Live OGC API Features / WFS | Add a Vector Layer → `https://server/wfs` or `https://server/ogc/features` |
+| **QGIS / MapLibre / deck.gl / ArcGIS Online** | MVT tiles (PostGIS) | `GET /tiles/{id}/tilejson.json` returns a TileJSON 3.0 doc with the tileset URL, bounds, vector layers schema |
+| **ArcGIS Pro** | OGC API Features | "Add Data → OGC API Features" with the GISPulse endpoint URL |
+| **ArcGIS GeoEvent / Zapier** | Webhook out (incoming v1.2.x) | Trigger fires → `POST` to your webhook URL |
+| **Custom JS apps** | Live events via WebSocket | `wss://server/ws/events?topics=trigger_fired&trigger_id=<uuid>` (filter by topic, trigger, or table) |
+
+### What's coming v1.3+
+
+- **QGIS plugin** — native dataset browser, job runner, OGC/PostGIS/MVT layer wizard
+- **ArcGIS REST connector** — first-class client for ArcGIS Online and Server feature services
+- **JS SDK** — `@gispulse/sdk-core` published on npm with typed APIs for jobs, rules, triggers, and live events
+- **MVT for DuckDB** — server-side vector tile generation without PostGIS
+
+> See [`docs/INTEGRATION_MATRIX.md`](docs/INTEGRATION_MATRIX.md) for the full client × mode × version compatibility matrix.
+
+### Concurrency note — SpatiaLite
+
+When GISPulse runs in **portable mode** (DuckDB / GPKG / SpatiaLite), the underlying SQLite engine enforces **a single writer at a time**. Concurrent rule executions and triggers serialize on the database file lock — this is by design for filesystem-based GPKG, not a GISPulse limit. For multi-writer workloads (parallel jobs, live triggers under load), switch to the **persistent mode (PostGIS)** which is the supported production path.
+
 ## Architecture
 
 ```mermaid
