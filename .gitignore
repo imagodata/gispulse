@@ -31,3 +31,9 @@ Thumbs.db
 # Build outputs
 portal/dist/
 viewer/dist/
+
+# SQLite / GPKG WAL artefacts (transient — do not track)
+*.gpkg-shm
+*.gpkg-wal
+*.sqlite-shm
+*.sqlite-wal
