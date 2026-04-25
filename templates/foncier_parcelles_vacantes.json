@@ -1,0 +1,119 @@
+{
+  "version": 2,
+  "name": "foncier_parcelles_vacantes",
+  "description": "Detection des parcelles vacantes / friches urbaines mobilisables pour renaturation ZAN ou operations d'amenagement — croisement cadastre x fichiers fonciers x PLU x DVF.",
+  "domain": "foncier",
+  "author": "GISPulse",
+  "tags": ["friches", "foncier", "zan", "cadastre", "dvf"],
+  "ref_layers": {
+    "cadastre": "data/parcelles_cadastre.gpkg",
+    "majic": "data/fichiers_fonciers.gpkg",
+    "plu_zonage": "data/plu_zonage.gpkg",
+    "dvf": "data/dvf_mutations.gpkg",
+    "zones_enjeux": "data/zac_ort.gpkg"
+  },
+  "inputs_notes": "fichiers_fonciers (CEREMA) joint au cadastre par id_parcelle. Champs attendus : dnulocal (nb locaux), catpro (proprietaire), dteloc (type local).",
+  "steps": [
+    {
+      "id": "parcelles_enrichies",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "majic",
+        "predicate": "contains",
+        "how": "left",
+        "columns": ["dnulocal", "catpro", "dteloc", "nbfdl"]
+      },
+      "input": "cadastre"
+    },
+    {
+      "id": "parcelles_vacantes",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "dnulocal == 0 or dteloc == 'BATI_VACANT'" },
+      "input": "parcelles_enrichies"
+    },
+    {
+      "id": "en_zones_constructibles",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "plu_zonage",
+        "predicate": "intersects",
+        "how": "inner",
+        "columns": ["TYPEZONE", "LIBELLE"],
+        "ref_filter": "TYPEZONE in ['U', 'AU']"
+      },
+      "input": "parcelles_vacantes"
+    },
+    {
+      "id": "surface_calcul",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "en_zones_constructibles"
+    },
+    {
+      "id": "filter_parcelles_utiles",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "area_m2 >= 200 and area_m2 <= 50000" },
+      "input": "surface_calcul"
+    },
+    {
+      "id": "join_mutations",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "dvf",
+        "predicate": "contains",
+        "how": "left",
+        "columns": ["date_mutation", "valeur_fonciere"],
+        "ref_filter": "nature_mutation == 'Vente'"
+      },
+      "input": "filter_parcelles_utiles"
+    },
+    {
+      "id": "est_en_zone_enjeu",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "zones_enjeux",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["TYPE_ENJEU", "NOM_OPERATION"]
+      },
+      "input": "join_mutations"
+    },
+    {
+      "id": "proprio_publique",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'PUBLIC' if catpro in ['ETAT', 'COMMUNE', 'EPCI', 'DEPARTEMENT', 'REGION'] else 'PRIVE'",
+        "output_field": "type_proprio"
+      },
+      "input": "est_en_zone_enjeu"
+    },
+    {
+      "id": "potentiel_constructible",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(area_m2 * 0.5, 0)",
+        "output_field": "surface_plancher_potentielle_m2"
+      },
+      "input": "proprio_publique"
+    },
+    {
+      "id": "score_priorite",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "(3 if type_proprio == 'PUBLIC' else 1) + (2 if TYPE_ENJEU is not None else 0) + (1 if area_m2 > 1000 else 0)",
+        "output_field": "score_priorite"
+      },
+      "input": "potentiel_constructible"
+    }
+  ]
+}

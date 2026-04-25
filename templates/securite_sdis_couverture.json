@@ -1,0 +1,130 @@
+{
+  "version": 2,
+  "name": "securite_sdis_couverture",
+  "description": "Analyse SDACR de couverture operationnelle SDIS — generation d'isochrones 10/20/30 min depuis les centres de secours, croisement avec la population INSEE et identification des zones blanches.",
+  "domain": "securite_civile",
+  "author": "GISPulse",
+  "tags": ["sdis", "sdacr", "isochrone", "secours", "insee"],
+  "requires_pro": true,
+  "ref_layers": {
+    "casernes": "data/centres_secours.gpkg",
+    "reseau_routier": "data/bd_topo_tronçons.gpkg",
+    "insee_carreaux": "data/insee_carroyage_200m.gpkg",
+    "erp_sensibles": "data/bpe_erp_sensibles.gpkg",
+    "ppri": "data/ppri_zonage.gpkg"
+  },
+  "steps": [
+    {
+      "id": "reseau_reproj",
+      "type": "capability",
+      "capability": "reproject",
+      "params": { "target_crs": "EPSG:2154" },
+      "input": "reseau_routier"
+    },
+    {
+      "id": "iso_c1_10min",
+      "type": "capability",
+      "capability": "isochrone",
+      "params": {
+        "ref_layer": "reseau_reproj",
+        "cost_budget": 600,
+        "weight_col": "tps_sec",
+        "dissolve": true,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "casernes"
+    },
+    {
+      "id": "iso_c2_20min",
+      "type": "capability",
+      "capability": "isochrone",
+      "params": {
+        "ref_layer": "reseau_reproj",
+        "cost_budget": 1200,
+        "weight_col": "tps_sec",
+        "dissolve": true,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "casernes"
+    },
+    {
+      "id": "iso_limite_30min",
+      "type": "capability",
+      "capability": "isochrone",
+      "params": {
+        "ref_layer": "reseau_reproj",
+        "cost_budget": 1800,
+        "weight_col": "tps_sec",
+        "dissolve": true,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "casernes"
+    },
+    {
+      "id": "pop_c1",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "spatial_predicate": "within",
+        "ref_layer": "iso_c1_10min"
+      },
+      "input": "insee_carreaux"
+    },
+    {
+      "id": "pop_c1_agregat",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "group_by_field": null,
+        "aggregations": {
+          "pop_couverte_10min":    { "field": "ind_c",   "func": "sum" },
+          "nb_carreaux_couverts":  { "field": "idINSPIRE","func": "count" }
+        }
+      },
+      "input": "pop_c1"
+    },
+    {
+      "id": "zones_blanches",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "spatial_predicate": "disjoint",
+        "ref_layer": "iso_limite_30min"
+      },
+      "input": "insee_carreaux"
+    },
+    {
+      "id": "erp_hors_couverture",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "spatial_predicate": "disjoint",
+        "ref_layer": "iso_c2_20min"
+      },
+      "input": "erp_sensibles"
+    },
+    {
+      "id": "routes_inondables",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "ppri",
+        "predicate": "intersects",
+        "how": "inner",
+        "columns": ["TYPEZONE"],
+        "ref_filter": "TYPEZONE == 'ROUGE'"
+      },
+      "input": "reseau_reproj"
+    },
+    {
+      "id": "criticite_couverture",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'CRITIQUE' if ind_c > 50 else 'VIGILANCE'",
+        "output_field": "niveau_criticite"
+      },
+      "input": "zones_blanches"
+    }
+  ]
+}

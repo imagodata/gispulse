@@ -1,0 +1,120 @@
+{
+  "version": 2,
+  "name": "mobilite_accessibilite_services",
+  "description": "Accessibilite aux services — isochrones 15/30 min en voiture depuis des points d'interet (gares, centres-bourgs), croisement avec population INSEE pour calcul du taux de couverture et identification des zones blanches.",
+  "domain": "mobilite",
+  "author": "GISPulse",
+  "tags": ["isochrone", "accessibilite", "insee", "gtfs", "services"],
+  "requires_pro": true,
+  "ref_layers": {
+    "reseau_routier": "data/bd_topo_tronçons.gpkg",
+    "poi_origine": "data/gares_centres_bourgs.gpkg",
+    "iris": "data/iris_insee.gpkg",
+    "bpe_services": "data/bpe_equipements.gpkg"
+  },
+  "inputs_notes": "reseau_routier attendu avec colonne 'tps_sec' (temps de trajet par tronçon). POI origine = points geolocalises servant de sources multi-departs.",
+  "steps": [
+    {
+      "id": "reprojection_reseau",
+      "type": "capability",
+      "capability": "reproject",
+      "params": { "target_crs": "EPSG:2154" },
+      "input": "reseau_routier"
+    },
+    {
+      "id": "isochrones_15min",
+      "type": "capability",
+      "capability": "isochrone",
+      "params": {
+        "ref_layer": "reseau_routier",
+        "cost_budget": 900,
+        "weight_col": "tps_sec",
+        "dissolve": true,
+        "edge_buffer_m": 50,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "poi_origine"
+    },
+    {
+      "id": "isochrones_30min",
+      "type": "capability",
+      "capability": "isochrone",
+      "params": {
+        "ref_layer": "reseau_routier",
+        "cost_budget": 1800,
+        "weight_col": "tps_sec",
+        "dissolve": true,
+        "edge_buffer_m": 50,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "poi_origine"
+    },
+    {
+      "id": "pop_15min",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "isochrones_15min",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["poi_id"]
+      },
+      "input": "iris"
+    },
+    {
+      "id": "pop_couverte_15",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "group_by_field": "poi_id",
+        "aggregations": {
+          "pop_15min": { "field": "P20_POP", "func": "sum" },
+          "nb_iris":   { "field": "CODE_IRIS", "func": "count" }
+        }
+      },
+      "input": "pop_15min"
+    },
+    {
+      "id": "services_accessibles",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "spatial_predicate": "within",
+        "ref_layer": "isochrones_15min"
+      },
+      "input": "bpe_services"
+    },
+    {
+      "id": "services_par_isochrone",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "group_by_field": "poi_id",
+        "aggregations": {
+          "nb_services": { "field": "TYPEQU", "func": "count" }
+        }
+      },
+      "input": "services_accessibles"
+    },
+    {
+      "id": "zones_blanches",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "spatial_predicate": "disjoint",
+        "ref_layer": "isochrones_30min"
+      },
+      "input": "iris"
+    },
+    {
+      "id": "score_accessibilite",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(nb_services / max(pop_15min / 1000, 1), 2)",
+        "output_field": "score_acces_pour_mille"
+      },
+      "input": "services_par_isochrone"
+    }
+  ]
+}

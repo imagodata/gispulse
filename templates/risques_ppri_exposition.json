@@ -1,0 +1,134 @@
+{
+  "version": 2,
+  "name": "risques_ppri_exposition",
+  "description": "Diagnostic d'exposition au risque inondation — croisement du bati et de la population avec les zonages PPRI (rouge/bleu), calcul du nombre de logements, habitants et etablissements sensibles exposes.",
+  "domain": "risques_naturels",
+  "author": "GISPulse",
+  "tags": ["ppri", "inondation", "georisques", "vulnerabilite"],
+  "ref_layers": {
+    "ppri": "data/ppri_zonage.gpkg",
+    "batiments": "data/bd_topo_batiments.gpkg",
+    "parcelles": "data/cadastre_parcelles.gpkg",
+    "insee_carreaux": "data/insee_carroyage_200m.gpkg",
+    "erp_sensibles": "data/bpe_erp_sensibles.gpkg"
+  },
+  "inputs_notes": "PPRI source Georisques (champs ALEA, TYPEZONE). Batiments BD TOPO (USAGE1, HAUTEUR). ERP sensibles = ecoles, hopitaux, EHPAD extraits BPE INSEE.",
+  "steps": [
+    {
+      "id": "reprojection",
+      "type": "capability",
+      "capability": "reproject",
+      "params": { "target_crs": "EPSG:2154" },
+      "input": "ppri"
+    },
+    {
+      "id": "zones_reglementaires",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "TYPEZONE in ['ROUGE', 'BLEU', 'ORANGE']" },
+      "input": "reprojection"
+    },
+    {
+      "id": "bati_expose",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "zones_reglementaires",
+        "predicate": "intersects",
+        "how": "inner",
+        "columns": ["TYPEZONE", "ALEA"]
+      },
+      "input": "batiments"
+    },
+    {
+      "id": "surface_bati",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "bati_expose"
+    },
+    {
+      "id": "logements_exposes",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "USAGE1 in ['Residentiel', 'Indifferencie']" },
+      "input": "surface_bati"
+    },
+    {
+      "id": "parcelles_exposees",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "zones_reglementaires",
+        "predicate": "intersects",
+        "how": "inner",
+        "columns": ["TYPEZONE"]
+      },
+      "input": "parcelles"
+    },
+    {
+      "id": "pop_exposee",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "zones_reglementaires",
+        "predicate": "intersects",
+        "how": "inner",
+        "columns": ["TYPEZONE", "ALEA"]
+      },
+      "input": "insee_carreaux"
+    },
+    {
+      "id": "pop_par_zone",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "group_by_field": "TYPEZONE",
+        "aggregations": {
+          "pop_exposee":      { "field": "ind_c",  "func": "sum" },
+          "logements_total":  { "field": "log_c",  "func": "sum" },
+          "nb_carreaux":      { "field": "TYPEZONE", "func": "count" }
+        }
+      },
+      "input": "pop_exposee"
+    },
+    {
+      "id": "erp_en_zone",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "spatial_predicate": "intersects",
+        "ref_layer": "zones_reglementaires"
+      },
+      "input": "erp_sensibles"
+    },
+    {
+      "id": "vulnerabilite_composite",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round((pop_exposee / 1000) * (3 if TYPEZONE == 'ROUGE' else (2 if TYPEZONE == 'ORANGE' else 1)), 2)",
+        "output_field": "indice_vulnerabilite"
+      },
+      "input": "pop_par_zone"
+    }
+  ],
+  "triggers": [
+    {
+      "name": "flag_nouvelle_parcelle_zone_ppri",
+      "trigger_type": "dml",
+      "event": "data_changed",
+      "conditions": { "table": "parcelles", "ops": ["INSERT", "UPDATE"] },
+      "predicates": [
+        { "type": "geom", "op": "intersects", "ref_table": "ppri", "ref_filter": "TYPEZONE == 'ROUGE'" }
+      ],
+      "predicate_logic": "AND",
+      "actions": [
+        { "action_type": "set_field", "config": { "field": "risque_ppri", "value": "ROUGE" } },
+        { "action_type": "notify", "config": { "channel": "ppri_alerts", "payload_template": { "parcel_id": "{NEW.id}", "zone": "ROUGE" } } }
+      ],
+      "enabled": true,
+      "auto_eval": true
+    }
+  ]
+}

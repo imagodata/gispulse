@@ -1,0 +1,132 @@
+{
+  "version": 2,
+  "name": "sante_apl_deserts",
+  "description": "Calcul de l'Accessibilite Potentielle Localisee (APL) medecins generalistes a l'echelle communale — methode DREES adaptee : offre ETP ponderee / demande populationnelle dans isochrone 20 min, identification des deserts medicaux.",
+  "domain": "sante",
+  "author": "GISPulse",
+  "tags": ["apl", "sante", "desert-medical", "rpps", "ars"],
+  "requires_pro": true,
+  "ref_layers": {
+    "medecins": "data/rpps_medecins.gpkg",
+    "reseau_routier": "data/bd_topo_tronçons.gpkg",
+    "iris": "data/iris_insee.gpkg",
+    "communes": "data/communes.gpkg",
+    "filosofi": "data/filosofi_iris.gpkg"
+  },
+  "inputs_notes": "medecins : RPPS filtre MG actifs, champ ETP (equivalent temps plein). iris : INSEE avec P20_POP. filosofi : revenu median iris (DISP_MED).",
+  "steps": [
+    {
+      "id": "medecins_actifs",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "specialite == 'MG' and mode_exercice == 'LIBERAL' and ETP > 0" },
+      "input": "medecins"
+    },
+    {
+      "id": "isochrone_20min",
+      "type": "capability",
+      "capability": "isochrone",
+      "params": {
+        "ref_layer": "reseau_routier",
+        "cost_budget": 1200,
+        "weight_col": "tps_sec",
+        "dissolve": false,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "medecins_actifs"
+    },
+    {
+      "id": "iris_en_isochrone",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "isochrone_20min",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["medecin_id", "ETP"]
+      },
+      "input": "iris"
+    },
+    {
+      "id": "apl_iris",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "group_by_field": "CODE_IRIS",
+        "aggregations": {
+          "offre_cumulee":    { "field": "ETP",    "func": "sum" },
+          "nb_medecins":      { "field": "ETP",    "func": "count" },
+          "pop_iris":         { "field": "P20_POP","func": "max" }
+        }
+      },
+      "input": "iris_en_isochrone"
+    },
+    {
+      "id": "calc_apl",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(offre_cumulee * 5000 / max(pop_iris, 1), 2)",
+        "output_field": "apl_consult_an_hab"
+      },
+      "input": "apl_iris"
+    },
+    {
+      "id": "classif_desert",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'DESERT_MAJEUR' if apl_consult_an_hab < 2.0 else ('DESERT' if apl_consult_an_hab < 2.5 else ('SOUS_DOTE' if apl_consult_an_hab < 3.5 else 'SUFFISANT'))",
+        "output_field": "classe_apl"
+      },
+      "input": "calc_apl"
+    },
+    {
+      "id": "join_precarite",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "filosofi",
+        "predicate": "within",
+        "how": "left",
+        "columns": ["DISP_MED", "TP60"]
+      },
+      "input": "classif_desert"
+    },
+    {
+      "id": "double_peine",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'DOUBLE_PEINE' if classe_apl in ['DESERT_MAJEUR', 'DESERT'] and TP60 > 20 else classe_apl",
+        "output_field": "priorite_ars"
+      },
+      "input": "join_precarite"
+    },
+    {
+      "id": "synthese_commune",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "communes",
+        "predicate": "within",
+        "how": "left",
+        "columns": ["CODE_INSEE", "LIB_COM"]
+      },
+      "input": "double_peine"
+    },
+    {
+      "id": "agreg_commune",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "group_by_field": "CODE_INSEE",
+        "aggregations": {
+          "apl_median_commune": { "field": "apl_consult_an_hab", "func": "median" },
+          "pop_desert":         { "field": "pop_iris", "func": "sum", "filter": "classe_apl in ['DESERT', 'DESERT_MAJEUR']" }
+        }
+      },
+      "input": "synthese_commune"
+    }
+  ]
+}

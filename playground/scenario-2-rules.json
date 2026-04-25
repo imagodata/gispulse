@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "name": "toulouse_commercial_buildings_near_arterials",
+  "description": "Toulouse commercial buildings within 50 m of an IGN BD TOPO arterial road (importance 2, 3 or 4 — nationales, départementales, voies principales). Step 1 filters the road network to arterials, step 2 buffers them to 50 m (Lambert93) and intersect-filters the buildings, step 3 keeps those tagged 'Commercial et services' in usage_1 or usage_2.",
+  "ref_layers": {
+    "routes": "routes",
+    "batiments": "batiments"
+  },
+  "steps": [
+    {
+      "id": "filter_routes_arterials",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "expression": "importance in ['2', '3', '4']"
+      },
+      "input": "routes"
+    },
+    {
+      "id": "filter_near_arterials",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "spatial_predicate": "intersects",
+        "ref_layer": "filter_routes_arterials",
+        "buffer_distance": 50,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "batiments"
+    },
+    {
+      "id": "filter_commercial",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "expression": "usage_1 == 'Commercial et services' or usage_2 == 'Commercial et services'"
+      },
+      "input": "filter_near_arterials"
+    }
+  ]
+}

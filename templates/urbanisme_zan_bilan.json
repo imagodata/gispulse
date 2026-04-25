@@ -1,0 +1,114 @@
+{
+  "version": 2,
+  "name": "urbanisme_zan_bilan",
+  "description": "Bilan ZAN (Zero Artificialisation Nette) d'une commune — calcul du solde entre surfaces artificialisees et renaturees entre deux millesimes OCS GE, ventile par grande categorie.",
+  "domain": "urbanisme",
+  "author": "GISPulse",
+  "tags": ["zan", "plu", "ocs-ge", "loi-climat", "artificialisation"],
+  "ref_layers": {
+    "ocs_t1": "data/ocs_ge_2015.gpkg",
+    "ocs_t2": "data/ocs_ge_2021.gpkg",
+    "perimetre_commune": "data/commune.gpkg",
+    "iris": "data/iris_insee.gpkg"
+  },
+  "inputs_notes": "ocs_t1/t2 attendus avec champ 'US_CODE' (usage) et 'CS_CODE' (couverture), standard IGN OCS GE.",
+  "steps": [
+    {
+      "id": "clip_t1",
+      "type": "capability",
+      "capability": "clip",
+      "params": { "ref_layer": "perimetre_commune" },
+      "input": "ocs_t1"
+    },
+    {
+      "id": "clip_t2",
+      "type": "capability",
+      "capability": "clip",
+      "params": { "ref_layer": "perimetre_commune" },
+      "input": "ocs_t2"
+    },
+    {
+      "id": "artif_t1",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "CS_CODE in ['CS1.1.1.1', 'CS1.1.1.2', 'CS1.1.2.1', 'CS1.1.2.2']" },
+      "input": "clip_t1"
+    },
+    {
+      "id": "artif_t2",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "CS_CODE in ['CS1.1.1.1', 'CS1.1.1.2', 'CS1.1.2.1', 'CS1.1.2.2']" },
+      "input": "clip_t2"
+    },
+    {
+      "id": "surface_t1",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "artif_t1"
+    },
+    {
+      "id": "surface_t2",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "artif_t2"
+    },
+    {
+      "id": "agg_t2_par_categorie",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "group_by_field": "US_CODE",
+        "aggregations": {
+          "surface_artif_m2": { "field": "area_m2", "func": "sum" },
+          "nb_polygones":     { "field": "US_CODE", "func": "count" }
+        }
+      },
+      "input": "surface_t2"
+    },
+    {
+      "id": "ratio_artif",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(surface_artif_m2 / 10000, 2)",
+        "output_field": "surface_artif_ha"
+      },
+      "input": "agg_t2_par_categorie"
+    },
+    {
+      "id": "solde_zan",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(surface_artif_ha_t2 - surface_artif_ha_t1, 3)",
+        "output_field": "solde_zan_ha"
+      },
+      "input": "ratio_artif"
+    },
+    {
+      "id": "join_iris",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "iris",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["CODE_IRIS", "LIB_IRIS", "P20_POP"]
+      },
+      "input": "solde_zan"
+    },
+    {
+      "id": "trajectoire_2031",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(solde_zan_ha * (2031 - 2021) / 6, 2)",
+        "output_field": "projection_zan_2031_ha"
+      },
+      "input": "join_iris"
+    }
+  ]
+}

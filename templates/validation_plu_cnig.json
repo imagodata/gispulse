@@ -1,0 +1,65 @@
+[
+  {
+    "name": "check_geometries",
+    "description": "Vérifier la validité topologique des géométries PLU (auto-intersections, polygones dégénérés)",
+    "capability": "topology_check",
+    "config": {
+      "order": 0,
+      "fix_invalid": false,
+      "tolerance": 0.001,
+      "report_field": "_topo_errors"
+    },
+    "enabled": true
+  },
+  {
+    "name": "validate_attributes_obligatoires",
+    "description": "Vérifier la présence des attributs obligatoires CNIG PLU : TYPEZONE, LIBELLE, LIBELONG, TYPESECT",
+    "capability": "attribute_validation",
+    "config": {
+      "order": 1,
+      "required_fields": ["TYPEZONE", "LIBELLE", "LIBELONG", "TYPESECT"],
+      "non_null_fields": ["TYPEZONE", "LIBELLE"],
+      "report_field": "_attr_errors"
+    },
+    "enabled": true
+  },
+  {
+    "name": "check_zones_cnig",
+    "description": "Vérifier que les codes TYPEZONE respectent la nomenclature CNIG (U, AU, A, N et variantes)",
+    "capability": "filter",
+    "config": {
+      "order": 2,
+      "expression": "TYPEZONE is not None and str(TYPEZONE).strip() != ''",
+      "report_invalid": true,
+      "report_field": "_zone_errors"
+    },
+    "enabled": true
+  },
+  {
+    "name": "check_completeness",
+    "description": "Vérifier la complétude du plan : absence de trous ou chevauchements entre zonages",
+    "capability": "completeness_check",
+    "config": {
+      "order": 3,
+      "check_gaps": true,
+      "check_overlaps": true,
+      "reference_layer": "perimetre_commune",
+      "tolerance": 0.5,
+      "report_field": "_completeness_errors"
+    },
+    "enabled": true
+  },
+  {
+    "name": "export_rapport_validation",
+    "description": "Exporter les entités en erreur dans une couche de rapport de validation",
+    "capability": "calculate",
+    "config": {
+      "order": 4,
+      "expression": "(_topo_errors or '') + ' | ' + (_attr_errors or '') + ' | ' + (_zone_errors or '') + ' | ' + (_completeness_errors or '')",
+      "output_field": "_validation_summary",
+      "filter_errors_only": true,
+      "output_layer": "rapport_validation_plu"
+    },
+    "enabled": true
+  }
+]

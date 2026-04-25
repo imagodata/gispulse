@@ -1,0 +1,86 @@
+{
+  "version": 2,
+  "name": "reseau_topology_prep",
+  "description": "Preparation d'un graphe lineaire propre (FTTH, routes, hydro, reseau electrique) avant analyse reseau (shortest_path, isochrone, connectivity_check). Rapproche les endpoints, prolonge les dangles, noude au niveau des intersections, retire duplicats et pseudo-nodes.",
+  "domain": "preparation",
+  "author": "GISPulse",
+  "tags": ["topologie", "reseau", "graphe", "ftth", "routes", "data_prep"],
+  "inputs_notes": "Entree = couche LineString unique. CAUTION: network_remove_pseudo_nodes est place en dernier car il perd les attributs metier. Si tu dois les conserver, stoppe la pipeline juste avant ce step.",
+  "steps": [
+    {
+      "id": "repare_geoms",
+      "type": "capability",
+      "capability": "make_valid",
+      "params": {
+        "drop_empty": true,
+        "keep_geom_type": true
+      }
+    },
+    {
+      "id": "snap_endpoints",
+      "type": "capability",
+      "capability": "network_snap_endpoints",
+      "params": {
+        "tolerance": 0.5,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "repare_geoms"
+    },
+    {
+      "id": "extend_dangles",
+      "type": "capability",
+      "capability": "network_extend_dangles",
+      "params": {
+        "tolerance": 2.0,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "snap_endpoints"
+    },
+    {
+      "id": "node_intersections",
+      "type": "capability",
+      "capability": "network_node_lines",
+      "params": {
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "extend_dangles"
+    },
+    {
+      "id": "dedup_edges",
+      "type": "capability",
+      "capability": "network_remove_duplicates",
+      "params": {
+        "tolerance": 0.05,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "node_intersections"
+    },
+    {
+      "id": "connectivite_avant_merge",
+      "type": "capability",
+      "capability": "connectivity_check",
+      "params": {
+        "tolerance": 0.1,
+        "check_dangling": true,
+        "check_isolated": true
+      },
+      "input": "dedup_edges"
+    },
+    {
+      "id": "minimal_graph",
+      "type": "capability",
+      "capability": "network_remove_pseudo_nodes",
+      "params": {
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "dedup_edges"
+    },
+    {
+      "id": "longueurs_finales",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "minimal_graph"
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "version": 2,
+  "name": "health_accessibility",
+  "description": "Health-facility accessibility — four concentric walking isochrones (500 m / 750 m / 1 km / 1.5 km, ~5 / 7.5 / 10 / 15 min) on the BD TOPO road network in EPSG:2154 from Santé facilities, computed in ONE Dijkstra pass via cost_budgets, then dilated by a 50 m buffer to capture buildings that sit slightly off the routed network (private paths, cul-de-sacs, footpaths missing from BD TOPO). classify_by_ring then tags every building with the smallest ring that contains it and paints it from a 5-band palette (green = inside 500 m, yellow/orange/red for the 750/1000/1500 m rings, dark red = beyond 1.5 km).",
+  "ref_layers": {
+    "routes": "routes",
+    "batiments": "batiments"
+  },
+  "steps": [
+    {
+      "id": "filter_sante",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "expression": "categorie == 'Santé'"
+      }
+    },
+    {
+      "id": "isochrone_rings",
+      "type": "capability",
+      "capability": "isochrone",
+      "params": {
+        "ref_layer": "routes",
+        "cost_budgets": [500, 750, 1000, 1500],
+        "crs_meters": "EPSG:2154",
+        "edge_buffer_m": 40,
+        "dissolve": true
+      },
+      "input": "filter_sante"
+    },
+    {
+      "id": "buffer_rings",
+      "type": "capability",
+      "capability": "buffer",
+      "params": {
+        "distance": 50,
+        "crs_meters": "EPSG:2154",
+        "cap_style": "round",
+        "join_style": "round"
+      },
+      "input": "isochrone_rings"
+    },
+    {
+      "id": "classify_by_ring",
+      "type": "capability",
+      "capability": "classify_by_ring",
+      "params": {
+        "ref_layers": ["buffer_rings"],
+        "ring_field": "cost_budget",
+        "class_col": "access_class",
+        "color_col": "access_color",
+        "value_col": "access_ring",
+        "palette": ["#1a9850", "#fee08b", "#fdae61", "#f46d43", "#a50026"],
+        "use_centroid": true,
+        "ring_simplify_tolerance": 10.0
+      },
+      "input": "batiments"
+    }
+  ]
+}

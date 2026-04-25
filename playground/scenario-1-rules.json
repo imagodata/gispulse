@@ -1,0 +1,52 @@
+{
+  "version": 2,
+  "name": "flood_risk_diagnostic",
+  "description": "Flood risk diagnostic: buildings within 250 m of an actual watercourse (Garonne) AND whose ground sits 0–15 m above the Garonne reference level (~134 m IGN69). Building height capped at 15 m to focus on low-rise stock most vulnerable to a 15 m flood envelope.",
+  "ref_layers": {
+    "cours_eau": "cours_eau",
+    "surfaces_eau": "surfaces_eau",
+    "batiments": "batiments"
+  },
+  "steps": [
+    {
+      "id": "filter_hydro",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "expression": "toponyme in ['la Garonne', 'Bras Inférieur Garonne']",
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "cours_eau"
+    },
+    {
+      "id": "filter_in_flood_zone",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "spatial_predicate": "intersects",
+        "ref_layer": "filter_hydro",
+        "buffer_distance": 250,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "input"
+    },
+    {
+      "id": "filter_in_flood_altitude",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "expression": "altitude_minimale_sol >= 134 and altitude_minimale_sol <= 149"
+      },
+      "input": "filter_in_flood_zone"
+    },
+    {
+      "id": "filter_low_buildings",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "expression": "hauteur > 0 and hauteur <= 15"
+      },
+      "input": "filter_in_flood_altitude"
+    }
+  ]
+}

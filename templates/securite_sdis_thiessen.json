@@ -1,0 +1,117 @@
+{
+  "version": 2,
+  "name": "securite_sdis_thiessen",
+  "description": "Zones de premier appel (Thiessen/Voronoi) autour des Centres d'Incendie et de Secours (CIS). Decoupe le departement par CIS geographiquement le plus proche, croise avec la population INSEE et les ERP sensibles pour dimensionner les ressources. Complement theorique aux isochrones reseau (SDACR).",
+  "domain": "securite_civile",
+  "author": "GISPulse",
+  "tags": ["sdis", "sdacr", "voronoi", "thiessen", "secours", "couverture"],
+  "ref_layers": {
+    "cis": "data/sdis_cis.gpkg",
+    "departement": "data/departement_limite.gpkg",
+    "pop_insee": "data/insee_carroyage_200m.gpkg",
+    "erp_sensibles": "data/erp_sensibles.gpkg"
+  },
+  "inputs_notes": "Entree identique au ref_layer 'cis' (centres CIS, points). Donne une partition a vol d'oiseau — a croiser avec les isochrones reelles si tu as un reseau routier. ERP sensibles = ecoles, EHPAD, hopitaux (cat 1-2 ou public fragile).",
+  "steps": [
+    {
+      "id": "cis_points",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "type_cis in ['CSP', 'CS', 'CPI']" }
+    },
+    {
+      "id": "zones_thiessen",
+      "type": "capability",
+      "capability": "voronoi_polygons",
+      "params": {
+        "tolerance": 0.0,
+        "only_edges": false
+      },
+      "input": "cis_points"
+    },
+    {
+      "id": "decoupe_departement",
+      "type": "capability",
+      "capability": "clip",
+      "params": { "ref_layer": "departement" },
+      "input": "zones_thiessen"
+    },
+    {
+      "id": "rattache_cis",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "cis",
+        "predicate": "contains",
+        "how": "left",
+        "columns": ["code_cis", "nom_cis", "type_cis", "effectif_jour", "effectif_nuit"]
+      },
+      "input": "decoupe_departement"
+    },
+    {
+      "id": "surface_zone",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "rattache_cis"
+    },
+    {
+      "id": "pop_par_zone",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "group_by_field": "code_cis",
+        "aggregations": {
+          "pop_totale":     { "field": "ind",     "func": "sum" },
+          "pop_60_plus":    { "field": "ind_60",  "func": "sum" },
+          "pop_0_17":       { "field": "ind_0_17","func": "sum" }
+        }
+      },
+      "input": "pop_insee"
+    },
+    {
+      "id": "zones_enrichies",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "pop_par_zone",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["pop_totale", "pop_60_plus", "pop_0_17"]
+      },
+      "input": "surface_zone"
+    },
+    {
+      "id": "nb_erp_sensibles",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "group_by_field": "code_cis",
+        "aggregations": {
+          "nb_erp": { "field": "id_erp", "func": "count" }
+        }
+      },
+      "input": "erp_sensibles"
+    },
+    {
+      "id": "charge_par_cis",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(pop_totale / max(effectif_jour, 1), 1)",
+        "output_field": "pop_par_sp_jour"
+      },
+      "input": "zones_enrichies"
+    },
+    {
+      "id": "tension_effectif",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'TENDU' if pop_par_sp_jour > 1500 else ('VIGILANCE' if pop_par_sp_jour > 800 else 'NORMAL')",
+        "output_field": "niveau_tension"
+      },
+      "input": "charge_par_cis"
+    }
+  ]
+}

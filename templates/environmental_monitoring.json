@@ -1,0 +1,80 @@
+[
+  {
+    "name": "import_satellite_stac",
+    "description": "Importer des images satellite Sentinel-2 L2A via le catalogue STAC (Earth Search / Planetary Computer)",
+    "capability": "stac_import",
+    "config": {
+      "order": 0,
+      "catalog": "earth_search",
+      "collection": "sentinel-2-l2a",
+      "bands": ["B04", "B08", "B11"],
+      "cloud_cover_max": 20,
+      "datetime": "2024-06-01/2024-09-30",
+      "bbox_from_input": true
+    },
+    "enabled": true
+  },
+  {
+    "name": "calcul_ndvi",
+    "description": "Calculer l'indice NDVI (Normalized Difference Vegetation Index) à partir des bandes NIR (B08) et Red (B04)",
+    "capability": "raster_calculate",
+    "config": {
+      "order": 1,
+      "expression": "(B08 - B04) / (B08 + B04)",
+      "output_band": "NDVI",
+      "output_dtype": "float32",
+      "nodata": -9999.0
+    },
+    "enabled": true
+  },
+  {
+    "name": "zonal_stats_parcelles",
+    "description": "Calculer les statistiques zonales NDVI sur les parcelles agricoles (mean, min, max, std)",
+    "capability": "zonal_stats",
+    "config": {
+      "order": 2,
+      "raster_layer": "NDVI",
+      "vector_layer": "parcelles",
+      "stats": ["mean", "min", "max", "std", "count"],
+      "prefix": "ndvi_",
+      "all_touched": false
+    },
+    "enabled": true
+  },
+  {
+    "name": "detection_changement",
+    "description": "Calculer la différence NDVI entre deux dates pour détecter les changements de végétation",
+    "capability": "calculate",
+    "config": {
+      "order": 3,
+      "expression": "ndvi_mean_t2 - ndvi_mean_t1",
+      "output_field": "ndvi_diff",
+      "date_t1": "2023-06-01/2023-09-30",
+      "date_t2": "2024-06-01/2024-09-30"
+    },
+    "enabled": true
+  },
+  {
+    "name": "classification_changement",
+    "description": "Classifier les zones selon l'amplitude de changement NDVI (forte hausse, stable, forte baisse)",
+    "capability": "calculate",
+    "config": {
+      "order": 4,
+      "expression": "'forte_hausse' if ndvi_diff > 0.2 else ('forte_baisse' if ndvi_diff < -0.2 else 'stable')",
+      "output_field": "statut_vegetation"
+    },
+    "enabled": true
+  },
+  {
+    "name": "export_rapport_monitoring",
+    "description": "Exporter les résultats du suivi environnemental avec les métriques NDVI et statuts de changement",
+    "capability": "filter",
+    "config": {
+      "order": 5,
+      "expression": "True",
+      "output_layer": "suivi_environnemental",
+      "output_fields": ["id_parcelle", "surface_ha", "ndvi_mean", "ndvi_diff", "statut_vegetation"]
+    },
+    "enabled": true
+  }
+]
