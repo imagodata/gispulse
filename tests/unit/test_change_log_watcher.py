@@ -1,0 +1,366 @@
+"""
+Unit tests for :class:`persistence.change_log_watcher.ChangeLogWatcher`.
+
+These tests use mock engines / hubs so they don't touch the disk and run
+fast even with the polling interval set very low. The integration test
+covering an end-to-end FastAPI + GPKG + WebSocket flow lives in
+``tests/integration/http/test_change_log_watcher_integration.py``.
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+from typing import Any
+
+import pytest
+
+from persistence.change_log_watcher import ChangeLogWatcher
+
+
+# ---------------------------------------------------------------------------
+# Test doubles
+# ---------------------------------------------------------------------------
+
+
+class _RecordingHub:
+    """In-memory stand-in for ``EventHub.broadcast``."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.events: list[tuple[str, dict[str, Any]]] = []
+
+    def broadcast(self, event_type: str, data: dict[str, Any] | None = None) -> None:
+        with self._lock:
+            self.events.append((event_type, data or {}))
+
+
+class _FakeEngine:
+    """Minimal engine that exposes the change-log API."""
+
+    backend_name = "gpkg"
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._rows: list[dict[str, Any]] = []
+        self._next_id = 1
+        self.processed_calls: list[int] = []
+        self.fail_get_pending = False
+
+    def push(
+        self, table: str, op: str, fid: str, ts: str = "2026-04-25T00:00:00"
+    ) -> int:
+        """Append a fake change_log row and return its id."""
+        with self._lock:
+            row_id = self._next_id
+            self._next_id += 1
+            self._rows.append(
+                {
+                    "id": row_id,
+                    "table_name": table,
+                    "operation": op,
+                    "row_pk": fid,
+                    "changed_at": ts,
+                    "processed": 0,
+                }
+            )
+            return row_id
+
+    def get_pending_changes(self, limit: int = 100) -> list[dict]:
+        if self.fail_get_pending:
+            raise RuntimeError("boom")
+        with self._lock:
+            pending = [r for r in self._rows if r["processed"] == 0]
+            return [dict(r) for r in pending[:limit]]
+
+    def mark_changes_processed(self, up_to_id: int) -> int:
+        with self._lock:
+            self.processed_calls.append(up_to_id)
+            n = 0
+            for r in self._rows:
+                if r["id"] <= up_to_id and r["processed"] == 0:
+                    r["processed"] = 1
+                    n += 1
+            return n
+
+
+def _wait_until(predicate, timeout: float = 2.0, step: float = 0.02) -> bool:
+    """Spin-wait helper — returns True if predicate becomes truthy in time."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(step)
+    return predicate()
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+class TestChangeLogWatcher:
+    def test_validates_constructor_args(self) -> None:
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+        with pytest.raises(ValueError):
+            ChangeLogWatcher(engine, hub, poll_interval=0)
+        with pytest.raises(ValueError):
+            ChangeLogWatcher(engine, hub, batch_limit=0)
+
+    def test_starts_and_stops_cleanly(self) -> None:
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.05)
+        assert not watcher.is_running()
+        watcher.start()
+        try:
+            assert _wait_until(lambda: watcher.is_running())
+        finally:
+            watcher.stop()
+        assert not watcher.is_running()
+
+    def test_start_is_idempotent(self) -> None:
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.05)
+        watcher.start()
+        try:
+            first_thread = watcher._thread
+            watcher.start()
+            assert watcher._thread is first_thread
+        finally:
+            watcher.stop()
+
+    def test_broadcasts_dml_changed_and_acks(self) -> None:
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.02)
+
+        engine.push("parcels", "INSERT", "42")
+        engine.push("parcels", "UPDATE", "43")
+
+        watcher.start()
+        try:
+            assert _wait_until(lambda: len(hub.events) >= 2)
+        finally:
+            watcher.stop()
+
+        types = [e[0] for e in hub.events]
+        assert types.count("dml.changed") == 2
+
+        first = hub.events[0][1]
+        assert first["table"] == "parcels"
+        assert first["op"] == "INSERT"
+        assert first["fid"] == "42"
+        assert first["change_id"] == 1
+        assert "ts" in first
+        # Security: no values leaked.
+        assert "new_values" not in first
+        assert "old_values" not in first
+
+        # max_id of the batch must have been acked.
+        assert engine.processed_calls
+        assert max(engine.processed_calls) == 2
+
+    def test_no_broadcast_when_no_pending_rows(self) -> None:
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.02)
+        watcher.start()
+        try:
+            time.sleep(0.15)  # several ticks
+        finally:
+            watcher.stop()
+        assert hub.events == []
+        assert engine.processed_calls == []
+
+    def test_recovers_after_get_pending_failure(self) -> None:
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.02)
+        # Speed up the recovery wait to keep the test snappy.
+        watcher._error_backoff = 0.05
+
+        engine.fail_get_pending = True
+        watcher.start()
+        try:
+            time.sleep(0.15)
+            engine.fail_get_pending = False
+            engine.push("layer_a", "INSERT", "1")
+            assert _wait_until(lambda: len(hub.events) == 1)
+        finally:
+            watcher.stop()
+        assert hub.events[0][0] == "dml.changed"
+
+    def test_evaluates_and_broadcasts_trigger_fired(self) -> None:
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+
+        class _Fired:
+            def __init__(self, trigger_id: str, matched: bool, actions: list[str]):
+                self.trigger_id = trigger_id
+                self.matched = matched
+                self.actions_dispatched = actions
+                self.eval_time_ms = 1.5
+
+        class _Evaluator:
+            def evaluate(self, change_record, triggers):
+                # One matched, one not — only the matched one must be broadcast.
+                return [
+                    _Fired("t-1", True, ["webhook"]),
+                    _Fired("t-2", False, []),
+                ]
+
+        triggers_seen: list[list] = []
+
+        def _provider():
+            triggers_seen.append(["t-1", "t-2"])
+            return ["t-1", "t-2"]  # placeholder list — evaluator ignores it
+
+        watcher = ChangeLogWatcher(
+            engine,
+            hub,
+            poll_interval=0.02,
+            trigger_evaluator=_Evaluator(),
+            triggers_provider=_provider,
+        )
+
+        engine.push("parcels", "INSERT", "9")
+        watcher.start()
+        try:
+            assert _wait_until(
+                lambda: any(e[0] == "trigger.fired" for e in hub.events)
+            )
+        finally:
+            watcher.stop()
+
+        fired = [e for e in hub.events if e[0] == "trigger.fired"]
+        assert len(fired) == 1
+        assert fired[0][1]["trigger_id"] == "t-1"
+        assert fired[0][1]["change_id"] == 1
+        assert fired[0][1]["actions"] == ["webhook"]
+        assert triggers_seen, "triggers_provider should have been queried"
+
+    def test_skips_eval_when_provider_returns_empty(self) -> None:
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+
+        class _Evaluator:
+            def __init__(self):
+                self.calls = 0
+
+            def evaluate(self, *_a, **_kw):
+                self.calls += 1
+                return []
+
+        evaluator = _Evaluator()
+        watcher = ChangeLogWatcher(
+            engine,
+            hub,
+            poll_interval=0.02,
+            trigger_evaluator=evaluator,
+            triggers_provider=lambda: [],
+        )
+
+        engine.push("parcels", "INSERT", "1")
+        watcher.start()
+        try:
+            assert _wait_until(lambda: hub.events)
+        finally:
+            watcher.stop()
+
+        assert evaluator.calls == 0
+        assert all(e[0] == "dml.changed" for e in hub.events)
+
+    def test_continues_when_evaluator_raises(self) -> None:
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+
+        class _Evaluator:
+            def evaluate(self, *_a, **_kw):
+                raise RuntimeError("evaluator boom")
+
+        watcher = ChangeLogWatcher(
+            engine,
+            hub,
+            poll_interval=0.02,
+            trigger_evaluator=_Evaluator(),
+            triggers_provider=lambda: ["t1"],
+        )
+
+        engine.push("parcels", "INSERT", "1")
+        watcher.start()
+        try:
+            assert _wait_until(lambda: any(e[0] == "dml.changed" for e in hub.events))
+        finally:
+            watcher.stop()
+        # dml.changed still made it through; ack still happened.
+        assert engine.processed_calls == [1]
+
+    def test_broadcast_failure_does_not_block_ack(self) -> None:
+        """P0-4a (Beta): a buggy/dead subscriber that raises in
+        broadcast() must NOT block ack. Otherwise the same rows
+        re-broadcast forever (stuck backlog).
+        """
+        engine = _FakeEngine()
+
+        class _RaisingHub:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def broadcast(self, event_type: str, data: dict) -> None:
+                self.calls += 1
+                raise RuntimeError("subscriber boom")
+
+        hub = _RaisingHub()
+        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.02)
+
+        engine.push("parcels", "INSERT", "1")
+        engine.push("parcels", "INSERT", "2")
+
+        watcher.start()
+        try:
+            assert _wait_until(
+                lambda: engine.processed_calls and max(engine.processed_calls) >= 2,
+                timeout=2.0,
+            )
+        finally:
+            watcher.stop()
+
+        # Broadcast was tried for each row even though it raised.
+        assert hub.calls >= 2
+        # Ack landed (max_id=2). Backlog drained.
+        assert max(engine.processed_calls) == 2
+
+    def test_skips_rows_without_id(self) -> None:
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+
+        # Inject a malformed row alongside a valid one.
+        engine._rows.extend(
+            [
+                {
+                    "id": None,
+                    "table_name": "x",
+                    "operation": "INSERT",
+                    "row_pk": "1",
+                    "changed_at": "now",
+                    "processed": 0,
+                },
+            ]
+        )
+        engine._next_id = 2
+        engine.push("y", "UPDATE", "2")  # id=2
+
+        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.02)
+        watcher.start()
+        try:
+            assert _wait_until(lambda: any(e[1].get("change_id") == 2 for e in hub.events))
+        finally:
+            watcher.stop()
+
+        # Only the valid row produced an event, and it was acked.
+        change_ids = [e[1]["change_id"] for e in hub.events]
+        assert change_ids == [2]
+        assert engine.processed_calls == [2]
