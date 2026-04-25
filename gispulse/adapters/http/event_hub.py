@@ -43,6 +43,25 @@ class EventHub:
 
     Thread-safe: uses an asyncio Queue per subscriber so producers can
     call :meth:`broadcast` from any thread/task.
+
+    Cross-thread broadcast contract (Lot 2 v2 — Beta E2E)
+    -----------------------------------------------------
+    ``ChangeLogWatcher`` runs on a daemon ``threading.Thread`` and calls
+    :meth:`broadcast` from outside the asyncio event loop. ``asyncio.Queue``
+    is **not** thread-safe — calling ``put_nowait`` from another thread
+    races against the loop's selector and silently loses events under
+    contention (Beta saw 1-2/3 events arrive on a 3-tenant burst).
+
+    The fix: at app startup the FastAPI lifespan calls :meth:`bind_loop`
+    with the running loop. From that point on, :meth:`broadcast` routes
+    every push through ``loop.call_soon_threadsafe`` so the actual
+    ``put_nowait`` runs on the loop thread. ``QueueFull`` is caught by
+    the wrapper :meth:`_safe_put` (synchronous, scheduled on the loop)
+    and bumps :attr:`dropped_total`.
+
+    Backwards-compat: when no loop is bound (unit tests instantiate the
+    hub directly inside ``asyncio.run``), :meth:`broadcast` falls back
+    to direct ``put_nowait``. In production the lifespan ALWAYS binds.
     """
 
     def __init__(self) -> None:
@@ -51,6 +70,27 @@ class EventHub:
         # Slow subscribers silently lose events when their per-sub queue
         # saturates at maxsize=1000; we now log error + bump the counter.
         self._dropped_total: int = 0
+        # Lot 2 v2 (Beta E2E): captured at startup by ``bind_loop`` so
+        # cross-thread producers (ChangeLogWatcher) can hand the push
+        # back to the loop thread via ``call_soon_threadsafe``. Keeping
+        # this nullable preserves the legacy in-loop behaviour for tests
+        # that build a hub inside ``asyncio.run`` without binding.
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Capture the asyncio loop for thread-safe broadcasting.
+
+        Called from the FastAPI lifespan once the loop is running. After
+        the call, every :meth:`broadcast` invoked from a producer thread
+        routes through ``loop.call_soon_threadsafe`` instead of touching
+        the queue directly.
+
+        Idempotent: re-binding the same loop is a no-op. Re-binding a
+        different loop (would only happen during teardown / test churn)
+        replaces the reference.
+        """
+        self._loop = loop
+        log.debug("event_hub_loop_bound")
 
     def subscribe(
         self,
@@ -107,8 +147,38 @@ class EventHub:
                 return False
         return True
 
+    def _safe_put(self, queue: asyncio.Queue[str], payload: str) -> None:
+        """Synchronous queue push that swallows ``QueueFull`` and counts drops.
+
+        Designed to be scheduled on the loop thread via
+        ``loop.call_soon_threadsafe`` from a producer thread. Running on
+        the loop side keeps every queue mutation single-threaded.
+        """
+        try:
+            queue.put_nowait(payload)
+        except asyncio.QueueFull:
+            # P0-4b (Beta): bump from warning -> error and expose a
+            # counter. A slow subscriber dropping events used to be
+            # invisible; ops now have a metric to alert on.
+            self._dropped_total += 1
+            log.error(
+                "event_hub_queue_full_dropped",
+                subscriber_count=len(self._subscribers),
+                total_drops=self._dropped_total,
+            )
+        except Exception as exc:  # pragma: no cover — defensive
+            log.error("event_hub_broadcast_failed", error=str(exc))
+
     def broadcast(self, event_type: str, data: dict[str, Any] | None = None) -> None:
-        """Push an event to every matching subscriber queue."""
+        """Push an event to every matching subscriber queue.
+
+        Thread-safe in production: when an event loop has been bound via
+        :meth:`bind_loop`, the actual queue push is scheduled on the loop
+        thread through ``call_soon_threadsafe``. This is critical because
+        ``ChangeLogWatcher`` calls ``broadcast()`` from a daemon thread,
+        and ``asyncio.Queue`` only guarantees thread-safety when mutated
+        from the loop that owns it.
+        """
         data = data or {}
         payload = json.dumps(
             {
@@ -117,21 +187,32 @@ class EventHub:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         )
+        # Snapshot the bound loop once: avoids a race where ``bind_loop``
+        # reassigns ``self._loop`` mid-iteration.
+        loop = self._loop
+        loop_running = loop is not None and loop.is_running()
+
         for sub in self._subscribers:
             if not self._should_send(sub, event_type, data):
                 continue
-            try:
-                sub.queue.put_nowait(payload)
-            except asyncio.QueueFull:
-                # P0-4b (Beta): bump from warning -> error and expose a
-                # counter. A slow subscriber dropping events used to be
-                # invisible; ops now have a metric to alert on.
-                self._dropped_total += 1
-                log.error(
-                    "event_hub_queue_full_dropped",
-                    subscriber_count=len(self._subscribers),
-                    total_drops=self._dropped_total,
-                )
+            if loop_running:
+                # Cross-thread safe path: the loop pickups the closure and
+                # runs ``_safe_put`` on its thread. ``QueueFull`` is caught
+                # inside ``_safe_put`` (call_soon_threadsafe never raises
+                # the user callback's exceptions back to the producer).
+                try:
+                    loop.call_soon_threadsafe(self._safe_put, sub.queue, payload)
+                except RuntimeError as exc:
+                    # Loop was closed between the snapshot and the call;
+                    # fall back to the in-loop path so the event isn't
+                    # silently dropped.
+                    log.warning("event_hub_loop_closed_fallback", error=str(exc))
+                    self._safe_put(sub.queue, payload)
+            else:
+                # In-loop / unit-test path: legacy behaviour preserved so
+                # existing tests that build EventHub() directly inside
+                # ``asyncio.run`` keep working without bind_loop().
+                self._safe_put(sub.queue, payload)
 
     @property
     def subscriber_count(self) -> int:

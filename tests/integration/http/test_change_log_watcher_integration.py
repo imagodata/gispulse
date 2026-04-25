@@ -112,6 +112,9 @@ def test_dml_change_arrives_on_websocket(gpkg_app_client) -> None:
         )
 
     data = payload["data"]
+    # Multi-tenant contract: project engine is registered with the
+    # synthetic id ``"__project__"`` (see app.py lifespan).
+    assert data["dataset_id"] == "__project__"
     assert data["table"] == "parcels"
     assert data["op"] == "INSERT"
     assert data["fid"] is not None

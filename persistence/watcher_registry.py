@@ -139,6 +139,7 @@ class WatcherRegistry:
             watcher = ChangeLogWatcher(
                 engine=engine,
                 event_hub=self._hub,
+                dataset_id=dataset_id,
                 poll_interval=poll_interval,
                 batch_limit=batch_limit,
                 triggers_provider=triggers_provider,

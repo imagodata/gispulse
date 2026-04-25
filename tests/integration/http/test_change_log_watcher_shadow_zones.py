@@ -240,9 +240,11 @@ class TestPayloadRedaction:
             f"DATA LEAK: column value {marker!r} appeared in WS payload: "
             f"{full_text}"
         )
-        # Also assert allowed keys exactly.
+        # Also assert allowed keys exactly. dataset_id added in Lot 2 v2 fix M1
+        # to disambiguate multi-GPKG events; no leak risk since it's a UUID/
+        # known identifier, not a row value.
         data = payloads[0]["data"]
-        assert set(data.keys()) <= {"table", "op", "fid", "change_id", "ts"}, (
+        assert set(data.keys()) <= {"dataset_id", "table", "op", "fid", "change_id", "ts"}, (
             f"Unexpected keys in dml.changed payload: {set(data.keys())}"
         )
 

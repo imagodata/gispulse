@@ -111,6 +111,13 @@ class ChangeLogWatcher:
                             ``mark_changes_processed``.
         event_hub:          Sink for ``dml.changed`` and ``trigger.fired``
                             events.
+        dataset_id:         Stable handle of the dataset this watcher
+                            polls (UUID string or the synthetic
+                            ``"__project__"`` for the lifespan-bound
+                            project GPKG). Injected into every broadcast
+                            payload so multi-tenant consumers can
+                            disambiguate tables that collide across
+                            datasets. Mandatory.
         poll_interval:      Seconds between two ``_tick()`` calls.
                             Default 0.2 s.
         batch_limit:        Max rows pulled per tick.
@@ -136,6 +143,7 @@ class ChangeLogWatcher:
         engine: _ChangeLogEngine,
         event_hub: _EventHubProtocol,
         *,
+        dataset_id: str,
         poll_interval: float = 0.2,
         batch_limit: int = 100,
         trigger_evaluator: _TriggerEvaluatorProtocol | None = None,
@@ -145,9 +153,18 @@ class ChangeLogWatcher:
             raise ValueError("poll_interval must be > 0")
         if batch_limit <= 0:
             raise ValueError("batch_limit must be > 0")
+        # Lot 2 v2 (Beta E2E): ``dataset_id`` is mandatory. Multi-tenant
+        # event consumers cannot tell two tables named ``parcels`` apart
+        # across two GPKGs without it. Empty string is rejected because
+        # downstream filters treat ``""`` as a wildcard match.
+        if not isinstance(dataset_id, str) or not dataset_id:
+            raise ValueError(
+                "dataset_id must be a non-empty string (multi-tenant contract)"
+            )
 
         self._engine = engine
         self._hub = event_hub
+        self._dataset_id = dataset_id
         self._poll_interval = float(poll_interval)
         self._batch_limit = int(batch_limit)
         self._evaluator = trigger_evaluator
@@ -199,9 +216,13 @@ class ChangeLogWatcher:
     # ------------------------------------------------------------------
 
     def _run(self) -> None:
-        """Polling loop — runs in the daemon thread."""
-        # First sleep before the first tick keeps CPU low when no data
-        # has changed yet and lets uvicorn finish startup.
+        """Polling loop — runs in the daemon thread.
+
+        ``sleep -> tick`` so that on restart with un-acked rows, the WS
+        subscriber has a chance to (re)connect before the watcher consumes
+        and acks the backlog (otherwise replay events are broadcast to no
+        subscribers and lost).
+        """
         while self._running:
             time.sleep(self._poll_interval)
             if not self._running:
@@ -209,11 +230,7 @@ class ChangeLogWatcher:
             try:
                 self._tick()
             except Exception as exc:  # pragma: no cover — defensive
-                # Never let an exception escape the worker; otherwise the
-                # daemon thread dies silently and live-sync stops.
                 logger.exception("change_log_watcher_tick_failed: %s", exc)
-                # Back off after a hard error so we don't pin a CPU when
-                # the engine is temporarily unavailable.
                 time.sleep(self._error_backoff)
 
     def _tick(self) -> int:
@@ -276,6 +293,7 @@ class ChangeLogWatcher:
                 self._hub.broadcast(
                     "dml.changed",
                     {
+                        "dataset_id": self._dataset_id,
                         "table": table,
                         "op": op,
                         "fid": fid,
@@ -326,6 +344,7 @@ class ChangeLogWatcher:
                         self._hub.broadcast(
                             "trigger.fired",
                             {
+                                "dataset_id": self._dataset_id,
                                 "trigger_id": str(trigger_id) if trigger_id else None,
                                 "change_id": change_id,
                                 "table": table,

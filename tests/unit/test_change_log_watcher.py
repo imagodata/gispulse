@@ -104,14 +104,17 @@ class TestChangeLogWatcher:
         engine = _FakeEngine()
         hub = _RecordingHub()
         with pytest.raises(ValueError):
-            ChangeLogWatcher(engine, hub, poll_interval=0)
+            ChangeLogWatcher(engine, hub, dataset_id="ds-test", poll_interval=0)
         with pytest.raises(ValueError):
-            ChangeLogWatcher(engine, hub, batch_limit=0)
+            ChangeLogWatcher(engine, hub, dataset_id="ds-test", batch_limit=0)
+        # Multi-tenant contract: dataset_id is mandatory and non-empty.
+        with pytest.raises(ValueError):
+            ChangeLogWatcher(engine, hub, dataset_id="")
 
     def test_starts_and_stops_cleanly(self) -> None:
         engine = _FakeEngine()
         hub = _RecordingHub()
-        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.05)
+        watcher = ChangeLogWatcher(engine, hub, dataset_id="ds-test", poll_interval=0.05)
         assert not watcher.is_running()
         watcher.start()
         try:
@@ -123,7 +126,7 @@ class TestChangeLogWatcher:
     def test_start_is_idempotent(self) -> None:
         engine = _FakeEngine()
         hub = _RecordingHub()
-        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.05)
+        watcher = ChangeLogWatcher(engine, hub, dataset_id="ds-test", poll_interval=0.05)
         watcher.start()
         try:
             first_thread = watcher._thread
@@ -135,7 +138,9 @@ class TestChangeLogWatcher:
     def test_broadcasts_dml_changed_and_acks(self) -> None:
         engine = _FakeEngine()
         hub = _RecordingHub()
-        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.02)
+        watcher = ChangeLogWatcher(
+            engine, hub, dataset_id="ds-42", poll_interval=0.02
+        )
 
         engine.push("parcels", "INSERT", "42")
         engine.push("parcels", "UPDATE", "43")
@@ -150,6 +155,9 @@ class TestChangeLogWatcher:
         assert types.count("dml.changed") == 2
 
         first = hub.events[0][1]
+        # Multi-tenant contract: every dml.changed payload carries the
+        # dataset_id of the originating watcher.
+        assert first["dataset_id"] == "ds-42"
         assert first["table"] == "parcels"
         assert first["op"] == "INSERT"
         assert first["fid"] == "42"
@@ -166,7 +174,7 @@ class TestChangeLogWatcher:
     def test_no_broadcast_when_no_pending_rows(self) -> None:
         engine = _FakeEngine()
         hub = _RecordingHub()
-        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.02)
+        watcher = ChangeLogWatcher(engine, hub, dataset_id="ds-test", poll_interval=0.02)
         watcher.start()
         try:
             time.sleep(0.15)  # several ticks
@@ -178,7 +186,7 @@ class TestChangeLogWatcher:
     def test_recovers_after_get_pending_failure(self) -> None:
         engine = _FakeEngine()
         hub = _RecordingHub()
-        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.02)
+        watcher = ChangeLogWatcher(engine, hub, dataset_id="ds-test", poll_interval=0.02)
         # Speed up the recovery wait to keep the test snappy.
         watcher._error_backoff = 0.05
 
@@ -221,6 +229,7 @@ class TestChangeLogWatcher:
         watcher = ChangeLogWatcher(
             engine,
             hub,
+            dataset_id="ds-trig",
             poll_interval=0.02,
             trigger_evaluator=_Evaluator(),
             triggers_provider=_provider,
@@ -237,6 +246,7 @@ class TestChangeLogWatcher:
 
         fired = [e for e in hub.events if e[0] == "trigger.fired"]
         assert len(fired) == 1
+        assert fired[0][1]["dataset_id"] == "ds-trig"
         assert fired[0][1]["trigger_id"] == "t-1"
         assert fired[0][1]["change_id"] == 1
         assert fired[0][1]["actions"] == ["webhook"]
@@ -258,6 +268,7 @@ class TestChangeLogWatcher:
         watcher = ChangeLogWatcher(
             engine,
             hub,
+            dataset_id="ds-test",
             poll_interval=0.02,
             trigger_evaluator=evaluator,
             triggers_provider=lambda: [],
@@ -284,6 +295,7 @@ class TestChangeLogWatcher:
         watcher = ChangeLogWatcher(
             engine,
             hub,
+            dataset_id="ds-test",
             poll_interval=0.02,
             trigger_evaluator=_Evaluator(),
             triggers_provider=lambda: ["t1"],
@@ -314,7 +326,7 @@ class TestChangeLogWatcher:
                 raise RuntimeError("subscriber boom")
 
         hub = _RaisingHub()
-        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.02)
+        watcher = ChangeLogWatcher(engine, hub, dataset_id="ds-test", poll_interval=0.02)
 
         engine.push("parcels", "INSERT", "1")
         engine.push("parcels", "INSERT", "2")
@@ -353,7 +365,7 @@ class TestChangeLogWatcher:
         engine._next_id = 2
         engine.push("y", "UPDATE", "2")  # id=2
 
-        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.02)
+        watcher = ChangeLogWatcher(engine, hub, dataset_id="ds-test", poll_interval=0.02)
         watcher.start()
         try:
             assert _wait_until(lambda: any(e[1].get("change_id") == 2 for e in hub.events))

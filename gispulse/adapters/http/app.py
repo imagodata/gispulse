@@ -212,6 +212,20 @@ def create_app(
     # ------------------------------------------------------------------ Lifespan
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        # Lot 2 v2 (Beta E2E): bind the running loop to EventHub so
+        # cross-thread producers (ChangeLogWatcher daemons) push through
+        # ``call_soon_threadsafe`` instead of touching asyncio.Queue from
+        # outside its loop. Done unconditionally — portal mode also has
+        # a hub on app.state.event_hub.
+        try:
+            import asyncio as _asyncio
+
+            hub = getattr(app.state, "event_hub", None)
+            if hub is not None and hasattr(hub, "bind_loop"):
+                hub.bind_loop(_asyncio.get_running_loop())
+        except Exception as exc:  # pragma: no cover — defensive
+            log.warning("event_hub_bind_loop_failed", error=str(exc))
+
         if is_portal:
             log.info("portal_startup", data_dir=str(_data_path))
             app.state.layer_cache = BoundedLayerCache(maxsize=50)
@@ -301,14 +315,20 @@ def create_app(
                     watcher = ChangeLogWatcher(
                         engine=spatial_engine,
                         event_hub=app.state.event_hub,
+                        dataset_id="__project__",
                         triggers_provider=_active_triggers,
                     )
                     watcher.start()
                     # Stash inside the registry under the synthetic id so
                     # shutdown_all() stops the project watcher too. We
                     # bypass register() because the engine is already open
-                    # and owned by the lifespan.
-                    registry._entries["__project__"] = (spatial_engine, watcher)  # noqa: SLF001
+                    # and owned by the lifespan. Tuple shape MUST match the
+                    # registry contract: (engine, watcher, layers).
+                    registry._entries["__project__"] = (  # noqa: SLF001
+                        spatial_engine,
+                        watcher,
+                        [],
+                    )
                     app.state.change_log_watcher = watcher
                     log.info(
                         "change_log_watcher_started",
@@ -330,7 +350,9 @@ def create_app(
             if registry is not None:
                 project_entry = registry._entries.pop("__project__", None)  # noqa: SLF001
                 if project_entry is not None:
-                    _project_engine, project_watcher = project_entry
+                    # 3-tuple matches the registry contract:
+                    # (engine, watcher, layers).
+                    _project_engine, project_watcher, _layers = project_entry
                     try:
                         project_watcher.stop()
                     except Exception as exc:

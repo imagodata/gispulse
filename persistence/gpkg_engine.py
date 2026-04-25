@@ -417,9 +417,28 @@ class GeoPackageEngine(SpatialEngine):
         uninstall_change_tracking(conn, layer_name)
 
     def get_pending_changes(self, limit: int = 100) -> list[dict]:
-        """Read unprocessed change log entries."""
+        """Read unprocessed change log entries.
+
+        Lot 2 v2 (Beta E2E multi-GPKG fix): we ``commit()`` BEFORE the SELECT
+        to discard any stale read-transaction snapshot the connection may
+        still hold. Under WAL with ``check_same_thread=False`` and a
+        long-lived connection shared by the polling daemon, SQLite can
+        keep a reader pinned to an older WAL frame even after another
+        connection (raw ``sqlite3.connect`` from outside) has committed
+        new rows to ``_gispulse_change_log``. The no-op commit forces the
+        next ``execute`` to start a fresh read transaction, guaranteeing
+        we see the latest committed state. Cheap (no pending writes ⇒
+        end-of-tx fast path) and idempotent.
+        """
         conn = self._get_conn()
         with self._lock:
+            try:
+                # Discard any cached read snapshot. With no in-flight write
+                # this is a no-op for SQLite but resets the wal-index view.
+                conn.commit()
+            except sqlite3.Error:
+                # Defensive — never let a commit error block polling.
+                pass
             rows = conn.execute(
                 "SELECT * FROM _gispulse_change_log "
                 "WHERE processed = 0 ORDER BY id LIMIT ?",

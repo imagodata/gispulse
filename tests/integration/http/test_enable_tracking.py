@@ -268,3 +268,8 @@ class TestEndToEndDMLEvent:
         assert match is not None
         assert match["data"]["op"] == "INSERT"
         assert "change_id" in match["data"]
+        # Multi-tenant contract (Beta E2E Lot 2 v2): the watcher injects
+        # the dataset_id of the originating GPKG so consumers can
+        # disambiguate across tenants. For uploaded datasets this is
+        # the dataset uuid returned by /datasets/upload.
+        assert match["data"]["dataset_id"] == ds["id"]

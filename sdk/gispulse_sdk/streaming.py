@@ -9,8 +9,18 @@ WebSocket support requires the ``ws`` extra::
 The server's ``dml.changed`` events are at-least-once: a bad subscriber,
 a transient ``mark_changes_processed`` failure (e.g. read-only GPKG), or
 a watcher restart with un-acked rows can replay the same ``change_id``
-to clients. Use :func:`dedupe_by_change_id` (or :meth:`subscribe_events`
-with the default ``dedupe=True``) to filter duplicates client-side.
+to clients. Use :func:`dedupe_events` (or :meth:`subscribe_events` with
+the default ``dedupe=True``) to filter duplicates client-side.
+
+## Multi-tenant change_id collision (Lot 2 v2)
+
+Each ``ChangeLogWatcher`` numbers ``change_id`` from 1 inside its own
+GPKG. Two datasets emitting INSERTs concurrently both produce
+``change_id=1`` from the client's perspective. The dedup key MUST
+therefore combine ``(dataset_id, change_id)`` — using ``change_id``
+alone silently drops legitimate events from a second tenant.
+:func:`dedupe_events` does this by default. ``dedupe_by_change_id`` is
+preserved as a deprecated alias for backwards-compatibility.
 """
 
 from __future__ import annotations
@@ -97,7 +107,7 @@ class WebSocketListener:
                 delay = min(delay * 2, self._max_delay)
 
 
-async def dedupe_by_change_id(
+async def dedupe_events(
     events: AsyncIterator[dict],
     *,
     window_size: int = 1024,
@@ -109,25 +119,39 @@ async def dedupe_by_change_id(
     Wrap your event iterator with this helper to get exactly-once
     semantics from the application's perspective.
 
+    Multi-tenant key (Lot 2 v2 — Beta E2E)
+    --------------------------------------
+    The dedup key is the tuple ``(dataset_id, change_id)``. Each
+    ``ChangeLogWatcher`` on the server numbers ``change_id`` from 1
+    inside its own GPKG, so collisions across datasets are guaranteed
+    on a multi-tenant deployment. Keying on ``change_id`` alone (the
+    pre-Lot 2 v2 behaviour) silently drops legitimate events from a
+    second tenant.
+
+    Events that lack ``dataset_id`` *or* ``change_id`` (heartbeats,
+    ``trigger.fired`` without an associated change, malformed envelope)
+    pass through unchanged — we never assume perfect server payloads.
+
     Args:
         events:      Async iterator of event dicts (matches the
                      ``{"type", "data": {...}, "timestamp"}`` envelope
                      produced by ``EventHub.broadcast`` and forwarded
                      through ``/ws/events``).
-        window_size: Maximum number of recently-seen ``change_id`` values
-                     to remember. FIFO eviction once the window is full.
-                     Defaults to 1024 — big enough for typical bursts,
-                     small enough to keep memory bounded.
+        window_size: Maximum number of recently-seen
+                     ``(dataset_id, change_id)`` tuples to remember.
+                     FIFO eviction once the window is full. Defaults to
+                     1024 — sufficient for ~1024 events / dataset within
+                     the active window. Tune up if your client buffers
+                     larger bursts before consuming.
 
     Yields:
-        Events whose ``change_id`` was not seen inside the current window.
-        Events lacking a ``change_id`` (heartbeats, ``trigger.fired``
-        without an associated change) pass through unchanged.
+        Events whose ``(dataset_id, change_id)`` tuple was not seen
+        inside the current window.
 
     Example::
 
-        async for event in dedupe_by_change_id(ws_events()):
-            print(event["data"]["change_id"], event["type"])
+        async for event in dedupe_events(ws_events()):
+            print(event["data"]["dataset_id"], event["data"]["change_id"])
     """
     if window_size <= 0:
         raise ValueError("window_size must be > 0")
@@ -137,25 +161,50 @@ async def dedupe_by_change_id(
 
     async for ev in events:
         try:
-            cid = ev.get("data", {}).get("change_id")
+            data = ev.get("data") or {}
+            cid = data.get("change_id")
+            ds_id = data.get("dataset_id")
         except AttributeError:
             cid = None
+            ds_id = None
 
-        if cid is None:
+        if cid is None or ds_id is None:
+            # No dedup key — heartbeat, malformed event, or pre-Lot 2 v2
+            # server that didn't inject ``dataset_id``. Always pass
+            # through to avoid silently dropping events.
             yield ev
             continue
 
-        if cid in seen_set:
+        key = (ds_id, cid)
+
+        if key in seen_set:
             # Duplicate within the current window — drop silently.
             continue
 
         if len(seen_order) == window_size:
-            # FIFO eviction: oldest id falls out of both structures.
+            # FIFO eviction: oldest tuple falls out of both structures.
             oldest = seen_order[0]
             seen_set.discard(oldest)
-        seen_order.append(cid)
-        seen_set.add(cid)
+        seen_order.append(key)
+        seen_set.add(key)
         yield ev
+
+
+# ---------------------------------------------------------------------------
+# Backwards-compat alias (Lot 2 v2)
+# ---------------------------------------------------------------------------
+#
+# ``dedupe_by_change_id`` was the pre-Lot 2 v2 name. The function now
+# keys on ``(dataset_id, change_id)`` because ``change_id`` alone is not
+# unique across multi-tenant deployments. The alias is preserved so
+# existing imports keep working — emit a DeprecationWarning the first
+# time it is used so SDK consumers migrate.
+dedupe_by_change_id = dedupe_events
+"""Deprecated alias for :func:`dedupe_events`.
+
+Kept for backwards-compatibility with the Lot 2 v1 SDK. The function
+now keys on ``(dataset_id, change_id)`` to avoid collisions across
+multi-tenant deployments. Migrate imports to :func:`dedupe_events`."""
 
 
 def iter_sse(response) -> Iterator[dict]:

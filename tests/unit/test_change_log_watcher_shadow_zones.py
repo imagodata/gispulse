@@ -126,7 +126,7 @@ class TestVolume:
         engine = _FakeEngine()
         hub = _RecordingHub()
         watcher = ChangeLogWatcher(
-            engine, hub, poll_interval=0.01, batch_limit=500
+            engine, hub, dataset_id="ds-shadow", poll_interval=0.01, batch_limit=500
         )
 
         for i in range(10_000):
@@ -214,7 +214,7 @@ class TestFailureModes:
 
         hub.broadcast = _flaky_broadcast  # type: ignore[assignment]
 
-        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.02)
+        watcher = ChangeLogWatcher(engine, hub, dataset_id="ds-shadow", poll_interval=0.02)
         watcher._error_backoff = 0.05
 
         engine.push("parcels", "INSERT", "1")
@@ -272,7 +272,7 @@ class TestFailureModes:
         engine = _FakeEngine()
         hub = _RecordingHub()
         engine.fail_mark_processed = True
-        watcher = ChangeLogWatcher(engine, hub, poll_interval=0.02)
+        watcher = ChangeLogWatcher(engine, hub, dataset_id="ds-shadow", poll_interval=0.02)
 
         engine.push("parcels", "INSERT", "1")
 
@@ -318,7 +318,11 @@ class TestFailureModes:
             return []
 
         watcher = ChangeLogWatcher(
-            engine, hub, poll_interval=0.02, triggers_provider=_heavy_provider
+            engine,
+            hub,
+            dataset_id="ds-shadow",
+            poll_interval=0.02,
+            triggers_provider=_heavy_provider,
         )
 
         for i in range(50):
