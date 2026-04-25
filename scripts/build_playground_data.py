@@ -297,11 +297,12 @@ SCENARIOS: list[ScenarioSpec] = [
         layers={
             "vegetation": LayerSpec(
                 source_layer="vegetation",
-                max_features=600,
-                # 1e-4 deg ~= 11 m at 45 N — invisible at the base zoom 12 where
-                # Fausses-Reposes spans dozens of kilometers. Keeps the bundle
-                # under budget without losing the patches < 1 ha (pipeline drops
-                # them anyway via the >= 10000 m^2 filter).
+                # Full bbox set — ~1.2k vegetation polygons over the wider
+                # Versailles cadre. The 600 cap dropped half the patches and
+                # broke the nearest-park query at the periphery. 1e-4 deg
+                # (~11 m) simplify is invisible at zoom 12 where Fausses-
+                # Reposes spans dozens of kilometers.
+                max_features=2000,
                 simplify=1e-4,
                 # BD TOPO zone_de_vegetation has no toponyme field — cleabs is
                 # the only stable identifier (IGN pivot). Used in the popup as
@@ -310,14 +311,12 @@ SCENARIOS: list[ScenarioSpec] = [
             ),
             "batiments": LayerSpec(
                 source_layer="batiments",
-                # Aligned on S3 accessibility cap: source bbox holds ~47k
-                # batiments and the previous 600 cap (k=79 decimation) left
-                # the map nearly empty. 8k keeps usage_1 proportional, lets
-                # filter_residential land on ~2.4k samples, and stays under
-                # the per-scenario bandwidth budget once simplify shrinks
-                # the footprints. 5e-5 deg ≈ 5 m at 48 N — invisible at
-                # zoom 12.
-                max_features=8000,
+                # Full Versailles bbox set — ~28k batiments. Previous 8k cap
+                # (1-in-3 decimation) showed only a third of the residential
+                # tissue and made filter_residential return a sparse subset.
+                # 5e-5 deg ≈ 5 m simplify is invisible at zoom 12 and keeps
+                # the gzipped payload tractable.
+                max_features=40000,
                 simplify=5e-5,
                 keep_fields=("usage_1", "hauteur"),
             ),
