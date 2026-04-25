@@ -309,13 +309,21 @@ SCENARIOS: list[ScenarioSpec] = [
         slug="real-estate",
         title="S6 - Versailles / Carte prix au m2 DVF",
         source_gpkg="versailles_bdtopo.gpkg",
-        bbox_4326=(2.100, 48.790, 2.150, 48.820),
-        center=(2.125, 48.805),
-        zoom=13,
+        # Aligned on S5 green-spaces extent: covers Versailles commune + Le
+        # Chesnay-Rocquencourt + Viroflay + Buc + Jouy-en-Josas. The forested
+        # west/south stays in-bbox but yields ~no DVF mutations, so the
+        # choropleth concentrates naturally on the urban tissue.
+        bbox_4326=(1.960, 48.770, 2.170, 48.870),
+        center=(2.095, 48.820),
+        zoom=12,
         layers={
             "dvf_ventes": LayerSpec(
                 source_layer="dvf_ventes",
-                max_features=2000,
+                # ~14× wider bbox than the original 5 × 3 km cadre. DVF density
+                # on greater Versailles (residential mutations 2022-2024) caps
+                # at ~6-8k after filter; 8000 leaves headroom without blowing
+                # the gzip budget.
+                max_features=8000,
                 simplify=0,  # points — nothing to simplify
                 keep_fields=(
                     "id_mutation",

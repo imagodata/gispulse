@@ -241,13 +241,15 @@ export const scenarios: Record<string, ScenarioConfig> = {
     mode: 'CLI + Map',
   },
 
-  // S6 — Versailles : Carte du prix au m² (DVF Etalab) + choroplèthe tuiles 50 m
+  // S6 — Versailles : Carte du prix au m² (DVF Etalab) + choroplèthe tuiles 100 m
+  // Emprise alignée sur S5 green-spaces (Versailles élargi : ~21 × 11 km) afin
+  // de couvrir l'ensemble du tissu urbain — Le Chesnay, Viroflay, Buc, Jouy.
   'real-estate': {
     datasetName: 'versailles_bdtopo',
     layers: ['dvf_ventes'],
-    center: [2.125, 48.805],
-    zoom: 13,
-    bbox: '2.100,48.790,2.150,48.820',
+    center: [2.095, 48.82],
+    zoom: 12,
+    bbox: '1.960,48.770,2.170,48.870',
     pipelineRules: [
       'filter_residential_sales',
       'compute_price_per_m2',
@@ -266,7 +268,7 @@ export const scenarios: Record<string, ScenarioConfig> = {
     },
     triggerNames: [],
     description:
-      'Carte du prix au m² Versailles — DVF (Etalab) 2022-2024 : filtre ventes Maison/Appartement, price_per_m2 = valeur_fonciere / surface_reelle_bati, suppression des outliers 1500-25000 €, classification en quintiles avec palette YlOrRd. Puis quadrillage régulier 50 m × 50 m (grid_create, CRS Lambert93), agrégation du prix moyen / m² par tuile (spatial_aggregate, predicate=contains) et choroplèthe final en heatmap lisible.',
+      'Carte du prix au m² Versailles élargi — DVF (Etalab) 2022-2024 sur le même cadre que S5 (Versailles + Le Chesnay + Viroflay + Buc + Jouy-en-Josas, ~21 × 11 km) : filtre ventes Maison/Appartement, price_per_m2 = valeur_fonciere / surface_reelle_bati, suppression des outliers 1500-25000 €, classification en quintiles avec palette YlOrRd. Puis quadrillage régulier 100 m × 100 m (grid_create, CRS Lambert93), agrégation du prix moyen / m² par tuile (spatial_aggregate, predicate=contains) et choroplèthe final en heatmap lisible.',
     capabilities: [
       'filter',
       'calculate',
