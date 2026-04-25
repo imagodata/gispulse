@@ -9,6 +9,7 @@ in ``gpkg_extensions`` per OGC GPKG Annex F.  They never appear in
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from pathlib import Path
 
@@ -17,6 +18,44 @@ from persistence.schema import (
     build_all_gpkg_schemas,
     build_model_table_mapping,
 )
+
+# ---------------------------------------------------------------------------
+# Identifier validation
+# ---------------------------------------------------------------------------
+# P0-4c (Beta): layer/identifier names are interpolated into trigger DDL via
+# f-strings (CREATE TRIGGER + INSERT INTO ... VALUES('{layer}', ...)). A name
+# containing single-quotes, double-quotes or semicolons becomes a textbook
+# SQL injection vector. We refuse non-identifier names *up front* with
+# ValueError so callers (HTTP endpoints, engine wrappers) can surface a
+# clean 400 instead of a silently broken trigger or a dropped table.
+
+_IDENT_RE = re.compile(r"^[^\W\d][\w]*$", re.UNICODE)
+# Unicode-aware identifier rule (matches Python's ``str.isidentifier``-ish):
+# - first char: Unicode letter or underscore (no digit)
+# - body: Unicode word chars (letters, digits, underscore)
+# Rejects quotes, semicolons, spaces, dots, dashes — anything that would
+# break the f-string DDL or open an SQLi vector. Accented layer names like
+# ``parcelles_éàü`` are accepted; ``a'); DROP TABLE x; --`` is not.
+
+
+def _validate_identifier(name: str) -> str:
+    """Validate that *name* is a safe SQL identifier.
+
+    Args:
+        name: Candidate identifier (layer name, column name, etc.).
+
+    Returns:
+        The validated identifier (unchanged) for fluent use.
+
+    Raises:
+        ValueError: If *name* contains characters outside ``[A-Za-z0-9_]``
+            or starts with a digit. Quotes and semicolons are rejected.
+    """
+    if not isinstance(name, str) or not _IDENT_RE.match(name):
+        raise ValueError(
+            f"invalid identifier: {name!r} — must match [A-Za-z_][A-Za-z0-9_]*"
+        )
+    return name
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +93,17 @@ END
 
 
 def _build_change_triggers(table_name: str, pk_col: str = "fid") -> list[str]:
-    """Generate INSERT/UPDATE/DELETE trigger SQL for a spatial layer."""
+    """Generate INSERT/UPDATE/DELETE trigger SQL for a spatial layer.
+
+    Both ``table_name`` and ``pk_col`` MUST be valid SQL identifiers — they
+    are interpolated directly into the DDL (no parameter binding possible
+    in DDL). See :func:`_validate_identifier` for the rules.
+
+    Raises:
+        ValueError: If either identifier is unsafe.
+    """
+    _validate_identifier(table_name)
+    _validate_identifier(pk_col)
     triggers = []
     for op, ref, extra_c, extra_v in [
         ("insert", "NEW", "new_values", "NULL"),
@@ -227,9 +276,18 @@ def install_change_tracking(
 
     Args:
         conn:       Open SQLite connection to the GPKG file.
-        layer_name: Name of the spatial table to track.
+        layer_name: Name of the spatial table to track. Must match
+                    ``[A-Za-z_][A-Za-z0-9_]*`` — see :func:`_validate_identifier`.
         pk_col:     Primary key column (default ``fid`` per GPKG spec).
+
+    Raises:
+        ValueError: If *layer_name* or *pk_col* contains unsafe characters.
     """
+    # Defensive: re-validate at the public entry point so callers that
+    # bypass _build_change_triggers (none today, but future refactors)
+    # still get the SQLi guard.
+    _validate_identifier(layer_name)
+    _validate_identifier(pk_col)
     for sql in _build_change_triggers(layer_name, pk_col):
         conn.execute(sql)
     conn.commit()
@@ -237,7 +295,12 @@ def install_change_tracking(
 
 
 def uninstall_change_tracking(conn: sqlite3.Connection, layer_name: str) -> None:
-    """Remove change tracking triggers for a spatial layer."""
+    """Remove change tracking triggers for a spatial layer.
+
+    Raises:
+        ValueError: If *layer_name* contains unsafe characters.
+    """
+    _validate_identifier(layer_name)
     for op in ("insert", "update", "delete"):
         conn.execute(f'DROP TRIGGER IF EXISTS "_gispulse_trg_{layer_name}_{op}"')
     conn.commit()

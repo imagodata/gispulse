@@ -21,6 +21,7 @@ from persistence.gpkg_schema import (
     _ensure_gpkg_core_tables,
     _ensure_gpkg_extensions_table,
     _register_extension,
+    _validate_identifier,
     bootstrap_gpkg_project,
     install_change_tracking,
     migrate_sqlite_to_gpkg,
@@ -351,3 +352,85 @@ class TestMigration:
 
         stats = migrate_sqlite_to_gpkg(old_db, conn)
         assert stats.get(old_table, 0) >= 1
+
+
+# ---------------------------------------------------------------------------
+# SQLi guard on layer/identifier names (P0-4c)
+# ---------------------------------------------------------------------------
+
+
+class TestIdentifierValidation:
+    """Beta P0-4c: identifier guard. ``install_change_tracking`` interpolates
+    layer_name into trigger DDL via f-strings (DDL cannot use bound params),
+    so an unsafe name is a textbook SQLi vector. ``_validate_identifier``
+    rejects anything that isn't ``[A-Za-z_]\\w*`` (Unicode-aware)."""
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "a';DROP TABLE x;--",
+            'a"; DROP TABLE x; --',
+            "evil'); DROP TABLE _gispulse_change_log; --",
+            "with space",
+            "with-dash",
+            "table.dot",
+            "1starts_with_digit",
+            "",
+            ";",
+            "--comment",
+            "table\nname",
+        ],
+    )
+    def test_rejects_unsafe_identifiers(self, name):
+        with pytest.raises(ValueError):
+            _validate_identifier(name)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "parcels",
+            "parcels_2024",
+            "_internal_metric",
+            "Parcelles",
+            "parcelles_éàü",  # Unicode word chars allowed
+            "naïve_layer",
+        ],
+    )
+    def test_accepts_safe_identifiers(self, name):
+        assert _validate_identifier(name) == name
+
+    def test_install_change_tracking_rejects_quote_in_layer_name(self, conn):
+        bootstrap_gpkg_project(conn)
+        with pytest.raises(ValueError):
+            install_change_tracking(conn, "a'); DROP TABLE x; --")
+
+    def test_install_change_tracking_rejects_semicolon(self, conn):
+        bootstrap_gpkg_project(conn)
+        with pytest.raises(ValueError):
+            install_change_tracking(conn, "tbl;DROP")
+
+    def test_install_change_tracking_rejects_space(self, conn):
+        bootstrap_gpkg_project(conn)
+        with pytest.raises(ValueError):
+            install_change_tracking(conn, "with space")
+
+    def test_uninstall_change_tracking_rejects_unsafe(self, conn):
+        bootstrap_gpkg_project(conn)
+        with pytest.raises(ValueError):
+            uninstall_change_tracking(conn, "a';--")
+
+    def test_install_change_tracking_unicode_layer_still_works(self, conn):
+        """Unicode word characters (accents) must remain valid identifiers
+        — Beta non-regression on test_install_change_tracking_with_unicode_layer_name."""
+        bootstrap_gpkg_project(conn)
+        layer = "parcelles_éàü"
+        conn.execute(f'CREATE TABLE "{layer}" (fid INTEGER PRIMARY KEY, name TEXT)')
+        conn.commit()
+        install_change_tracking(conn, layer)
+        # Trigger fires correctly.
+        conn.execute(f'INSERT INTO "{layer}"(name) VALUES (?)', ("alpha",))
+        conn.commit()
+        row = conn.execute(
+            "SELECT table_name FROM _gispulse_change_log ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert row is not None and row["table_name"] == layer
