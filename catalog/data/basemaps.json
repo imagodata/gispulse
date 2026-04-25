@@ -1,0 +1,122 @@
+[
+  {
+    "id": "osm",
+    "name": "OpenStreetMap",
+    "description": "Carte collaborative mondiale — style standard",
+    "url_template": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    "protocol": "xyz",
+    "attribution": "&copy; OpenStreetMap contributors",
+    "max_zoom": 19,
+    "tags": ["general", "default", "osm"]
+  },
+  {
+    "id": "osm-fr",
+    "name": "OpenStreetMap France",
+    "description": "Rendu OSM adapté pour la France",
+    "url_template": "https://tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png",
+    "protocol": "xyz",
+    "attribution": "&copy; OpenStreetMap France",
+    "max_zoom": 20,
+    "tags": ["france", "osm"]
+  },
+  {
+    "id": "satellite",
+    "name": "Satellite (Esri)",
+    "description": "Imagerie satellite mondiale — Esri World Imagery",
+    "url_template": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    "protocol": "xyz",
+    "attribution": "&copy; Esri, Maxar, Earthstar Geographics",
+    "max_zoom": 19,
+    "tags": ["satellite", "imagery", "esri"]
+  },
+  {
+    "id": "ign-plan",
+    "name": "IGN Plan v2",
+    "description": "Carte topographique IGN — Géoplateforme WMTS",
+    "url_template": "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+    "protocol": "wmts",
+    "attribution": "&copy; IGN Géoplateforme",
+    "max_zoom": 19,
+    "tags": ["france", "ign", "topo"]
+  },
+  {
+    "id": "ign-ortho",
+    "name": "IGN Orthophotos",
+    "description": "Photographies aériennes IGN — France entière",
+    "url_template": "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+    "protocol": "wmts",
+    "attribution": "&copy; IGN Géoplateforme",
+    "max_zoom": 20,
+    "tags": ["france", "ign", "satellite", "ortho"]
+  },
+  {
+    "id": "ign-scan25",
+    "name": "IGN Scan 25",
+    "description": "Cartes topographiques IGN — couche MAPS libre d'accès",
+    "url_template": "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.MAPS&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+    "protocol": "wmts",
+    "attribution": "&copy; IGN Géoplateforme",
+    "max_zoom": 18,
+    "tags": ["france", "ign", "topo", "randonnée"]
+  },
+  {
+    "id": "ign-cadastre",
+    "name": "IGN Cadastre",
+    "description": "Parcelles cadastrales — overlay transparent",
+    "url_template": "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=CADASTRALPARCELS.PARCELLAIRE_EXPRESS&STYLE=PCI vecteur&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+    "protocol": "wmts",
+    "attribution": "&copy; IGN Géoplateforme",
+    "max_zoom": 20,
+    "tags": ["france", "ign", "cadastre", "overlay"]
+  },
+  {
+    "id": "dark",
+    "name": "Dark (CARTO)",
+    "description": "Fond sombre pour visualisation de données",
+    "url_template": "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
+    "protocol": "xyz",
+    "attribution": "&copy; CARTO, &copy; OpenStreetMap contributors",
+    "max_zoom": 20,
+    "tags": ["dark", "dataviz", "carto"]
+  },
+  {
+    "id": "light",
+    "name": "Light (CARTO)",
+    "description": "Fond clair minimaliste pour visualisation de données",
+    "url_template": "https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
+    "protocol": "xyz",
+    "attribution": "&copy; CARTO, &copy; OpenStreetMap contributors",
+    "max_zoom": 20,
+    "tags": ["light", "dataviz", "carto"]
+  },
+  {
+    "id": "topo",
+    "name": "OpenTopoMap",
+    "description": "Carte topographique ouverte avec courbes de niveau",
+    "url_template": "https://tile.opentopomap.org/{z}/{x}/{y}.png",
+    "protocol": "xyz",
+    "attribution": "&copy; OpenTopoMap, &copy; OpenStreetMap contributors",
+    "max_zoom": 17,
+    "tags": ["topo", "elevation", "outdoor"]
+  },
+  {
+    "id": "voyager",
+    "name": "Voyager (CARTO)",
+    "description": "Fond clair coloré avec labels — polyvalent",
+    "url_template": "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png",
+    "protocol": "xyz",
+    "attribution": "&copy; CARTO, &copy; OpenStreetMap contributors",
+    "max_zoom": 20,
+    "tags": ["general", "carto", "color"]
+  },
+  {
+    "id": "none",
+    "name": "Aucun fond",
+    "description": "Pas de fond de carte — données seules",
+    "url_template": "",
+    "protocol": "xyz",
+    "attribution": "",
+    "max_zoom": 22,
+    "tags": ["none", "empty"]
+  }
+]

@@ -1,0 +1,164 @@
+{
+  "version": 2,
+  "name": "retail_huff_chalandise",
+  "description": "Modele de Huff de zones de chalandise — isochrones drive-time depuis magasins, calcul des parts de marche par IRIS selon attractivite (surface commerciale / distance^beta) et identification des whitespace.",
+  "domain": "retail_geomarketing",
+  "author": "GISPulse",
+  "tags": ["huff", "retail", "chalandise", "geomarketing", "whitespace"],
+  "requires_pro": true,
+  "ref_layers": {
+    "magasins": "data/magasins_enseigne.gpkg",
+    "reseau_routier": "data/bd_topo_tronçons.gpkg",
+    "iris": "data/iris_insee.gpkg",
+    "filosofi": "data/filosofi_iris.gpkg",
+    "concurrents": "data/sirene_commerces.gpkg"
+  },
+  "inputs_notes": "magasins attendus avec colonne 'surface_m2' (surface de vente) et 'ca_ref' (CA etalonnage optionnel). alpha=1, beta=2 (calibrage standard Huff).",
+  "steps": [
+    {
+      "id": "iso_5min",
+      "type": "capability",
+      "capability": "isochrone",
+      "params": {
+        "ref_layer": "reseau_routier",
+        "cost_budget": 300,
+        "weight_col": "tps_sec",
+        "dissolve": false,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "magasins"
+    },
+    {
+      "id": "iso_10min",
+      "type": "capability",
+      "capability": "isochrone",
+      "params": {
+        "ref_layer": "reseau_routier",
+        "cost_budget": 600,
+        "weight_col": "tps_sec",
+        "dissolve": false,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "magasins"
+    },
+    {
+      "id": "iso_20min",
+      "type": "capability",
+      "capability": "isochrone",
+      "params": {
+        "ref_layer": "reseau_routier",
+        "cost_budget": 1200,
+        "weight_col": "tps_sec",
+        "dissolve": false,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "magasins"
+    },
+    {
+      "id": "iris_enrichis",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "filosofi",
+        "predicate": "within",
+        "how": "left",
+        "columns": ["DISP_MED", "NBPERS_MEN"]
+      },
+      "input": "iris"
+    },
+    {
+      "id": "iris_dans_20min",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "iso_20min",
+        "predicate": "intersects",
+        "how": "inner",
+        "columns": ["magasin_id", "surface_m2"]
+      },
+      "input": "iris_enrichis"
+    },
+    {
+      "id": "centroide_iris",
+      "type": "capability",
+      "capability": "centroid",
+      "params": {},
+      "input": "iris_dans_20min"
+    },
+    {
+      "id": "distance_iris_magasin",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "2500",
+        "output_field": "distance_approx_m"
+      },
+      "input": "centroide_iris"
+    },
+    {
+      "id": "attractivite_huff",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(surface_m2 / (distance_approx_m ** 2), 6)",
+        "output_field": "attractivite"
+      },
+      "input": "distance_iris_magasin"
+    },
+    {
+      "id": "total_attractivite_iris",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "group_by_field": "CODE_IRIS",
+        "aggregations": {
+          "sum_attractivite": { "field": "attractivite", "func": "sum" },
+          "nb_magasins":      { "field": "magasin_id",   "func": "count" },
+          "pop_iris":         { "field": "P20_POP",      "func": "max" },
+          "revenu":           { "field": "DISP_MED",     "func": "max" }
+        }
+      },
+      "input": "attractivite_huff"
+    },
+    {
+      "id": "part_marche",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(attractivite / sum_attractivite * 100, 2)",
+        "output_field": "part_marche_pct"
+      },
+      "input": "total_attractivite_iris"
+    },
+    {
+      "id": "ca_potentiel",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(part_marche_pct / 100 * pop_iris * (revenu / 12) * 0.15, 0)",
+        "output_field": "ca_potentiel_mensuel"
+      },
+      "input": "part_marche"
+    },
+    {
+      "id": "whitespace",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "spatial_predicate": "disjoint",
+        "ref_layer": "iso_10min"
+      },
+      "input": "iris_enrichis"
+    },
+    {
+      "id": "whitespace_potentiel",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(P20_POP * (DISP_MED / 12) * 0.08, 0)",
+        "output_field": "ca_zone_blanche"
+      },
+      "input": "whitespace"
+    }
+  ]
+}

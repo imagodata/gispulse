@@ -1,0 +1,141 @@
+{
+  "version": 2,
+  "name": "batiment_dpe_priorisation",
+  "description": "Priorisation des batiments residentiels pour programmes de renovation energetique — croisement passoires thermiques BDNB avec precarite INSEE FILOSOFI, dispositifs ANAH et proprietaires MAJIC.",
+  "domain": "batiment_renovation",
+  "author": "GISPulse",
+  "tags": ["dpe", "renovation", "bdnb", "anah", "precarite"],
+  "ref_layers": {
+    "bdnb": "data/bdnb_batiments.gpkg",
+    "filosofi": "data/filosofi_iris.gpkg",
+    "opah_pig": "data/zonage_anah.gpkg",
+    "majic": "data/fichiers_fonciers.gpkg",
+    "copropos_fragiles": "data/pdlhi_coproprietes.gpkg"
+  },
+  "steps": [
+    {
+      "id": "bati_reproj",
+      "type": "capability",
+      "capability": "reproject",
+      "params": { "target_crs": "EPSG:2154" },
+      "input": "bdnb"
+    },
+    {
+      "id": "passoires_thermiques",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "dpe_class in ['E', 'F', 'G'] and usage_principal == 'RESIDENTIEL'" },
+      "input": "bati_reproj"
+    },
+    {
+      "id": "surfaces_bati",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "passoires_thermiques"
+    },
+    {
+      "id": "join_precarite",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "filosofi",
+        "predicate": "within",
+        "how": "left",
+        "columns": ["DISP_MED", "TP60", "PPFRAG"]
+      },
+      "input": "surfaces_bati"
+    },
+    {
+      "id": "indice_precarite",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "('FORT' if TP60 > 25 else ('MOYEN' if TP60 > 15 else 'FAIBLE'))",
+        "output_field": "niveau_precarite"
+      },
+      "input": "join_precarite"
+    },
+    {
+      "id": "en_opah",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "opah_pig",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["TYPE_DISPOSITIF", "DATE_FIN"]
+      },
+      "input": "indice_precarite"
+    },
+    {
+      "id": "join_proprio",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "majic",
+        "predicate": "contains",
+        "how": "left",
+        "columns": ["catpro", "nbfdl", "dteloc"]
+      },
+      "input": "en_opah"
+    },
+    {
+      "id": "flag_copro_fragile",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "copropos_fragiles",
+        "predicate": "within",
+        "how": "left",
+        "columns": ["niveau_fragilite"]
+      },
+      "input": "join_proprio"
+    },
+    {
+      "id": "energie_evitable",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(area_m2 * (450 if dpe_class == 'G' else (350 if dpe_class == 'F' else 280)), 0)",
+        "output_field": "conso_evitable_kwh_an"
+      },
+      "input": "flag_copro_fragile"
+    },
+    {
+      "id": "co2_evitable",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(conso_evitable_kwh_an * 0.227 / 1000, 2)",
+        "output_field": "co2_evitable_t_an"
+      },
+      "input": "energie_evitable"
+    },
+    {
+      "id": "score_priorite",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "(3 if dpe_class == 'G' else (2 if dpe_class == 'F' else 1)) + (2 if niveau_precarite == 'FORT' else (1 if niveau_precarite == 'MOYEN' else 0)) + (1 if TYPE_DISPOSITIF is not None else 0) + (1 if niveau_fragilite is not None else 0)",
+        "output_field": "score_priorite_renov"
+      },
+      "input": "co2_evitable"
+    },
+    {
+      "id": "agreg_iris",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "group_by_field": "CODE_IRIS",
+        "aggregations": {
+          "nb_passoires":        { "field": "score_priorite_renov", "func": "count" },
+          "surface_passoires_m2":{ "field": "area_m2", "func": "sum" },
+          "co2_evitable_iris":   { "field": "co2_evitable_t_an", "func": "sum" },
+          "score_moyen":         { "field": "score_priorite_renov", "func": "mean" }
+        }
+      },
+      "input": "score_priorite"
+    }
+  ]
+}

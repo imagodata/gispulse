@@ -1,0 +1,85 @@
+[
+  {
+    "name": "filter_ventes_recentes",
+    "description": "Ne garder que les mutations de type 'Vente' sur 2022-2024 pour un marche stabilise",
+    "capability": "filter",
+    "config": {
+      "order": 0,
+      "expression": "nature_mutation == 'Vente' and date_mutation >= '2022-01-01' and date_mutation <= '2024-12-31'"
+    },
+    "enabled": true
+  },
+  {
+    "name": "filter_biens_batis",
+    "description": "Filtrer les appartements et maisons (exclure terrains nus, locaux industriels)",
+    "capability": "filter",
+    "config": {
+      "order": 1,
+      "expression": "type_local in ['Appartement', 'Maison'] and valeur_fonciere > 10000 and surface_reelle_bati > 10"
+    },
+    "enabled": true
+  },
+  {
+    "name": "prix_m2",
+    "description": "Calcul du prix au m² bati",
+    "capability": "calculate",
+    "config": {
+      "order": 2,
+      "expression": "round(valeur_fonciere / surface_reelle_bati, 0)",
+      "output_field": "prix_m2"
+    },
+    "enabled": true
+  },
+  {
+    "name": "filter_outliers",
+    "description": "Exclure les outliers (prix > 15k€/m² ou < 500€/m² = erreurs probables)",
+    "capability": "filter",
+    "config": {
+      "order": 3,
+      "expression": "prix_m2 >= 500 and prix_m2 <= 15000"
+    },
+    "enabled": true
+  },
+  {
+    "name": "join_iris",
+    "description": "Rattacher chaque mutation a son IRIS INSEE pour agregation",
+    "capability": "spatial_join",
+    "config": {
+      "order": 4,
+      "ref_layer": "iris",
+      "predicate": "within",
+      "how": "left",
+      "columns": ["CODE_IRIS", "LIB_IRIS", "TYP_IRIS"]
+    },
+    "enabled": true
+  },
+  {
+    "name": "agreger_par_iris",
+    "description": "Statistiques prix par IRIS (mediane, moyenne, volumes)",
+    "capability": "spatial_aggregate",
+    "config": {
+      "order": 5,
+      "group_by_field": "CODE_IRIS",
+      "aggregations": {
+        "prix_m2_median":     { "field": "prix_m2", "func": "median" },
+        "prix_m2_moyen":      { "field": "prix_m2", "func": "mean" },
+        "prix_m2_max":        { "field": "prix_m2", "func": "max" },
+        "prix_m2_min":        { "field": "prix_m2", "func": "min" },
+        "nb_mutations":       { "field": "prix_m2", "func": "count" },
+        "surface_bati_totale":{ "field": "surface_reelle_bati", "func": "sum" }
+      }
+    },
+    "enabled": true
+  },
+  {
+    "name": "tension_marche",
+    "description": "Classification de tension du marche selon prix median et volume",
+    "capability": "calculate",
+    "config": {
+      "order": 6,
+      "expression": "'TRES_TENDU' if prix_m2_median > 5000 else ('TENDU' if prix_m2_median > 3000 else ('MOYEN' if prix_m2_median > 1800 else 'DETENDU'))",
+      "output_field": "niveau_tension"
+    },
+    "enabled": true
+  }
+]

@@ -1,0 +1,69 @@
+###############################################################################
+# GISPulse — Local team stack (Mode B)
+#
+# Non-dev compose: no source code mounted, no hot-reload.
+# For LAN team usage with PostGIS.
+#
+# Usage:
+#   cp .env.example .env   # adjust POSTGRES_PASSWORD at minimum
+#   docker compose -f docker-compose.local.yml up -d
+#   open http://localhost:8001/docs
+###############################################################################
+
+services:
+  # ── PostGIS database ─────────────────────────────────────────────────────
+  postgis:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gispulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gispulse}
+      POSTGRES_DB: ${POSTGRES_DB:-gispulse}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gispulse}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gispulse
+
+  # ── GISPulse API + Portal ────────────────────────────────────────────────
+  gispulse-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${GISPULSE_PORT:-8001}:8001"
+    environment:
+      GISPULSE_ENGINE: postgis
+      GISPULSE_DSN: postgresql://${POSTGRES_USER:-gispulse}:${POSTGRES_PASSWORD:-gispulse}@postgis:5432/${POSTGRES_DB:-gispulse}
+      GISPULSE_STORAGE: sqlite
+      GISPULSE_TIER: ${GISPULSE_TIER:-community}
+      GISPULSE_API_KEYS: ${GISPULSE_API_KEYS:-}
+    depends_on:
+      postgis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    volumes:
+      - gispulse_data:/root/.gispulse
+      - uploads:/data
+    networks:
+      - gispulse
+
+networks:
+  gispulse:
+    driver: bridge
+
+volumes:
+  pgdata:
+  gispulse_data:
+  uploads:

@@ -1,0 +1,132 @@
+{
+  "version": 2,
+  "name": "urbanisme_permis_conformite",
+  "description": "Instruction rapide d'un permis de construire — croisement de la parcelle du petitionnaire avec le zonage PLU applicable, les servitudes, les risques et les perimetres ABF pour fiche d'analyse automatique.",
+  "domain": "urbanisme",
+  "author": "GISPulse",
+  "tags": ["permis", "pc", "instruction", "plu", "servitudes"],
+  "ref_layers": {
+    "parcelle_petitionnaire": "data/parcelle_projet.gpkg",
+    "plu_zonage": "data/plu_zonage.gpkg",
+    "servitudes": "data/sup_servitudes.gpkg",
+    "abf": "data/abf_perimetres_500m.gpkg",
+    "ppri": "data/ppri_zonage.gpkg",
+    "natura2000": "data/natura2000.gpkg"
+  },
+  "steps": [
+    {
+      "id": "parcelle_reproj",
+      "type": "capability",
+      "capability": "reproject",
+      "params": { "target_crs": "EPSG:2154" },
+      "input": "parcelle_petitionnaire"
+    },
+    {
+      "id": "surface_parcelle",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "parcelle_reproj"
+    },
+    {
+      "id": "zonage_applicable",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "plu_zonage",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["TYPEZONE", "LIBELLE", "LIBELONG"]
+      },
+      "input": "surface_parcelle"
+    },
+    {
+      "id": "servitudes_actives",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "servitudes",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["CODE_SUP", "LIBELLE"]
+      },
+      "input": "zonage_applicable"
+    },
+    {
+      "id": "flag_abf",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "abf",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["NOM_MH", "DIST_MH"]
+      },
+      "input": "servitudes_actives"
+    },
+    {
+      "id": "flag_risques",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "ppri",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["TYPEZONE", "ALEA"]
+      },
+      "input": "flag_abf"
+    },
+    {
+      "id": "flag_natura",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "natura2000",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["SITECODE", "SITENAME"]
+      },
+      "input": "flag_risques"
+    },
+    {
+      "id": "ces_max",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "0.3 if TYPEZONE == 'U' else (0.1 if TYPEZONE == 'A' else (0.05 if TYPEZONE == 'N' else 0.2))",
+        "output_field": "ces_max_regle"
+      },
+      "input": "flag_natura"
+    },
+    {
+      "id": "emprise_max",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(area_m2 * ces_max_regle, 1)",
+        "output_field": "emprise_autorisee_m2"
+      },
+      "input": "ces_max"
+    },
+    {
+      "id": "niveau_complexite",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'COMPLEXE' if NOM_MH is not None or SITECODE is not None or TYPEZONE == 'ROUGE' else ('STANDARD' if CODE_SUP is not None else 'SIMPLE')",
+        "output_field": "niveau_instruction"
+      },
+      "input": "emprise_max"
+    },
+    {
+      "id": "synthese_fiche",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'Zone ' + (str(TYPEZONE) or 'INCONNUE') + ' / CES max ' + str(ces_max_regle) + ' / Complexite ' + str(niveau_instruction)",
+        "output_field": "synthese_instruction"
+      },
+      "input": "niveau_complexite"
+    }
+  ]
+}

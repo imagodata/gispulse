@@ -1,0 +1,132 @@
+{
+  "version": 2,
+  "name": "energie_solaire_toiture",
+  "description": "Estimation du potentiel solaire photovoltaique des toitures — statistiques zonales d'irradiation raster PVGIS sur emprises bati, filtrage par orientation/pente, calcul de puissance et production annuelles.",
+  "domain": "energie",
+  "author": "GISPulse",
+  "tags": ["solaire", "pv", "toiture", "bdnb", "lidar"],
+  "requires_pro": true,
+  "requires_plugins": ["gispulse-cap-raster-extras"],
+  "ref_layers": {
+    "batiments": "data/bd_topo_batiments.gpkg",
+    "abf": "data/abf_perimetres_500m.gpkg",
+    "bdnb": "data/bdnb_batiments.gpkg"
+  },
+  "inputs_notes": "rasters attendus dans le FS : irradiation_annuelle.tif (kWh/m2/an, PVGIS), pente_mnS.tif (deg, LiDAR HD), orientation_mnS.tif (aspect 0-360 deg, LiDAR HD).",
+  "steps": [
+    {
+      "id": "bati_reproj",
+      "type": "capability",
+      "capability": "reproject",
+      "params": { "target_crs": "EPSG:2154" },
+      "input": "batiments"
+    },
+    {
+      "id": "surface_toiture",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "bati_reproj"
+    },
+    {
+      "id": "filter_batiments_significatifs",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "area_m2 >= 30 and HAUTEUR >= 3" },
+      "input": "surface_toiture"
+    },
+    {
+      "id": "zonal_irradiation",
+      "type": "capability",
+      "capability": "zonal_stats",
+      "params": {
+        "raster_path": "data/irradiation_annuelle.tif",
+        "stats": ["mean", "max", "count"],
+        "prefix": "irrad_",
+        "all_touched": false
+      },
+      "input": "filter_batiments_significatifs"
+    },
+    {
+      "id": "zonal_pente",
+      "type": "capability",
+      "capability": "zonal_stats",
+      "params": {
+        "raster_path": "data/pente_mnS.tif",
+        "stats": ["mean", "max"],
+        "prefix": "pente_"
+      },
+      "input": "zonal_irradiation"
+    },
+    {
+      "id": "zonal_orientation",
+      "type": "capability",
+      "capability": "zonal_stats",
+      "params": {
+        "raster_path": "data/orientation_mnS.tif",
+        "stats": ["mean"],
+        "prefix": "orient_"
+      },
+      "input": "zonal_pente"
+    },
+    {
+      "id": "filter_toitures_eligibles",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "pente_mean >= 10 and pente_mean <= 60 and orient_mean >= 90 and orient_mean <= 270 and irrad_mean > 1000" },
+      "input": "zonal_orientation"
+    },
+    {
+      "id": "surface_utile",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(area_m2 * 0.6, 1)",
+        "output_field": "surface_utile_m2"
+      },
+      "input": "filter_toitures_eligibles"
+    },
+    {
+      "id": "puissance_installable",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(surface_utile_m2 * 0.2, 2)",
+        "output_field": "puissance_kwc"
+      },
+      "input": "surface_utile"
+    },
+    {
+      "id": "production_annuelle",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(puissance_kwc * irrad_mean * 0.82, 0)",
+        "output_field": "production_kwh_an"
+      },
+      "input": "puissance_installable"
+    },
+    {
+      "id": "flag_abf",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "abf",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["NOM_MH"]
+      },
+      "input": "production_annuelle"
+    },
+    {
+      "id": "contrainte_patrimoniale",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'CONTRAINTE_ABF' if NOM_MH is not None else 'LIBRE'",
+        "output_field": "statut_patrimonial"
+      },
+      "input": "flag_abf"
+    }
+  ]
+}

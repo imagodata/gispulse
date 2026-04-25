@@ -1,0 +1,67 @@
+[
+  {
+    "name": "import_reseau_fibre",
+    "description": "Importer et normaliser le réseau fibre optique (câbles, boîtiers, NRO, PBO)",
+    "capability": "filter",
+    "config": {
+      "order": 0,
+      "expression": "TYPE_INFRA in ('CABLE', 'BOITIER', 'NRO', 'PBO', 'PM', 'PEP')",
+      "allow_all_if_missing": true
+    },
+    "enabled": true
+  },
+  {
+    "name": "connectivity_check",
+    "description": "Vérifier la connectivité du graphe réseau — détecter les segments déconnectés ou les noeuds isolés",
+    "capability": "network_check",
+    "config": {
+      "order": 1,
+      "tolerance": 0.1,
+      "check_dangling": true,
+      "check_isolated": true,
+      "report_field": "_connectivity_status"
+    },
+    "enabled": true
+  },
+  {
+    "name": "calcul_zones_couverture",
+    "description": "Calculer les zones de couverture par isochrone autour des NRO (rayon 20 km réseau fibre)",
+    "capability": "buffer",
+    "config": {
+      "order": 2,
+      "distance": 20000,
+      "crs_meters": "EPSG:2154",
+      "filter_expression": "TYPE_INFRA == 'NRO'",
+      "dissolve_by": "ID_NRO"
+    },
+    "enabled": true
+  },
+  {
+    "name": "spatial_aggregate_par_nro",
+    "description": "Agréger les statistiques du réseau par zone NRO : nombre de PM, PBO, longueur câbles",
+    "capability": "spatial_aggregate",
+    "config": {
+      "order": 3,
+      "group_by_field": "ID_NRO",
+      "aggregations": {
+        "nb_pm": {"field": "TYPE_INFRA", "func": "count", "filter": "TYPE_INFRA == 'PM'"},
+        "nb_pbo": {"field": "TYPE_INFRA", "func": "count", "filter": "TYPE_INFRA == 'PBO'"},
+        "longueur_cable_m": {"field": "LONGUEUR", "func": "sum"},
+        "nb_prises": {"field": "NB_PRISES", "func": "sum"}
+      },
+      "output_layer": "stats_par_nro"
+    },
+    "enabled": true
+  },
+  {
+    "name": "calcul_taux_couverture",
+    "description": "Calculer le taux de couverture FTTH par NRO (prises livrables / prises cibles)",
+    "capability": "calculate",
+    "config": {
+      "order": 4,
+      "expression": "round(nb_prises / max(NB_PRISES_CIBLES, 1) * 100, 2)",
+      "output_field": "taux_couverture_pct"
+    },
+    "enabled": true
+  }
+]

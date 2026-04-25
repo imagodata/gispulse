@@ -1,0 +1,9 @@
+[
+  {
+    "name": "high_rated_pois",
+    "capability": "filter",
+    "config": {
+      "expression": "rating >= 4.0"
+    }
+  }
+]

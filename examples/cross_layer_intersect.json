@@ -1,0 +1,9 @@
+[
+  {
+    "name": "parcels_near_roads",
+    "capability": "intersects",
+    "config": {
+      "ref_layer": "roads"
+    }
+  }
+]

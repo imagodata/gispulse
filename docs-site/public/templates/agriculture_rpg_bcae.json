@@ -1,0 +1,122 @@
+{
+  "version": 2,
+  "name": "agriculture_rpg_bcae",
+  "description": "Controle de conformite BCAE (Bonnes Conditions Agricoles Environnementales) des parcelles PAC — verification bandes tampons cours d'eau, haies preservees, couverture minimale et zones humides.",
+  "domain": "agriculture",
+  "author": "GISPulse",
+  "tags": ["rpg", "pac", "bcae", "agriculture", "controle"],
+  "ref_layers": {
+    "rpg": "data/rpg_parcelles.gpkg",
+    "cours_eau_bcae": "data/bd_topage_cours_eau_bcae.gpkg",
+    "haies": "data/bd_topo_haies.gpkg",
+    "zones_humides": "data/zones_humides.gpkg"
+  },
+  "inputs_notes": "RPG attendu avec champs CODE_CULTU, SURF_PARC, ID_EXPLOIT. Cours d'eau BCAE = reseau BCAE reglementaire (art. D615-46 CRPM).",
+  "steps": [
+    {
+      "id": "rpg_reproj",
+      "type": "capability",
+      "capability": "reproject",
+      "params": { "target_crs": "EPSG:2154" },
+      "input": "rpg"
+    },
+    {
+      "id": "rpg_surfaces",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "rpg_reproj"
+    },
+    {
+      "id": "bande_tampon_bcae",
+      "type": "capability",
+      "capability": "buffer",
+      "params": { "distance": 5, "crs_meters": "EPSG:2154" },
+      "input": "cours_eau_bcae"
+    },
+    {
+      "id": "parcelles_en_bande",
+      "type": "capability",
+      "capability": "intersects",
+      "params": { "ref_layer": "bande_tampon_bcae" },
+      "input": "rpg_surfaces"
+    },
+    {
+      "id": "check_bande_tampon",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'OK' if CODE_CULTU in ['PPH', 'PRL', 'PPR', 'SPH'] else 'INFRACTION_BCAE_1'",
+        "output_field": "check_bcae_1"
+      },
+      "input": "parcelles_en_bande"
+    },
+    {
+      "id": "parcelles_zones_humides",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "zones_humides",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["TYPE_ZH"]
+      },
+      "input": "rpg_surfaces"
+    },
+    {
+      "id": "check_zh_laboure",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'INFRACTION_BCAE_9' if TYPE_ZH is not None and CODE_CULTU in ['BTH', 'MIS', 'TRN', 'ORP'] else 'OK'",
+        "output_field": "check_bcae_9"
+      },
+      "input": "parcelles_zones_humides"
+    },
+    {
+      "id": "haies_parcelles",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "haies",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["ID_HAIE", "LONGUEUR"]
+      },
+      "input": "rpg_surfaces"
+    },
+    {
+      "id": "longueur_haies_exploit",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "group_by_field": "ID_EXPLOIT",
+        "aggregations": {
+          "longueur_haies_m": { "field": "LONGUEUR", "func": "sum" },
+          "surface_totale_ha": { "field": "SURF_PARC", "func": "sum" }
+        }
+      },
+      "input": "haies_parcelles"
+    },
+    {
+      "id": "ratio_haies",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "round(longueur_haies_m / max(surface_totale_ha, 1), 2)",
+        "output_field": "metres_haies_par_ha"
+      },
+      "input": "longueur_haies_exploit"
+    },
+    {
+      "id": "score_conformite",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'CONFORME' if metres_haies_par_ha >= 50 else 'INFRACTION_BCAE_8'",
+        "output_field": "statut_bcae_haies"
+      },
+      "input": "ratio_haies"
+    }
+  ]
+}

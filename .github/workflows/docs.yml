@@ -1,0 +1,75 @@
+name: Deploy docs to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs-site/**"
+      - "templates/**"
+      - "scripts/build_playground_data.py"
+      - "scripts/build_templates_index.py"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python deps for static data build
+        run: pip install geopandas shapely fiona pyogrio
+
+      - name: Build static playground datasets (< 60 kB per scenario)
+        run: python scripts/build_playground_data.py
+        continue-on-error: true   # source GPKGs may not be checked in; skip silently
+
+      - name: Build templates index
+        run: python scripts/build_templates_index.py
+
+      - name: Install docs-site dependencies
+        working-directory: docs-site
+        run: npm ci
+
+      - name: Build VitePress
+        working-directory: docs-site
+        run: npm run build
+
+      - name: Smoke-test dist artifacts
+        run: python scripts/smoke_test_docs.py
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs-site/.vitepress/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

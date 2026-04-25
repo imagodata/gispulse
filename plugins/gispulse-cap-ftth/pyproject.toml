@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gispulse-cap-ftth"
+version = "1.2.0"
+description = "FTTH network design and calculation pipeline for GISPulse"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "GISPulse", email = "dev@gispulse.io" }]
+dependencies = [
+    "geopandas>=0.14",
+    "shapely>=2.0",
+    "networkx>=3.0",
+]
+
+[project.entry-points."gispulse.capabilities"]
+ftth = "gispulse_cap_ftth:register"

@@ -1,0 +1,796 @@
+{
+  "generated_by": "scripts/build_templates_index.py",
+  "count": 21,
+  "items": [
+    {
+      "slug": "agriculture_rpg_bcae",
+      "file": "agriculture_rpg_bcae.json",
+      "title": "agriculture_rpg_bcae",
+      "description": "Controle de conformite BCAE (Bonnes Conditions Agricoles Environnementales) des parcelles PAC — verification bandes tampons cours d'eau, haies preservees, couverture minimale et zones humides.",
+      "domain": "agriculture",
+      "tags": [
+        "rpg",
+        "pac",
+        "bcae",
+        "agriculture",
+        "controle"
+      ],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "reproject",
+        "area_length",
+        "buffer",
+        "intersects",
+        "calculate",
+        "spatial_join",
+        "spatial_aggregate"
+      ],
+      "step_count": 11,
+      "steps": [
+        "rpg_reproj (reproject)",
+        "rpg_surfaces (area_length)",
+        "bande_tampon_bcae (buffer)",
+        "parcelles_en_bande (intersects)",
+        "check_bande_tampon (calculate)",
+        "parcelles_zones_humides (spatial_join)",
+        "check_zh_laboure (calculate)",
+        "haies_parcelles (spatial_join)",
+        "longueur_haies_exploit (spatial_aggregate)",
+        "ratio_haies (calculate)",
+        "score_conformite (calculate)"
+      ],
+      "size_bytes": 3694
+    },
+    {
+      "slug": "batiment_dpe_priorisation",
+      "file": "batiment_dpe_priorisation.json",
+      "title": "batiment_dpe_priorisation",
+      "description": "Priorisation des batiments residentiels pour programmes de renovation energetique — croisement passoires thermiques BDNB avec precarite INSEE FILOSOFI, dispositifs ANAH et proprietaires MAJIC.",
+      "domain": "batiment_renovation",
+      "tags": [
+        "dpe",
+        "renovation",
+        "bdnb",
+        "anah",
+        "precarite"
+      ],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "reproject",
+        "filter",
+        "area_length",
+        "spatial_join",
+        "calculate",
+        "spatial_aggregate"
+      ],
+      "step_count": 12,
+      "steps": [
+        "bati_reproj (reproject)",
+        "passoires_thermiques (filter)",
+        "surfaces_bati (area_length)",
+        "join_precarite (spatial_join)",
+        "indice_precarite (calculate)",
+        "en_opah (spatial_join)",
+        "join_proprio (spatial_join)",
+        "flag_copro_fragile (spatial_join)",
+        "energie_evitable (calculate)",
+        "co2_evitable (calculate)",
+        "score_priorite (calculate)",
+        "agreg_iris (spatial_aggregate)"
+      ],
+      "size_bytes": 4368
+    },
+    {
+      "slug": "cadastre_topology_cleanup",
+      "file": "cadastre_topology_cleanup.json",
+      "title": "cadastre_topology_cleanup",
+      "description": "Pipeline de nettoyage topologique d'une coverage polygonale (cadastre, PLU, ilots RPG, OCS GE). Repare les geometries invalides, aligne les frontieres partagees sur une grille commune, comble les petits gaps, resout les overlaps et retire les slivers. A lancer avant toute analyse stricte.",
+      "domain": "preparation",
+      "tags": [
+        "topologie",
+        "coverage",
+        "cadastre",
+        "plu",
+        "nettoyage",
+        "data_prep"
+      ],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "make_valid",
+        "snap_to_grid",
+        "polygon_snap_borders",
+        "polygon_fix_gaps",
+        "polygon_fix_overlaps",
+        "polygon_remove_slivers",
+        "topology_check",
+        "area_length"
+      ],
+      "step_count": 8,
+      "steps": [
+        "repare_geoms (make_valid)",
+        "snap_precision (snap_to_grid)",
+        "align_borders (polygon_snap_borders)",
+        "fix_gaps (polygon_fix_gaps)",
+        "fix_overlaps (polygon_fix_overlaps)",
+        "remove_slivers (polygon_remove_slivers)",
+        "issues_report (topology_check)",
+        "surfaces_finales (area_length)"
+      ],
+      "size_bytes": 2595
+    },
+    {
+      "slug": "energie_solaire_toiture",
+      "file": "energie_solaire_toiture.json",
+      "title": "energie_solaire_toiture",
+      "description": "Estimation du potentiel solaire photovoltaique des toitures — statistiques zonales d'irradiation raster PVGIS sur emprises bati, filtrage par orientation/pente, calcul de puissance et production annuelles.",
+      "domain": "energie",
+      "tags": [
+        "solaire",
+        "pv",
+        "toiture",
+        "bdnb",
+        "lidar"
+      ],
+      "requires_pro": true,
+      "requires_plugins": [
+        "gispulse-cap-raster-extras"
+      ],
+      "version": 2,
+      "capabilities": [
+        "reproject",
+        "area_length",
+        "filter",
+        "zonal_stats",
+        "calculate",
+        "spatial_join"
+      ],
+      "step_count": 12,
+      "steps": [
+        "bati_reproj (reproject)",
+        "surface_toiture (area_length)",
+        "filter_batiments_significatifs (filter)",
+        "zonal_irradiation (zonal_stats)",
+        "zonal_pente (zonal_stats)",
+        "zonal_orientation (zonal_stats)",
+        "filter_toitures_eligibles (filter)",
+        "surface_utile (calculate)",
+        "puissance_installable (calculate)",
+        "production_annuelle (calculate)",
+        "flag_abf (spatial_join)",
+        "contrainte_patrimoniale (calculate)"
+      ],
+      "size_bytes": 3923
+    },
+    {
+      "slug": "environmental_monitoring",
+      "file": "environmental_monitoring.json",
+      "title": "environmental_monitoring",
+      "description": "",
+      "domain": "environmental",
+      "tags": [],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 1,
+      "capabilities": [
+        "stac_import",
+        "raster_calculate",
+        "zonal_stats",
+        "calculate",
+        "filter"
+      ],
+      "step_count": 6,
+      "steps": [
+        "import_satellite_stac",
+        "calcul_ndvi",
+        "zonal_stats_parcelles",
+        "detection_changement",
+        "classification_changement",
+        "export_rapport_monitoring"
+      ],
+      "size_bytes": 2572
+    },
+    {
+      "slug": "environnement_iota_loi_eau",
+      "file": "environnement_iota_loi_eau.json",
+      "title": "environnement_iota_loi_eau",
+      "description": "Pre-diagnostic IOTA (Installations, Ouvrages, Travaux, Activites) loi sur l'eau — analyse d'impact d'un projet sur les zones humides, cours d'eau et masses d'eau DCE pour determiner le regime (declaration/autorisation).",
+      "domain": "environnement",
+      "tags": [
+        "iota",
+        "loi-eau",
+        "zones-humides",
+        "dce",
+        "sage"
+      ],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "reproject",
+        "area_length",
+        "clip",
+        "calculate",
+        "buffer",
+        "intersects",
+        "spatial_join"
+      ],
+      "step_count": 11,
+      "steps": [
+        "projet_reproj (reproject)",
+        "projet_surface (area_length)",
+        "zh_impactees (clip)",
+        "surface_zh_impactee (area_length)",
+        "regime_zh (calculate)",
+        "bande_rivulaire (buffer)",
+        "projet_en_bande (intersects)",
+        "masses_eau_impactees (spatial_join)",
+        "sage_applicable (spatial_join)",
+        "evaluation_natura (spatial_join)",
+        "niveau_procedure (calculate)"
+      ],
+      "size_bytes": 3475
+    },
+    {
+      "slug": "environnement_tvb_ruptures",
+      "file": "environnement_tvb_ruptures.json",
+      "title": "environnement_tvb_ruptures",
+      "description": "Trame Verte et Bleue — identification des reservoirs de biodiversite (ZNIEFF/Natura 2000), generation de corridors potentiels par buffer, detection des ruptures par les infrastructures routieres/ferroviaires.",
+      "domain": "environnement",
+      "tags": [
+        "tvb",
+        "biodiversite",
+        "znieff",
+        "natura2000",
+        "corridors"
+      ],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "union",
+        "filter",
+        "dissolve",
+        "buffer",
+        "intersects",
+        "area_length",
+        "spatial_aggregate",
+        "calculate",
+        "connectivity_check"
+      ],
+      "step_count": 11,
+      "steps": [
+        "reservoirs_base (union)",
+        "reservoirs_naturels (filter)",
+        "reservoirs_dissolve (dissolve)",
+        "corridors_potentiels (buffer)",
+        "obstacles_routiers (filter)",
+        "buffer_routes (buffer)",
+        "ruptures_routieres (intersects)",
+        "longueur_ruptures (area_length)",
+        "score_fragmentation (spatial_aggregate)",
+        "priorite_restauration (calculate)",
+        "connectivite_reseau (connectivity_check)"
+      ],
+      "size_bytes": 3276
+    },
+    {
+      "slug": "foncier_dvf_marche",
+      "file": "foncier_dvf_marche.json",
+      "title": "foncier_dvf_marche",
+      "description": "",
+      "domain": "foncier",
+      "tags": [],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 1,
+      "capabilities": [
+        "filter",
+        "calculate",
+        "spatial_join",
+        "spatial_aggregate"
+      ],
+      "step_count": 7,
+      "steps": [
+        "filter_ventes_recentes",
+        "filter_biens_batis",
+        "prix_m2",
+        "filter_outliers",
+        "join_iris",
+        "agreger_par_iris",
+        "tension_marche"
+      ],
+      "size_bytes": 2747
+    },
+    {
+      "slug": "foncier_parcelles_vacantes",
+      "file": "foncier_parcelles_vacantes.json",
+      "title": "foncier_parcelles_vacantes",
+      "description": "Detection des parcelles vacantes / friches urbaines mobilisables pour renaturation ZAN ou operations d'amenagement — croisement cadastre x fichiers fonciers x PLU x DVF.",
+      "domain": "foncier",
+      "tags": [
+        "friches",
+        "foncier",
+        "zan",
+        "cadastre",
+        "dvf"
+      ],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "spatial_join",
+        "filter",
+        "area_length",
+        "calculate"
+      ],
+      "step_count": 10,
+      "steps": [
+        "parcelles_enrichies (spatial_join)",
+        "parcelles_vacantes (filter)",
+        "en_zones_constructibles (spatial_join)",
+        "surface_calcul (area_length)",
+        "filter_parcelles_utiles (filter)",
+        "join_mutations (spatial_join)",
+        "est_en_zone_enjeu (spatial_join)",
+        "proprio_publique (calculate)",
+        "potentiel_constructible (calculate)",
+        "score_priorite (calculate)"
+      ],
+      "size_bytes": 3686
+    },
+    {
+      "slug": "ftth_demande_hotspots",
+      "file": "ftth_demande_hotspots.json",
+      "title": "ftth_demande_hotspots",
+      "description": "Detection des hotspots de demande FTTH / marche adressable par clustering density-based (HDBSCAN) sur les prises eligibles. Dessine une enveloppe concave par grappe et agrege la demande + distance au NRO le plus proche, pour prioriser les zones de deploiement.",
+      "domain": "ftth",
+      "tags": [
+        "ftth",
+        "clustering",
+        "hdbscan",
+        "hotspots",
+        "demande",
+        "marche_adressable"
+      ],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "filter",
+        "cluster_hdbscan",
+        "nearest_neighbor",
+        "concave_hull",
+        "area_length",
+        "spatial_aggregate",
+        "spatial_join",
+        "calculate"
+      ],
+      "step_count": 9,
+      "steps": [
+        "prises_eligibles (filter)",
+        "clusters (cluster_hdbscan)",
+        "prises_grappes (filter)",
+        "distance_nro (nearest_neighbor)",
+        "enveloppe_grappes (concave_hull)",
+        "surface_grappes (area_length)",
+        "stats_grappes (spatial_aggregate)",
+        "rattache_commune (spatial_join)",
+        "priorite_hotspot (calculate)"
+      ],
+      "size_bytes": 3515
+    },
+    {
+      "slug": "ftth_network_analysis",
+      "file": "ftth_network_analysis.json",
+      "title": "ftth_network_analysis",
+      "description": "",
+      "domain": "ftth",
+      "tags": [],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 1,
+      "capabilities": [
+        "filter",
+        "network_check",
+        "buffer",
+        "spatial_aggregate",
+        "calculate"
+      ],
+      "step_count": 5,
+      "steps": [
+        "import_reseau_fibre",
+        "connectivity_check",
+        "calcul_zones_couverture",
+        "spatial_aggregate_par_nro",
+        "calcul_taux_couverture"
+      ],
+      "size_bytes": 2176
+    },
+    {
+      "slug": "mobilite_accessibilite_services",
+      "file": "mobilite_accessibilite_services.json",
+      "title": "mobilite_accessibilite_services",
+      "description": "Accessibilite aux services — isochrones 15/30 min en voiture depuis des points d'interet (gares, centres-bourgs), croisement avec population INSEE pour calcul du taux de couverture et identification des zones blanches.",
+      "domain": "mobilite",
+      "tags": [
+        "isochrone",
+        "accessibilite",
+        "insee",
+        "gtfs",
+        "services"
+      ],
+      "requires_pro": true,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "reproject",
+        "isochrone",
+        "spatial_join",
+        "spatial_aggregate",
+        "filter",
+        "calculate"
+      ],
+      "step_count": 9,
+      "steps": [
+        "reprojection_reseau (reproject)",
+        "isochrones_15min (isochrone)",
+        "isochrones_30min (isochrone)",
+        "pop_15min (spatial_join)",
+        "pop_couverte_15 (spatial_aggregate)",
+        "services_accessibles (filter)",
+        "services_par_isochrone (spatial_aggregate)",
+        "zones_blanches (filter)",
+        "score_accessibilite (calculate)"
+      ],
+      "size_bytes": 3476
+    },
+    {
+      "slug": "reseau_topology_prep",
+      "file": "reseau_topology_prep.json",
+      "title": "reseau_topology_prep",
+      "description": "Preparation d'un graphe lineaire propre (FTTH, routes, hydro, reseau electrique) avant analyse reseau (shortest_path, isochrone, connectivity_check). Rapproche les endpoints, prolonge les dangles, noude au niveau des intersections, retire duplicats et pseudo-nodes.",
+      "domain": "preparation",
+      "tags": [
+        "topologie",
+        "reseau",
+        "graphe",
+        "ftth",
+        "routes",
+        "data_prep"
+      ],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "make_valid",
+        "network_snap_endpoints",
+        "network_extend_dangles",
+        "network_node_lines",
+        "network_remove_duplicates",
+        "connectivity_check",
+        "network_remove_pseudo_nodes",
+        "area_length"
+      ],
+      "step_count": 8,
+      "steps": [
+        "repare_geoms (make_valid)",
+        "snap_endpoints (network_snap_endpoints)",
+        "extend_dangles (network_extend_dangles)",
+        "node_intersections (network_node_lines)",
+        "dedup_edges (network_remove_duplicates)",
+        "connectivite_avant_merge (connectivity_check)",
+        "minimal_graph (network_remove_pseudo_nodes)",
+        "longueurs_finales (area_length)"
+      ],
+      "size_bytes": 2445
+    },
+    {
+      "slug": "retail_huff_chalandise",
+      "file": "retail_huff_chalandise.json",
+      "title": "retail_huff_chalandise",
+      "description": "Modele de Huff de zones de chalandise — isochrones drive-time depuis magasins, calcul des parts de marche par IRIS selon attractivite (surface commerciale / distance^beta) et identification des whitespace.",
+      "domain": "retail_geomarketing",
+      "tags": [
+        "huff",
+        "retail",
+        "chalandise",
+        "geomarketing",
+        "whitespace"
+      ],
+      "requires_pro": true,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "isochrone",
+        "spatial_join",
+        "centroid",
+        "calculate",
+        "spatial_aggregate",
+        "filter"
+      ],
+      "step_count": 13,
+      "steps": [
+        "iso_5min (isochrone)",
+        "iso_10min (isochrone)",
+        "iso_20min (isochrone)",
+        "iris_enrichis (spatial_join)",
+        "iris_dans_20min (spatial_join)",
+        "centroide_iris (centroid)",
+        "distance_iris_magasin (calculate)",
+        "attractivite_huff (calculate)",
+        "total_attractivite_iris (spatial_aggregate)",
+        "part_marche (calculate)",
+        "ca_potentiel (calculate)",
+        "whitespace (filter)"
+      ],
+      "size_bytes": 4731
+    },
+    {
+      "slug": "risques_ppri_exposition",
+      "file": "risques_ppri_exposition.json",
+      "title": "risques_ppri_exposition",
+      "description": "Diagnostic d'exposition au risque inondation — croisement du bati et de la population avec les zonages PPRI (rouge/bleu), calcul du nombre de logements, habitants et etablissements sensibles exposes.",
+      "domain": "risques_naturels",
+      "tags": [
+        "ppri",
+        "inondation",
+        "georisques",
+        "vulnerabilite"
+      ],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "reproject",
+        "filter",
+        "spatial_join",
+        "area_length",
+        "spatial_aggregate",
+        "calculate"
+      ],
+      "step_count": 10,
+      "steps": [
+        "reprojection (reproject)",
+        "zones_reglementaires (filter)",
+        "bati_expose (spatial_join)",
+        "surface_bati (area_length)",
+        "logements_exposes (filter)",
+        "parcelles_exposees (spatial_join)",
+        "pop_exposee (spatial_join)",
+        "pop_par_zone (spatial_aggregate)",
+        "erp_en_zone (filter)",
+        "vulnerabilite_composite (calculate)"
+      ],
+      "size_bytes": 4239
+    },
+    {
+      "slug": "sante_apl_deserts",
+      "file": "sante_apl_deserts.json",
+      "title": "sante_apl_deserts",
+      "description": "Calcul de l'Accessibilite Potentielle Localisee (APL) medecins generalistes a l'echelle communale — methode DREES adaptee : offre ETP ponderee / demande populationnelle dans isochrone 20 min, identification des deserts medicaux.",
+      "domain": "sante",
+      "tags": [
+        "apl",
+        "sante",
+        "desert-medical",
+        "rpps",
+        "ars"
+      ],
+      "requires_pro": true,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "filter",
+        "isochrone",
+        "spatial_join",
+        "spatial_aggregate",
+        "calculate"
+      ],
+      "step_count": 10,
+      "steps": [
+        "medecins_actifs (filter)",
+        "isochrone_20min (isochrone)",
+        "iris_en_isochrone (spatial_join)",
+        "apl_iris (spatial_aggregate)",
+        "calc_apl (calculate)",
+        "classif_desert (calculate)",
+        "join_precarite (spatial_join)",
+        "double_peine (calculate)",
+        "synthese_commune (spatial_join)",
+        "agreg_commune (spatial_aggregate)"
+      ],
+      "size_bytes": 4150
+    },
+    {
+      "slug": "securite_sdis_couverture",
+      "file": "securite_sdis_couverture.json",
+      "title": "securite_sdis_couverture",
+      "description": "Analyse SDACR de couverture operationnelle SDIS — generation d'isochrones 10/20/30 min depuis les centres de secours, croisement avec la population INSEE et identification des zones blanches.",
+      "domain": "securite_civile",
+      "tags": [
+        "sdis",
+        "sdacr",
+        "isochrone",
+        "secours",
+        "insee"
+      ],
+      "requires_pro": true,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "reproject",
+        "isochrone",
+        "filter",
+        "spatial_aggregate",
+        "spatial_join",
+        "calculate"
+      ],
+      "step_count": 10,
+      "steps": [
+        "reseau_reproj (reproject)",
+        "iso_c1_10min (isochrone)",
+        "iso_c2_20min (isochrone)",
+        "iso_limite_30min (isochrone)",
+        "pop_c1 (filter)",
+        "pop_c1_agregat (spatial_aggregate)",
+        "zones_blanches (filter)",
+        "erp_hors_couverture (filter)",
+        "routes_inondables (spatial_join)",
+        "criticite_couverture (calculate)"
+      ],
+      "size_bytes": 3526
+    },
+    {
+      "slug": "securite_sdis_thiessen",
+      "file": "securite_sdis_thiessen.json",
+      "title": "securite_sdis_thiessen",
+      "description": "Zones de premier appel (Thiessen/Voronoi) autour des Centres d'Incendie et de Secours (CIS). Decoupe le departement par CIS geographiquement le plus proche, croise avec la population INSEE et les ERP sensibles pour dimensionner les ressources. Complement theorique aux isochrones reseau (SDACR).",
+      "domain": "securite_civile",
+      "tags": [
+        "sdis",
+        "sdacr",
+        "voronoi",
+        "thiessen",
+        "secours",
+        "couverture"
+      ],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "filter",
+        "voronoi_polygons",
+        "clip",
+        "spatial_join",
+        "area_length",
+        "spatial_aggregate",
+        "calculate"
+      ],
+      "step_count": 10,
+      "steps": [
+        "cis_points (filter)",
+        "zones_thiessen (voronoi_polygons)",
+        "decoupe_departement (clip)",
+        "rattache_cis (spatial_join)",
+        "surface_zone (area_length)",
+        "pop_par_zone (spatial_aggregate)",
+        "zones_enrichies (spatial_join)",
+        "nb_erp_sensibles (spatial_aggregate)",
+        "charge_par_cis (calculate)",
+        "tension_effectif (calculate)"
+      ],
+      "size_bytes": 3708
+    },
+    {
+      "slug": "urbanisme_permis_conformite",
+      "file": "urbanisme_permis_conformite.json",
+      "title": "urbanisme_permis_conformite",
+      "description": "Instruction rapide d'un permis de construire — croisement de la parcelle du petitionnaire avec le zonage PLU applicable, les servitudes, les risques et les perimetres ABF pour fiche d'analyse automatique.",
+      "domain": "urbanisme",
+      "tags": [
+        "permis",
+        "pc",
+        "instruction",
+        "plu",
+        "servitudes"
+      ],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "reproject",
+        "area_length",
+        "spatial_join",
+        "calculate"
+      ],
+      "step_count": 11,
+      "steps": [
+        "parcelle_reproj (reproject)",
+        "surface_parcelle (area_length)",
+        "zonage_applicable (spatial_join)",
+        "servitudes_actives (spatial_join)",
+        "flag_abf (spatial_join)",
+        "flag_risques (spatial_join)",
+        "flag_natura (spatial_join)",
+        "ces_max (calculate)",
+        "emprise_max (calculate)",
+        "niveau_complexite (calculate)",
+        "synthese_fiche (calculate)"
+      ],
+      "size_bytes": 3863
+    },
+    {
+      "slug": "urbanisme_zan_bilan",
+      "file": "urbanisme_zan_bilan.json",
+      "title": "urbanisme_zan_bilan",
+      "description": "Bilan ZAN (Zero Artificialisation Nette) d'une commune — calcul du solde entre surfaces artificialisees et renaturees entre deux millesimes OCS GE, ventile par grande categorie.",
+      "domain": "urbanisme",
+      "tags": [
+        "zan",
+        "plu",
+        "ocs-ge",
+        "loi-climat",
+        "artificialisation"
+      ],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "clip",
+        "filter",
+        "area_length",
+        "spatial_aggregate",
+        "calculate",
+        "spatial_join"
+      ],
+      "step_count": 11,
+      "steps": [
+        "clip_t1 (clip)",
+        "clip_t2 (clip)",
+        "artif_t1 (filter)",
+        "artif_t2 (filter)",
+        "surface_t1 (area_length)",
+        "surface_t2 (area_length)",
+        "agg_t2_par_categorie (spatial_aggregate)",
+        "ratio_artif (calculate)",
+        "solde_zan (calculate)",
+        "join_iris (spatial_join)",
+        "trajectoire_2031 (calculate)"
+      ],
+      "size_bytes": 3267
+    },
+    {
+      "slug": "validation_plu_cnig",
+      "file": "validation_plu_cnig.json",
+      "title": "validation_plu_cnig",
+      "description": "",
+      "domain": "validation",
+      "tags": [],
+      "requires_pro": false,
+      "requires_plugins": [],
+      "version": 1,
+      "capabilities": [
+        "topology_check",
+        "attribute_validation",
+        "filter",
+        "completeness_check",
+        "calculate"
+      ],
+      "step_count": 5,
+      "steps": [
+        "check_geometries",
+        "validate_attributes_obligatoires",
+        "check_zones_cnig",
+        "check_completeness",
+        "export_rapport_validation"
+      ],
+      "size_bytes": 2114
+    }
+  ]
+}

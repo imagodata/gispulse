@@ -1,0 +1,16 @@
+[
+  {
+    "name": "filter_large_parcels",
+    "description": "Keep only parcels larger than 5 hectares",
+    "capability": "filter",
+    "config": { "expression": "area_ha > 5", "order": 0 },
+    "enabled": true
+  },
+  {
+    "name": "reproject_lambert93",
+    "description": "Reproject to Lambert-93 (France)",
+    "capability": "reproject",
+    "config": { "target_crs": "EPSG:2154", "order": 1 },
+    "enabled": true
+  }
+]

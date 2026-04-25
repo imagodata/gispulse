@@ -1,0 +1,116 @@
+{
+  "version": 2,
+  "name": "environnement_iota_loi_eau",
+  "description": "Pre-diagnostic IOTA (Installations, Ouvrages, Travaux, Activites) loi sur l'eau — analyse d'impact d'un projet sur les zones humides, cours d'eau et masses d'eau DCE pour determiner le regime (declaration/autorisation).",
+  "domain": "environnement",
+  "author": "GISPulse",
+  "tags": ["iota", "loi-eau", "zones-humides", "dce", "sage"],
+  "ref_layers": {
+    "projet": "data/emprise_projet.gpkg",
+    "zones_humides": "data/zones_humides_inpn.gpkg",
+    "cours_eau": "data/bd_topage_cours_eau.gpkg",
+    "masses_eau_dce": "data/masses_eau_dce.gpkg",
+    "sage": "data/sage_perimetres.gpkg",
+    "natura2000": "data/natura2000.gpkg"
+  },
+  "steps": [
+    {
+      "id": "projet_reproj",
+      "type": "capability",
+      "capability": "reproject",
+      "params": { "target_crs": "EPSG:2154" },
+      "input": "projet"
+    },
+    {
+      "id": "projet_surface",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "projet_reproj"
+    },
+    {
+      "id": "zh_impactees",
+      "type": "capability",
+      "capability": "clip",
+      "params": { "ref_layer": "zones_humides" },
+      "input": "projet_surface"
+    },
+    {
+      "id": "surface_zh_impactee",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "zh_impactees"
+    },
+    {
+      "id": "regime_zh",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'AUTORISATION' if area_m2 > 10000 else ('DECLARATION' if area_m2 > 1000 else 'NON_SOUMIS')",
+        "output_field": "regime_rubrique_3310"
+      },
+      "input": "surface_zh_impactee"
+    },
+    {
+      "id": "bande_rivulaire",
+      "type": "capability",
+      "capability": "buffer",
+      "params": { "distance": 200, "crs_meters": "EPSG:2154" },
+      "input": "cours_eau"
+    },
+    {
+      "id": "projet_en_bande",
+      "type": "capability",
+      "capability": "intersects",
+      "params": { "ref_layer": "bande_rivulaire" },
+      "input": "projet_surface"
+    },
+    {
+      "id": "masses_eau_impactees",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "masses_eau_dce",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["CODE_ME", "ETAT_ECOL", "OBJ_2027"]
+      },
+      "input": "projet_surface"
+    },
+    {
+      "id": "sage_applicable",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "sage",
+        "predicate": "within",
+        "how": "left",
+        "columns": ["NOM_SAGE", "DATE_APPROB"]
+      },
+      "input": "masses_eau_impactees"
+    },
+    {
+      "id": "evaluation_natura",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "natura2000",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["SITECODE", "SITENAME", "SITETYPE"]
+      },
+      "input": "sage_applicable"
+    },
+    {
+      "id": "niveau_procedure",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'AUTORISATION_ENVIRONNEMENTALE' if regime_rubrique_3310 == 'AUTORISATION' or SITECODE is not None else ('DECLARATION' if regime_rubrique_3310 == 'DECLARATION' else 'NON_SOUMIS')",
+        "output_field": "procedure_finale"
+      },
+      "input": "evaluation_natura"
+    }
+  ]
+}

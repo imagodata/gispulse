@@ -1,0 +1,114 @@
+{
+  "version": 2,
+  "name": "real_estate_price_map",
+  "description": "Versailles €/m² map from DVF (Etalab) mutations: keep residential sales, compute price_per_m2, drop outliers, classify into quintiles with a YlOrRd color ramp. Then tile the area with a regular 50 m × 50 m fishnet, aggregate the mean price per m² per tile (spatial_aggregate, predicate=contains), and paint the YlOrRd choropleth as a high-resolution heatmap.",
+  "ref_layers": {
+    "dvf_ventes": "dvf_ventes"
+  },
+  "steps": [
+    {
+      "id": "filter_residential_sales",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "expression": "nature_mutation == 'Vente' and type_local in ['Maison', 'Appartement']"
+      }
+    },
+    {
+      "id": "compute_price_per_m2",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expressions": {
+          "price_per_m2": "valeur_fonciere / surface_reelle_bati"
+        }
+      },
+      "input": "filter_residential_sales"
+    },
+    {
+      "id": "drop_price_outliers",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "expression": "price_per_m2 >= 1500 and price_per_m2 <= 25000"
+      },
+      "input": "compute_price_per_m2"
+    },
+    {
+      "id": "classify_price_quintiles",
+      "type": "capability",
+      "capability": "classify",
+      "params": {
+        "field": "price_per_m2",
+        "method": "quantile",
+        "bins": 5,
+        "class_col": "price_class",
+        "color_col": "price_color",
+        "palette": [
+          "#ffffb2",
+          "#fecc5c",
+          "#fd8d3c",
+          "#f03b20",
+          "#bd0026"
+        ]
+      },
+      "input": "drop_price_outliers"
+    },
+    {
+      "id": "create_price_grid",
+      "type": "capability",
+      "capability": "grid_create",
+      "params": {
+        "ref_layer": "drop_price_outliers",
+        "cell_size": 50,
+        "crs_meters": "EPSG:2154",
+        "clip_to_extent": true
+      },
+      "input": "drop_price_outliers"
+    },
+    {
+      "id": "aggregate_price_to_grid",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "ref_layer": "drop_price_outliers",
+        "predicate": "contains",
+        "agg": {
+          "mean_price_per_m2": ["price_per_m2", "mean"],
+          "max_price_per_m2": ["price_per_m2", "max"],
+          "tx_count": ["price_per_m2", "count"]
+        }
+      },
+      "input": "create_price_grid"
+    },
+    {
+      "id": "keep_cells_with_sales",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "expression": "tx_count > 0"
+      },
+      "input": "aggregate_price_to_grid"
+    },
+    {
+      "id": "classify_grid_choropleth",
+      "type": "capability",
+      "capability": "classify",
+      "params": {
+        "field": "mean_price_per_m2",
+        "method": "quantile",
+        "bins": 5,
+        "class_col": "tile_class",
+        "color_col": "tile_color",
+        "palette": [
+          "#ffffb2",
+          "#fecc5c",
+          "#fd8d3c",
+          "#f03b20",
+          "#bd0026"
+        ]
+      },
+      "input": "keep_cells_with_sales"
+    }
+  ]
+}

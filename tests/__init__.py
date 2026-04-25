@@ -1,0 +1,1 @@
+"""GISPulse test suite."""

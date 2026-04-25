@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gispulse-cap-osm-import"
+version = "0.9.4"
+description = "Import and synchronize OpenStreetMap data with tag-based filtering"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "osm-community" }]
+dependencies = [
+    "geopandas>=0.14",
+    "shapely>=2.0",
+    "requests>=2.28",
+]
+
+[project.entry-points."gispulse.capabilities"]
+osm_import = "gispulse_cap_osm_import:register"

@@ -1,0 +1,9 @@
+[
+  {
+    "name": "buffer_30m",
+    "description": "Apply a 30m buffer around all parcels",
+    "capability": "buffer",
+    "config": { "distance": 30 },
+    "enabled": true
+  }
+]

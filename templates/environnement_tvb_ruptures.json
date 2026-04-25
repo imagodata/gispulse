@@ -1,0 +1,108 @@
+{
+  "version": 2,
+  "name": "environnement_tvb_ruptures",
+  "description": "Trame Verte et Bleue — identification des reservoirs de biodiversite (ZNIEFF/Natura 2000), generation de corridors potentiels par buffer, detection des ruptures par les infrastructures routieres/ferroviaires.",
+  "domain": "environnement",
+  "author": "GISPulse",
+  "tags": ["tvb", "biodiversite", "znieff", "natura2000", "corridors"],
+  "ref_layers": {
+    "znieff1": "data/znieff_type1.gpkg",
+    "znieff2": "data/znieff_type2.gpkg",
+    "natura2000": "data/natura2000.gpkg",
+    "ocs_ge": "data/ocs_ge.gpkg",
+    "routes": "data/bd_topo_routes.gpkg",
+    "voies_ferrees": "data/bd_topo_voies_ferrees.gpkg"
+  },
+  "steps": [
+    {
+      "id": "reservoirs_base",
+      "type": "capability",
+      "capability": "union",
+      "params": {},
+      "input": "znieff1"
+    },
+    {
+      "id": "reservoirs_naturels",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "CS_CODE in ['CS2.1.1', 'CS2.1.2', 'CS2.1.3', 'CS2.2.1']" },
+      "input": "ocs_ge"
+    },
+    {
+      "id": "reservoirs_dissolve",
+      "type": "capability",
+      "capability": "dissolve",
+      "params": { "by": "CS_CODE" },
+      "input": "reservoirs_naturels"
+    },
+    {
+      "id": "corridors_potentiels",
+      "type": "capability",
+      "capability": "buffer",
+      "params": { "distance": 300, "crs_meters": "EPSG:2154" },
+      "input": "reservoirs_dissolve"
+    },
+    {
+      "id": "obstacles_routiers",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "NATURE in ['Autoroute', 'Route a 2 chaussees', 'Quasi-autoroute']" },
+      "input": "routes"
+    },
+    {
+      "id": "buffer_routes",
+      "type": "capability",
+      "capability": "buffer",
+      "params": { "distance": 15, "crs_meters": "EPSG:2154" },
+      "input": "obstacles_routiers"
+    },
+    {
+      "id": "ruptures_routieres",
+      "type": "capability",
+      "capability": "intersects",
+      "params": { "ref_layer": "corridors_potentiels" },
+      "input": "buffer_routes"
+    },
+    {
+      "id": "longueur_ruptures",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "ruptures_routieres"
+    },
+    {
+      "id": "score_fragmentation",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "group_by_field": "NATURE",
+        "aggregations": {
+          "longueur_rupture_m": { "field": "length_m", "func": "sum" },
+          "nb_segments":        { "field": "NATURE",   "func": "count" }
+        }
+      },
+      "input": "longueur_ruptures"
+    },
+    {
+      "id": "priorite_restauration",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'PRIORITE_1' if longueur_rupture_m > 500 else ('PRIORITE_2' if longueur_rupture_m > 100 else 'PRIORITE_3')",
+        "output_field": "priorite_tvb"
+      },
+      "input": "score_fragmentation"
+    },
+    {
+      "id": "connectivite_reseau",
+      "type": "capability",
+      "capability": "connectivity_check",
+      "params": {
+        "tolerance": 1.0,
+        "check_dangling": true,
+        "check_isolated": true
+      },
+      "input": "corridors_potentiels"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "type": "FeatureCollection",
+  "name": "parcels",
+  "crs": {
+    "type": "name",
+    "properties": { "name": "urn:ogc:def:crs:EPSG::4326" }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "id": 1, "name": "Parc Central", "area_ha": 12.5, "zone": "green", "owner": "Commune" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[2.3488, 48.8534], [2.3520, 48.8534], [2.3520, 48.8560], [2.3488, 48.8560], [2.3488, 48.8534]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": 2, "name": "Zone Industrielle Nord", "area_ha": 45.0, "zone": "industrial", "owner": "Prive" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[2.3550, 48.8600], [2.3620, 48.8600], [2.3620, 48.8650], [2.3550, 48.8650], [2.3550, 48.8600]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": 3, "name": "Lotissement Sud", "area_ha": 3.2, "zone": "residential", "owner": "Commune" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[2.3400, 48.8480], [2.3450, 48.8480], [2.3450, 48.8510], [2.3400, 48.8510], [2.3400, 48.8480]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": 4, "name": "Ferme Bio", "area_ha": 28.7, "zone": "agricultural", "owner": "Prive" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[2.3300, 48.8550], [2.3380, 48.8550], [2.3380, 48.8610], [2.3300, 48.8610], [2.3300, 48.8550]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": 5, "name": "Ecole Maternelle", "area_ha": 0.8, "zone": "public", "owner": "Commune" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[2.3500, 48.8520], [2.3515, 48.8520], [2.3515, 48.8530], [2.3500, 48.8530], [2.3500, 48.8520]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": 6, "name": "Foret Communale", "area_ha": 120.0, "zone": "green", "owner": "Commune" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[2.3100, 48.8400], [2.3300, 48.8400], [2.3300, 48.8500], [2.3100, 48.8500], [2.3100, 48.8400]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": 7, "name": "Centre Commercial", "area_ha": 5.5, "zone": "commercial", "owner": "Prive" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[2.3460, 48.8540], [2.3490, 48.8540], [2.3490, 48.8560], [2.3460, 48.8560], [2.3460, 48.8540]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": 8, "name": "Stade Municipal", "area_ha": 2.1, "zone": "public", "owner": "Commune" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[2.3530, 48.8500], [2.3560, 48.8500], [2.3560, 48.8520], [2.3530, 48.8520], [2.3530, 48.8500]]]
+      }
+    }
+  ]
+}

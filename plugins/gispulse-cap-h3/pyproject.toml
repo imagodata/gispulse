@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gispulse-cap-h3"
+version = "1.0.0"
+description = "Uber H3 hexagonal grid aggregation for point datasets"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "GISPulse", email = "dev@gispulse.io" }]
+dependencies = [
+    "geopandas>=0.14",
+    "shapely>=2.0",
+    "h3>=3.7",
+]
+
+[project.entry-points."gispulse.capabilities"]
+h3_analysis = "gispulse_cap_h3:register"

@@ -1,0 +1,73 @@
+{
+  "version": 2,
+  "name": "park_access_score",
+  "description": "Versailles park accessibility: compute vegetation area (Lambert93), keep only parks >= 1 ha (SCoT IdF urban-park threshold), then for each residential building measure the distance to the nearest park and classify against WHO / SCoT / ADEME walking thresholds (300 m / 600 m / 1000 m).",
+  "ref_layers": {
+    "vegetation": "vegetation",
+    "batiments": "batiments"
+  },
+  "steps": [
+    {
+      "id": "compute_veg_area",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {
+        "area_col": "area_m2",
+        "crs_meters": "EPSG:2154",
+        "compute_length": false
+      }
+    },
+    {
+      "id": "filter_parks_1ha",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "expression": "area_m2 >= 10000"
+      },
+      "input": "compute_veg_area"
+    },
+    {
+      "id": "filter_residential",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "expression": "usage_1 == 'Résidentiel'"
+      },
+      "input": "batiments"
+    },
+    {
+      "id": "nearest_park",
+      "type": "capability",
+      "capability": "nearest_neighbor",
+      "params": {
+        "ref_layer": "filter_parks_1ha",
+        "k": 1,
+        "distance_col": "park_distance_m",
+        "columns": ["cleabs", "nature", "area_m2"],
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "filter_residential"
+    },
+    {
+      "id": "classify_access",
+      "type": "capability",
+      "capability": "classify",
+      "params": {
+        "field": "park_distance_m",
+        "method": "manual",
+        "bins": 4,
+        "breaks": [0, 300, 600, 1000, 99999],
+        "class_col": "access_class",
+        "color_col": "access_color",
+        "palette": ["#1a9850", "#a6d96a", "#fdae61", "#d7191c"]
+      },
+      "input": "nearest_park"
+    }
+  ],
+  "triggers": [
+    {
+      "on": "schedule:0 6 * * 1",
+      "then": "run_pipeline"
+    }
+  ]
+}

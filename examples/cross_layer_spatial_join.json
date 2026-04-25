@@ -1,0 +1,15 @@
+[
+  {
+    "name": "parcels_with_flood_risk",
+    "description": "Join flood risk level to parcels that intersect flood zones",
+    "capability": "spatial_join",
+    "config": {
+      "ref_layer": "flood_zones",
+      "how": "left",
+      "predicate": "intersects",
+      "columns": ["risk_level", "name"],
+      "order": 0
+    },
+    "enabled": true
+  }
+]

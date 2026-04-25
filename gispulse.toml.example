@@ -1,0 +1,67 @@
+# GISPulse Configuration
+# Copy to gispulse.toml and edit.
+# Env vars (GISPULSE_*) always override values in this file.
+
+[engine]
+backend = "duckdb"              # duckdb | postgis | hybrid | gpkg
+tier = "community"              # community | pro | enterprise
+# license_key = ""              # required for pro/enterprise
+
+[database]
+# dsn = "postgresql://gispulse:gispulse@localhost:5432/gispulse"
+gpkg_path = "project.gpkg"
+# postgis_dsn = ""              # for SQL preview / portal queries
+
+[storage]
+mode = "sqlite"                 # sqlite | memory
+# db_path = "~/.gispulse/gispulse.db"
+data_dir = "~/.gispulse/data"
+
+[s3]
+# endpoint = ""                 # set to enable S3 mode (Pro)
+# bucket = "gispulse"
+# access_key = ""
+# secret_key = ""               # prefer env var GISPULSE_S3_SECRET_KEY
+# region = "us-east-1"
+
+[api]
+env = "development"             # development | production
+# api_keys = ""                 # comma-separated; empty = auth disabled
+cors_origins = ""               # comma-separated origins
+rbac = false
+max_upload_mb = 500
+# metrics_token = ""            # Bearer token for /metrics
+# sql_admin_key = ""            # admin key for SQL endpoints
+
+[auth.oidc]
+# issuer = ""                   # e.g. https://auth.example.com/realms/gispulse
+# client_id = ""
+# client_secret = ""            # prefer env var GISPULSE_OIDC_CLIENT_SECRET
+# redirect_uri = ""
+scopes = "openid,profile,email"
+default_role = "editor"
+
+[session]
+# secret = ""                   # prefer env var GISPULSE_SESSION_SECRET
+expiry = 28800                  # 8 hours
+
+[redis]
+# url = ""                      # redis://... enables distributed mode
+# rate_limit_storage = ""       # override for rate limiting backend
+
+[logging]
+level = "INFO"                  # DEBUG | INFO | WARNING | ERROR
+format = "console"              # console | json
+
+[audit]
+enabled = false
+retention_days = 90
+
+[jobs]
+timeout = 3600                  # max job duration in seconds
+duckdb_threshold = 100000       # rows threshold for DuckDB over pandas
+
+[telemetry]
+# enabled = ""                  # "0" or "1" override
+# url = ""                      # custom telemetry endpoint
+no_update_check = false

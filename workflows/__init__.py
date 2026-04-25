@@ -1,0 +1,1 @@
+"""GISPulse workflows — orchestration de templates et capabilities."""

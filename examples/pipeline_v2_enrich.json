@@ -1,0 +1,65 @@
+{
+  "version": 2,
+  "name": "enrich_parcels",
+  "description": "Filter large parcels, buffer them, join flood risk zones, dissolve result",
+
+  "ref_layers": {
+    "flood_zones": "data/flood_zones.gpkg"
+  },
+
+  "steps": [
+    {
+      "id": "filter_large",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "area_m2 > 1000" }
+    },
+    {
+      "id": "buffer_50m",
+      "type": "capability",
+      "capability": "buffer",
+      "params": { "distance": 50 },
+      "input": "filter_large"
+    },
+    {
+      "id": "join_flood_risk",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "flood_zones",
+        "predicate": "intersects",
+        "columns": ["risk_level"]
+      },
+      "input": "buffer_50m",
+      "when": {
+        "type": "attr",
+        "field": "zone_type",
+        "op": "eq",
+        "value": "urban"
+      }
+    },
+    {
+      "id": "dissolve_result",
+      "type": "capability",
+      "capability": "dissolve",
+      "params": { "by": "risk_level" },
+      "input": "join_flood_risk"
+    }
+  ],
+
+  "triggers": [
+    {
+      "on": "dml:parcelles:INSERT,UPDATE",
+      "when": [
+        { "type": "attr", "field": "area_m2", "op": "gt", "value": 500 },
+        { "type": "geom", "op": "intersects", "ref_table": "flood_zones" }
+      ],
+      "then": "run_pipeline"
+    },
+    {
+      "on": "schedule:0 6 * * *",
+      "then": "notify",
+      "then_config": { "channel": "alerts", "message": "Daily parcel enrichment complete" }
+    }
+  ]
+}

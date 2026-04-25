@@ -1,0 +1,71 @@
+# GISPulse — Tier → Features catalog (OSS)
+#
+# This file defines which technical features are available in each tier.
+# It is consumed by `persistence/tier.py` and `core/plugin_hub.py` to enforce
+# feature-locked gating in the AGPL OSS distribution.
+#
+# Pricing (EUR amounts, billing cycles, early-adopter terms) lives in
+# `gispulse-enterprise/config/pricing_commercial.yml` and is NOT part of OSS.
+#
+# Cf. docs/OSS_SPLIT_PLAN.md §2.1 (Feature-locked model).
+
+tiers:
+  community:
+    aliases: [free]
+    features:
+      - core_engine
+      - duckdb
+      - cli
+      - portal_single_user
+      - sdk
+      - qgis_plugin
+      - docker
+    limits:
+      datasets: unlimited_local
+      api_keys: 0
+      users: 1
+      projects: 1
+
+  pro:
+    inherits: community
+    features:
+      - postgis
+      - hybrid
+      - esb_triggers
+      - dag_executor
+      - visual_editor
+      - monitoring
+      - cron_pipelines
+      - raster
+      - network
+    limits:
+      instances: 1
+      api_keys: 5
+      datasets: 50
+      projects: 5
+
+  team:
+    inherits: pro
+    features:
+      - rbac
+      - multi_project
+      - support_48h
+    limits:
+      instances: 2
+      api_keys: 20
+      datasets: unlimited
+      projects: unlimited
+
+  enterprise:
+    inherits: team
+    features:
+      - sso_saml_oidc
+      - clustering
+      - white_label
+      - sla_4h
+      - custom_capabilities
+    limits:
+      instances: unlimited
+      api_keys: unlimited
+      datasets: unlimited
+      projects: unlimited

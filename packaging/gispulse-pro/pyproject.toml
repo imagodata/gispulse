@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gispulse-pro"
+version = "1.0.0"
+description = "GISPulse Pro — PostGIS, RBAC, scheduling, S3, audit logging"
+license = "AGPL-3.0-or-later"
+requires-python = ">=3.10"
+readme = "README.md"
+keywords = ["gis", "geospatial", "postgis", "spatial", "rules-engine"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "gispulse[postgis,api,redis,s3,scheduling]>=1.0.0",
+]
+
+[project.optional-dependencies]
+all = ["gispulse[all]>=1.0.0"]

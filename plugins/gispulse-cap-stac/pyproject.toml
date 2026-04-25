@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gispulse-cap-stac"
+version = "0.5.0"
+description = "Browse and ingest data from STAC catalogs"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "community-geo" }]
+dependencies = [
+    "geopandas>=0.14",
+    "shapely>=2.0",
+    "pystac-client>=0.6",
+]
+
+[project.entry-points."gispulse.capabilities"]
+stac_import = "gispulse_cap_stac:register"

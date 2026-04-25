@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "name": "road_network_filter",
+  "description": "Clermont-Ferrand structural road network: filter by importance (1-2 - motorways + national roads, L111-6 scope). Single step - the playground focuses on the DML setback trigger fired by the user-drawn building.",
+  "ref_layers": {
+    "routes": "routes"
+  },
+  "steps": [
+    {
+      "id": "filter_major_roads",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "expression": "importance in ['1', '2']"
+      }
+    }
+  ]
+}

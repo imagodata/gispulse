@@ -1,0 +1,27 @@
+{
+    "version": "{{VERSION}}",
+    "description": "Modular geospatial engine with business rules, triggers, and dual-mode processing",
+    "homepage": "https://github.com/imagodata/gispulse",
+    "license": "AGPL-3.0-or-later",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/imagodata/gispulse/releases/download/v{{VERSION}}/gispulse-v{{VERSION}}-windows-x86_64.zip",
+            "hash": "{{SHA256_WINDOWS_X86_64}}"
+        }
+    },
+    "bin": "gispulse.exe",
+    "checkver": {
+        "github": "https://github.com/imagodata/gispulse"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/imagodata/gispulse/releases/download/v$version/gispulse-v$version-windows-x86_64.zip"
+            }
+        },
+        "hash": {
+            "url": "$url.sha256"
+        }
+    },
+    "post_install": "Write-Host 'Run \"gispulse doctor\" to verify your environment.' -ForegroundColor Green"
+}

@@ -1,0 +1,52 @@
+{
+  "name": "alert_road_setback_violation",
+  "description": "Fire when a residential building is created within 250 m of a structural road (importance 1-2: motorways + national roads) - urban planning setback rule (Code de l'urbanisme L111-6: 75 m motorway / 25 m main road; demo widens to 250 m so the alert reads at city zoom).",
+  "event": "FEATURE_CREATED",
+  "trigger_type": "DML",
+  "category": "BUSINESS_RULE",
+  "severity": "warning",
+  "conditions": {
+    "table": "batiments",
+    "operations": ["INSERT"]
+  },
+  "predicates": [
+    {
+      "type": "geom",
+      "op": "intersects",
+      "ref_table": "routes",
+      "ref_filter": "importance in ('1', '2')",
+      "buffer_m": 250
+    },
+    {
+      "type": "attr",
+      "field": "usage_1",
+      "op": "eq",
+      "value": "Residentiel"
+    }
+  ],
+  "predicate_logic": "AND",
+  "actions": [
+    {
+      "action_type": "FLAG_FEATURE",
+      "config": {
+        "field": "_safety_alert",
+        "value": "ROAD_SETBACK_VIOLATION"
+      }
+    },
+    {
+      "action_type": "LOG_EVENT",
+      "config": {
+        "message": "Residential building within 250 m of a structural road (importance 1-2) - check L111-6 setback rule",
+        "level": "warning"
+      }
+    },
+    {
+      "action_type": "NOTIFY",
+      "config": {
+        "message": "ALERT URBA: nouveau bati residentiel a moins de 250 m d'un axe structurant (autoroute ou nationale) a Clermont-Ferrand. Verifier recul reglementaire (Code urba L111-6).",
+        "channel": "urbanisme"
+      }
+    }
+  ],
+  "enabled": true
+}

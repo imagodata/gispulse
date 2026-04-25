@@ -1,0 +1,9 @@
+[
+  {
+    "name": "clip_parcels_to_flood",
+    "description": "Clip parcels to the flood zone boundaries",
+    "capability": "clip",
+    "config": { "ref_layer": "flood_zones", "order": 0 },
+    "enabled": true
+  }
+]

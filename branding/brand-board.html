@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GISPulse — Brand Board</title>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Rubik', system-ui, sans-serif;
+    background: #fafafa;
+    color: #212121;
+    line-height: 1.6;
+  }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+
+  h1 {
+    font-size: 2.5rem;
+    font-weight: 800;
+    text-align: center;
+    margin: 3rem 0 0.5rem;
+    color: #212121;
+  }
+
+  .subtitle {
+    text-align: center;
+    color: #757575;
+    font-size: 1rem;
+    margin-bottom: 4rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 3rem 0 1.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid #E0E0E0;
+    color: #212121;
+  }
+
+  h3 {
+    font-weight: 600;
+    margin: 1.5rem 0 1rem;
+    color: #757575;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.85rem;
+  }
+
+  /* ── Color Palettes ──────────────────────────────── */
+  .palette-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 2rem;
+  }
+
+  .swatch {
+    width: 110px;
+    height: 85px;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 6px 8px;
+    font-size: 0.65rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    border: 1px solid rgba(0,0,0,0.08);
+    transition: transform 0.2s;
+  }
+
+  .swatch:hover { transform: scale(1.05); }
+  .swatch-label { font-size: 0.6rem; opacity: 0.7; margin-bottom: 2px; }
+  .swatch.light-text { color: #fff; }
+  .swatch.dark-text { color: #212121; }
+
+  /* ── Logo Grid ──────────────────────────────── */
+  .logo-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.5rem;
+  }
+
+  .logo-card {
+    border: 1px solid #E0E0E0;
+    border-radius: 16px;
+    overflow: hidden;
+    transition: box-shadow 0.2s;
+  }
+
+  .logo-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
+
+  .logo-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2.5rem;
+    min-height: 200px;
+  }
+
+  .logo-preview.bg-light { background: #ffffff; }
+  .logo-preview.bg-dark { background: #1a1a1a; }
+  .logo-preview.bg-grid {
+    background: #ffffff;
+    background-image:
+      linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  .logo-info {
+    padding: 1rem 1.25rem;
+    background: #f5f5f5;
+    border-top: 1px solid #E0E0E0;
+  }
+
+  .logo-info .name { font-weight: 700; font-size: 0.9rem; }
+  .logo-info .desc { font-size: 0.75rem; color: #757575; margin-top: 4px; }
+
+  /* ── Identity Concept ──────────────────────────────── */
+  .concept-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1.5rem;
+  }
+
+  .concept-card {
+    border: 1px solid #E0E0E0;
+    border-radius: 12px;
+    padding: 1.5rem;
+    background: #fff;
+  }
+
+  .concept-card h4 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    color: #212121;
+  }
+
+  .concept-card p {
+    font-size: 0.85rem;
+    color: #616161;
+    line-height: 1.5;
+  }
+
+  .concept-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1rem;
+    font-size: 1.2rem;
+  }
+
+  /* ── Tier badges ──────────────────────────────── */
+  .tier-grid {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+  }
+
+  .tier-card {
+    flex: 1;
+    min-width: 200px;
+    border-radius: 12px;
+    padding: 1.5rem;
+    border: 1px solid #E0E0E0;
+    background: #fff;
+    text-align: center;
+  }
+
+  .tier-badge {
+    display: inline-block;
+    padding: 4px 16px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.75rem;
+  }
+
+  .tier-name { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.25rem; }
+  .tier-price { font-size: 0.85rem; color: #757575; }
+
+  /* ── Mockup ──────────────────────────────── */
+  .mockup-frame {
+    border: 1px solid #E0E0E0;
+    border-radius: 16px;
+    overflow: hidden;
+    margin: 1.5rem 0;
+  }
+
+  .mockup-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 14px;
+    background: #f5f5f5;
+    border-bottom: 1px solid #E0E0E0;
+  }
+
+  .mockup-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .mockup-url {
+    flex: 1;
+    text-align: center;
+    font-size: 0.75rem;
+    color: #9E9E9E;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* ── Typography ──────────────────────────────── */
+  .typo-sample {
+    padding: 1.5rem;
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid #E0E0E0;
+    margin-bottom: 1rem;
+  }
+  .typo-name { font-size: 0.75rem; color: #9E9E9E; margin-bottom: 0.5rem; font-family: 'JetBrains Mono', monospace; }
+
+  /* ── Anatomy ──────────────────────────────── */
+  .anatomy-legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+  .anatomy-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: #616161;
+  }
+  .anatomy-dot {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    border: 1px solid rgba(0,0,0,0.1);
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+<h1>GISPulse Brand Board</h1>
+<p class="subtitle">Identite visuelle — Grille spatiale, donnees vivantes, electrons colores</p>
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2>1. Concept — Anatomie du logo</h2>
+
+<p style="color:#616161; margin-bottom:1.5rem;">Le logo represente une grille spatiale vivante : 4 noeuds d'ancrage (les datasets), un hub central pulsant (le moteur GISPulse), des connexions (les pipelines), et 4 electrons colores en orbite (les traitements en cours). Les particules de donnees circulent sur les aretes.</p>
+
+<div class="concept-grid">
+  <div class="concept-card">
+    <div class="concept-icon" style="background:#f5f5f5;">
+      <svg width="24" height="24"><circle cx="12" cy="12" r="6" fill="#FFFFFF" stroke="#E0E0E0" stroke-width="2"/></svg>
+    </div>
+    <h4>Hub central (blanc)</h4>
+    <p>Le moteur GISPulse. Pulse subtil qui donne vie. Point focal de toutes les connexions.</p>
+  </div>
+  <div class="concept-card">
+    <div class="concept-icon" style="background:#f5f5f5;">
+      <svg width="24" height="24"><circle cx="12" cy="12" r="5" fill="#212121"/></svg>
+    </div>
+    <h4>Noeuds d'ancrage (sombres)</h4>
+    <p>Les 4 datasets/sources de donnees. Positionnement en grille = structure spatiale.</p>
+  </div>
+  <div class="concept-card">
+    <div class="concept-icon" style="background:#f5f5f5;">
+      <svg width="24" height="24"><line x1="4" y1="4" x2="20" y2="20" stroke="#757575" stroke-width="1.5" stroke-dasharray="3,3"/></svg>
+    </div>
+    <h4>Connexions (gris)</h4>
+    <p>Les pipelines et liens entre datasets. Tirets = grille spatiale. Traits pleins = flux de donnees.</p>
+  </div>
+  <div class="concept-card">
+    <div class="concept-icon" style="background:#E3F2FD;">
+      <svg width="24" height="24"><circle cx="6" cy="12" r="4" fill="#0D47A1"/><circle cx="18" cy="8" r="4" fill="#B71C1C"/></svg>
+    </div>
+    <h4>Electrons (colores)</h4>
+    <p>4 traitements en orbite : bleu (analyse), rouge (alertes), orange (triggers), vert (validation).</p>
+  </div>
+  <div class="concept-card">
+    <div class="concept-icon" style="background:#FFF3E0;">
+      <svg width="24" height="24"><circle cx="8" cy="12" r="2" fill="#F57F17"/><circle cx="16" cy="12" r="2" fill="#4CAF50"/></svg>
+    </div>
+    <h4>Particules (micro)</h4>
+    <p>Donnees qui circulent sur les aretes entre noeuds. Apparition/disparition = flux temps reel.</p>
+  </div>
+</div>
+
+<h3>Legende des couleurs</h3>
+<div class="anatomy-legend">
+  <div class="anatomy-item"><div class="anatomy-dot" style="background:#FFFFFF;"></div> Hub central — Moteur</div>
+  <div class="anatomy-item"><div class="anatomy-dot" style="background:#212121;"></div> Noeuds — Datasets</div>
+  <div class="anatomy-item"><div class="anatomy-dot" style="background:#757575;"></div> Connexions — Pipelines</div>
+  <div class="anatomy-item"><div class="anatomy-dot" style="background:#0D47A1;"></div> Bleu — Analyse spatiale</div>
+  <div class="anatomy-item"><div class="anatomy-dot" style="background:#B71C1C;"></div> Rouge — Alertes / Erreurs</div>
+  <div class="anatomy-item"><div class="anatomy-dot" style="background:#F57F17;"></div> Orange — Triggers</div>
+  <div class="anatomy-item"><div class="anatomy-dot" style="background:#4CAF50;"></div> Vert — Validation / Succes</div>
+  <div class="anatomy-item"><div class="anatomy-dot" style="background:#E0E0E0;"></div> Gris clair — Ondes pulse</div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2>2. Palette de couleurs</h2>
+
+<h3>Base neutre</h3>
+<div class="palette-row">
+  <div class="swatch dark-text" style="background:#FFFFFF;">
+    <span class="swatch-label">white</span>
+    #FFFFFF
+  </div>
+  <div class="swatch dark-text" style="background:#FAFAFA;">
+    <span class="swatch-label">bg</span>
+    #FAFAFA
+  </div>
+  <div class="swatch dark-text" style="background:#F5F5F5;">
+    <span class="swatch-label">surface</span>
+    #F5F5F5
+  </div>
+  <div class="swatch dark-text" style="background:#E0E0E0;">
+    <span class="swatch-label">border</span>
+    #E0E0E0
+  </div>
+  <div class="swatch dark-text" style="background:#BDBDBD;">
+    <span class="swatch-label">pulse-2</span>
+    #BDBDBD
+  </div>
+  <div class="swatch dark-text" style="background:#9E9E9E;">
+    <span class="swatch-label">pulse-3</span>
+    #9E9E9E
+  </div>
+  <div class="swatch light-text" style="background:#757575;">
+    <span class="swatch-label">muted</span>
+    #757575
+  </div>
+  <div class="swatch light-text" style="background:#616161;">
+    <span class="swatch-label">secondary</span>
+    #616161
+  </div>
+  <div class="swatch light-text" style="background:#212121;">
+    <span class="swatch-label">nodes</span>
+    #212121
+  </div>
+  <div class="swatch light-text" style="background:#1a1a1a;">
+    <span class="swatch-label">dark-bg</span>
+    #1a1a1a
+  </div>
+</div>
+
+<h3>Electrons — Accents semantiques</h3>
+<div class="palette-row">
+  <div class="swatch light-text" style="background:#0D47A1;">
+    <span class="swatch-label">blue-deep</span>
+    #0D47A1
+  </div>
+  <div class="swatch light-text" style="background:#2196F3;">
+    <span class="swatch-label">blue-glow</span>
+    #2196F3
+  </div>
+  <div class="swatch light-text" style="background:#B71C1C;">
+    <span class="swatch-label">red-deep</span>
+    #B71C1C
+  </div>
+  <div class="swatch light-text" style="background:#F44336;">
+    <span class="swatch-label">red-glow</span>
+    #F44336
+  </div>
+  <div class="swatch light-text" style="background:#F57F17;">
+    <span class="swatch-label">orange</span>
+    #F57F17
+  </div>
+  <div class="swatch dark-text" style="background:#FFC107;">
+    <span class="swatch-label">amber-glow</span>
+    #FFC107
+  </div>
+  <div class="swatch light-text" style="background:#4CAF50;">
+    <span class="swatch-label">green</span>
+    #4CAF50
+  </div>
+  <div class="swatch dark-text" style="background:#FF6F00;">
+    <span class="swatch-label">orange-fav</span>
+    #FF6F00
+  </div>
+</div>
+
+<h3>Usage semantique</h3>
+<div class="palette-row">
+  <div class="swatch light-text" style="background:#0D47A1;">
+    <span class="swatch-label">info / analyse</span>
+    #0D47A1
+  </div>
+  <div class="swatch light-text" style="background:#4CAF50;">
+    <span class="swatch-label">success</span>
+    #4CAF50
+  </div>
+  <div class="swatch light-text" style="background:#F57F17;">
+    <span class="swatch-label">warning</span>
+    #F57F17
+  </div>
+  <div class="swatch light-text" style="background:#B71C1C;">
+    <span class="swatch-label">error</span>
+    #B71C1C
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2>3. Variations de logo</h2>
+
+<div class="logo-grid">
+
+  <!-- Logo icon animated -->
+  <div class="logo-card">
+    <div class="logo-preview bg-grid">
+      <object data="logo-icon.svg" type="image/svg+xml" width="160" height="160" style="pointer-events:none;"></object>
+    </div>
+    <div class="logo-info">
+      <div class="name">logo-icon.svg — Icone animee (fond clair)</div>
+      <div class="desc">Icone principale avec pulse + electrons en orbite + particules. Usage : hero section, landing page, presentations.</div>
+    </div>
+  </div>
+
+  <!-- Logo horizontal -->
+  <div class="logo-card">
+    <div class="logo-preview bg-grid">
+      <object data="gispulse_logo_bold_horizontal.svg" type="image/svg+xml" width="320" height="150" style="pointer-events:none;"></object>
+    </div>
+    <div class="logo-info">
+      <div class="name">gispulse_logo_bold_horizontal.svg — Wordmark horizontal (fond clair)</div>
+      <div class="desc">Logo + texte "GISPulse" Rubik Bold noir. Usage : navbar, header, documentation.</div>
+    </div>
+  </div>
+
+  <!-- Logo vertical -->
+  <div class="logo-card">
+    <div class="logo-preview bg-grid">
+      <object data="gispulse_logo_bold_vertical.svg" type="image/svg+xml" width="220" height="220" style="pointer-events:none;"></object>
+    </div>
+    <div class="logo-info">
+      <div class="name">gispulse_logo_bold_vertical.svg — Wordmark vertical (fond clair)</div>
+      <div class="desc">Logo centre + texte en dessous. Usage : splash screen, app icon, social media.</div>
+    </div>
+  </div>
+
+  <!-- Logo white on dark -->
+  <div class="logo-card">
+    <div class="logo-preview bg-dark">
+      <object data="gispulse_logo_bold_white.svg" type="image/svg+xml" width="320" height="160" style="pointer-events:none;"></object>
+    </div>
+    <div class="logo-info">
+      <div class="name">gispulse_logo_bold_white.svg — Wordmark blanc (fond sombre)</div>
+      <div class="desc">Version dark mode avec glow. Noeuds clairs, electrons lumineux. Usage : dark UI, terminal, presentations sombres.</div>
+    </div>
+  </div>
+
+  <!-- Favicon -->
+  <div class="logo-card">
+    <div class="logo-preview bg-grid" style="gap: 2rem; flex-direction: row;">
+      <div style="text-align:center;">
+        <object data="favicon.svg" type="image/svg+xml" width="64" height="64" style="pointer-events:none;"></object>
+        <div style="font-size:0.65rem; color:#9E9E9E; margin-top:4px;">64px</div>
+      </div>
+      <div style="text-align:center;">
+        <object data="favicon.svg" type="image/svg+xml" width="32" height="32" style="pointer-events:none;"></object>
+        <div style="font-size:0.65rem; color:#9E9E9E; margin-top:4px;">32px</div>
+      </div>
+      <div style="text-align:center;">
+        <object data="favicon.svg" type="image/svg+xml" width="16" height="16" style="pointer-events:none;"></object>
+        <div style="font-size:0.65rem; color:#9E9E9E; margin-top:4px;">16px</div>
+      </div>
+    </div>
+    <div class="logo-info">
+      <div class="name">favicon.svg — Favicon simplifie</div>
+      <div class="desc">Version ultra-simplifiee sans animation. Points plus gros, connexions epaisses. 3 accents : bleu, rouge, orange.</div>
+    </div>
+  </div>
+
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2>4. Typographie</h2>
+
+<div class="typo-sample">
+  <div class="typo-name">Rubik / 700-800 / Headings & Logo</div>
+  <div style="font-size:2.5rem; font-weight:800; letter-spacing:-0.01em; color:#212121;">
+    GISPulse
+  </div>
+  <div style="font-size:1.8rem; font-weight:700; color:#212121; margin-top:0.5rem;">
+    Spatial rules engine for your data
+  </div>
+</div>
+
+<div class="typo-sample">
+  <div class="typo-name">Rubik / 400 / Body</div>
+  <div style="font-size:1rem; font-weight:400; color:#616161; max-width:600px;">
+    GISPulse transforme vos donnees geospatiales en decisions automatisees. Definissez des regles, declenchez des traitements, surveillez vos datasets — le tout en mode portable ou persistant.
+  </div>
+</div>
+
+<div class="typo-sample">
+  <div class="typo-name">JetBrains Mono / 500 / Code & Labels</div>
+  <div style="font-size:0.9rem; font-weight:500; color:#0D47A1; font-family:'JetBrains Mono', monospace; background:#F5F5F5; padding:0.75rem 1rem; border-radius:8px; display:inline-block;">
+    gispulse run --mode portable --input data.gpkg --rules buffer_zone.json
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2>5. Tiers & Badges</h2>
+
+<div class="tier-grid">
+  <div class="tier-card">
+    <div class="tier-badge" style="background:#4CAF50; color:#fff;">COMMUNITY</div>
+    <div class="tier-name">Community</div>
+    <div class="tier-price">Gratuit / AGPL</div>
+  </div>
+  <div class="tier-card" style="border-color:#0D47A1;">
+    <div class="tier-badge" style="background:#0D47A1; color:#fff;">PRO</div>
+    <div class="tier-name">Pro</div>
+    <div class="tier-price">79 EUR/mois</div>
+  </div>
+  <div class="tier-card" style="border-color:#F57F17;">
+    <div class="tier-badge" style="background:#F57F17; color:#fff;">TEAM</div>
+    <div class="tier-name">Team</div>
+    <div class="tier-price">Sur devis</div>
+  </div>
+  <div class="tier-card" style="border-color:#B71C1C;">
+    <div class="tier-badge" style="background:#B71C1C; color:#fff;">ENTERPRISE</div>
+    <div class="tier-name">Enterprise</div>
+    <div class="tier-price">Sur devis</div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2>6. Maquette site — Hero Section (fond clair)</h2>
+
+<div class="mockup-frame">
+  <div class="mockup-bar">
+    <div class="mockup-dot" style="background:#F44336;"></div>
+    <div class="mockup-dot" style="background:#FFC107;"></div>
+    <div class="mockup-dot" style="background:#4CAF50;"></div>
+    <div class="mockup-url">gispulse.dev</div>
+  </div>
+  <div style="background:#ffffff; padding:0;">
+    <!-- Nav -->
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:1rem 2rem; border-bottom:1px solid #E0E0E0; max-width:100%;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <object data="favicon.svg" type="image/svg+xml" width="28" height="28" style="pointer-events:none;"></object>
+        <span style="font-weight:700; font-size:1.1rem; color:#212121;">GISPulse</span>
+      </div>
+      <div style="display:flex; gap:2rem; font-size:0.85rem; color:#757575; align-items:center;">
+        <span>Features</span>
+        <span>Docs</span>
+        <span>Pricing</span>
+        <span style="background:#212121; color:#fff; padding:6px 16px; border-radius:6px; font-weight:600;">Get Started</span>
+      </div>
+    </div>
+
+    <!-- Hero content -->
+    <div style="text-align:center; padding:4rem 2rem; position:relative; overflow:hidden;">
+      <!-- Background grid -->
+      <div style="position:absolute; inset:0; background-image:
+        linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px);
+        background-size: 40px 40px;"></div>
+
+      <div style="position:relative; z-index:1;">
+        <!-- Animated logo -->
+        <div style="margin-bottom:2rem;">
+          <object data="logo-icon.svg" type="image/svg+xml" width="120" height="120" style="pointer-events:none;"></object>
+        </div>
+
+        <div style="font-size:3rem; font-weight:800; letter-spacing:-0.02em; line-height:1.15; max-width:700px; margin:0 auto 1.5rem; color:#212121;">
+          Your data, your rules.
+        </div>
+        <p style="font-size:1.05rem; color:#757575; max-width:540px; margin:0 auto 2rem; line-height:1.6;">
+          Moteur geospatial modulaire pour executer des regles metier, des traitements et des triggers sur vos datasets spatiaux.
+        </p>
+
+        <!-- CTA -->
+        <div style="display:flex; gap:1rem; justify-content:center; margin-bottom:3rem;">
+          <span style="background:#212121; color:#fff; padding:12px 28px; border-radius:8px; font-weight:700; font-size:0.95rem; cursor:pointer;">
+            Get Started Free
+          </span>
+          <span style="background:#fff; color:#616161; padding:12px 28px; border-radius:8px; font-weight:600; font-size:0.95rem; border:1px solid #E0E0E0; cursor:pointer;">
+            View Documentation
+          </span>
+        </div>
+
+        <!-- Code snippet -->
+        <div style="background:#212121; border-radius:12px; padding:1.25rem; max-width:520px; margin:0 auto; text-align:left; font-family:'JetBrains Mono', monospace; font-size:0.8rem; color:#E0E0E0;">
+          <div style="color:#757575; margin-bottom:6px;">$ gispulse</div>
+          <div><span style="color:#4CAF50;">run</span> <span style="color:#2196F3;">--mode</span> portable \</div>
+          <div style="padding-left:1rem;"><span style="color:#2196F3;">--input</span> <span style="color:#FFC107;">parcels.gpkg</span> \</div>
+          <div style="padding-left:1rem;"><span style="color:#2196F3;">--rules</span> <span style="color:#FFC107;">buffer_zone.json</span></div>
+        </div>
+
+        <!-- Stats -->
+        <div style="display:flex; justify-content:center; gap:3rem; margin-top:3rem; font-size:0.8rem; color:#9E9E9E;">
+          <div><span style="font-size:1.4rem; font-weight:800; color:#0D47A1;">30+</span><br>Capabilities</div>
+          <div><span style="font-size:1.4rem; font-weight:800; color:#F57F17;">2</span><br>Modes</div>
+          <div><span style="font-size:1.4rem; font-weight:800; color:#4CAF50;">AGPL</span><br>Open Source</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2>7. Maquette site — Hero Section (fond sombre)</h2>
+
+<div class="mockup-frame">
+  <div class="mockup-bar" style="background:#212121; border-color:#333;">
+    <div class="mockup-dot" style="background:#F44336;"></div>
+    <div class="mockup-dot" style="background:#FFC107;"></div>
+    <div class="mockup-dot" style="background:#4CAF50;"></div>
+    <div class="mockup-url" style="color:#616161;">gispulse.dev</div>
+  </div>
+  <div style="background:#1a1a1a; padding:0;">
+    <!-- Nav -->
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:1rem 2rem; border-bottom:1px solid #333; max-width:100%;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <object data="favicon.svg" type="image/svg+xml" width="28" height="28" style="pointer-events:none;"></object>
+        <span style="font-weight:700; font-size:1.1rem; color:#E0E0E0;">GISPulse</span>
+      </div>
+      <div style="display:flex; gap:2rem; font-size:0.85rem; color:#757575; align-items:center;">
+        <span>Features</span>
+        <span>Docs</span>
+        <span>Pricing</span>
+        <span style="background:#fff; color:#212121; padding:6px 16px; border-radius:6px; font-weight:600;">Get Started</span>
+      </div>
+    </div>
+
+    <!-- Hero content -->
+    <div style="text-align:center; padding:4rem 2rem; position:relative; overflow:hidden;">
+      <div style="position:absolute; inset:0; background-image:
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+        background-size: 40px 40px;"></div>
+
+      <div style="position:relative; z-index:1;">
+        <div style="margin-bottom:2rem;">
+          <object data="logo-icon.svg" type="image/svg+xml" width="120" height="120" style="pointer-events:none; filter:invert(1);"></object>
+        </div>
+
+        <div style="font-size:3rem; font-weight:800; letter-spacing:-0.02em; line-height:1.15; max-width:700px; margin:0 auto 1.5rem; color:#FAFAFA;">
+          Your data, your rules.
+        </div>
+        <p style="font-size:1.05rem; color:#757575; max-width:540px; margin:0 auto 2rem; line-height:1.6;">
+          Moteur geospatial modulaire pour executer des regles metier, des traitements et des triggers sur vos datasets spatiaux.
+        </p>
+
+        <div style="display:flex; gap:1rem; justify-content:center; margin-bottom:3rem;">
+          <span style="background:#fff; color:#212121; padding:12px 28px; border-radius:8px; font-weight:700; font-size:0.95rem; cursor:pointer;">
+            Get Started Free
+          </span>
+          <span style="background:transparent; color:#9E9E9E; padding:12px 28px; border-radius:8px; font-weight:600; font-size:0.95rem; border:1px solid #333; cursor:pointer;">
+            View Documentation
+          </span>
+        </div>
+
+        <div style="background:#111; border:1px solid #333; border-radius:12px; padding:1.25rem; max-width:520px; margin:0 auto; text-align:left; font-family:'JetBrains Mono', monospace; font-size:0.8rem; color:#E0E0E0;">
+          <div style="color:#616161; margin-bottom:6px;">$ gispulse</div>
+          <div><span style="color:#4CAF50;">run</span> <span style="color:#2196F3;">--mode</span> portable \</div>
+          <div style="padding-left:1rem;"><span style="color:#2196F3;">--input</span> <span style="color:#FFC107;">parcels.gpkg</span> \</div>
+          <div style="padding-left:1rem;"><span style="color:#2196F3;">--rules</span> <span style="color:#FFC107;">buffer_zone.json</span></div>
+        </div>
+
+        <div style="display:flex; justify-content:center; gap:3rem; margin-top:3rem; font-size:0.8rem; color:#616161;">
+          <div><span style="font-size:1.4rem; font-weight:800; color:#2196F3;">30+</span><br>Capabilities</div>
+          <div><span style="font-size:1.4rem; font-weight:800; color:#FFC107;">2</span><br>Modes</div>
+          <div><span style="font-size:1.4rem; font-weight:800; color:#4CAF50;">AGPL</span><br>Open Source</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2>8. Resume palette — Variables CSS</h2>
+
+<div style="background:#212121; border-radius:12px; padding:2rem; font-family:'JetBrains Mono', monospace; font-size:0.8rem; line-height:2; color:#E0E0E0;">
+<div style="color:#757575;">/* GISPulse Brand Tokens — Rubik + Grayscale + Accents */</div>
+<br>
+<div style="color:#757575;">/* Base */</div>
+<div>--gp-white:       <span style="color:#fff;">#FFFFFF</span>;  <span style="color:#616161;">/* hub central, fond clair */</span></div>
+<div>--gp-bg:          <span style="color:#BDBDBD;">#FAFAFA</span>;  <span style="color:#616161;">/* fond page clair */</span></div>
+<div>--gp-surface:     <span style="color:#BDBDBD;">#F5F5F5</span>;  <span style="color:#616161;">/* cards, panels */</span></div>
+<div>--gp-border:      <span style="color:#BDBDBD;">#E0E0E0</span>;  <span style="color:#616161;">/* bordures, ondes pulse */</span></div>
+<div>--gp-muted:       <span style="color:#9E9E9E;">#757575</span>;  <span style="color:#616161;">/* texte secondaire */</span></div>
+<div>--gp-nodes:       <span style="color:#9E9E9E;">#212121</span>;  <span style="color:#616161;">/* noeuds, texte, CTA */</span></div>
+<div>--gp-dark-bg:     <span style="color:#9E9E9E;">#1a1a1a</span>;  <span style="color:#616161;">/* fond sombre */</span></div>
+<br>
+<div style="color:#757575;">/* Electrons — Accents */</div>
+<div>--gp-blue:        <span style="color:#2196F3;">#0D47A1</span>;  <span style="color:#616161;">/* analyse, info, Pro tier */</span></div>
+<div>--gp-blue-glow:   <span style="color:#2196F3;">#2196F3</span>;  <span style="color:#616161;">/* version lumineuse dark bg */</span></div>
+<div>--gp-red:         <span style="color:#F44336;">#B71C1C</span>;  <span style="color:#616161;">/* alertes, error, Enterprise */</span></div>
+<div>--gp-red-glow:    <span style="color:#F44336;">#F44336</span>;  <span style="color:#616161;">/* version lumineuse dark bg */</span></div>
+<div>--gp-orange:      <span style="color:#FFC107;">#F57F17</span>;  <span style="color:#616161;">/* triggers, warning, Team */</span></div>
+<div>--gp-amber-glow:  <span style="color:#FFC107;">#FFC107</span>;  <span style="color:#616161;">/* version lumineuse dark bg */</span></div>
+<div>--gp-green:       <span style="color:#4CAF50;">#4CAF50</span>;  <span style="color:#616161;">/* validation, success, Community */</span></div>
+<br>
+<div style="color:#757575;">/* Tiers */</div>
+<div>--gp-tier-community:   <span style="color:#4CAF50;">#4CAF50</span>;</div>
+<div>--gp-tier-pro:         <span style="color:#2196F3;">#0D47A1</span>;</div>
+<div>--gp-tier-team:        <span style="color:#FFC107;">#F57F17</span>;</div>
+<div>--gp-tier-enterprise:  <span style="color:#F44336;">#B71C1C</span>;</div>
+<br>
+<div style="color:#757575;">/* Typography */</div>
+<div>--gp-font-brand: 'Rubik', system-ui, sans-serif;</div>
+<div>--gp-font-mono:  'JetBrains Mono', monospace;</div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<h2>9. Fichiers du dossier branding/</h2>
+
+<div style="background:#F5F5F5; border-radius:12px; padding:1.5rem; font-family:'JetBrains Mono', monospace; font-size:0.8rem; line-height:2;">
+<div style="color:#757575;">branding/</div>
+<div>&nbsp;&nbsp;brand-board.html&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#757575;">// Ce fichier</span></div>
+<div>&nbsp;&nbsp;logo-icon.svg&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#757575;">// Icone animee (fond clair/transparent)</span></div>
+<div>&nbsp;&nbsp;favicon.svg&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#757575;">// Favicon simplifie (pas d'animation)</span></div>
+<div>&nbsp;&nbsp;gispulse_logo_bold_horizontal.svg&nbsp;<span style="color:#757575;">// Logo + texte horizontal (fond clair)</span></div>
+<div>&nbsp;&nbsp;gispulse_logo_bold_vertical.svg&nbsp;&nbsp;&nbsp;<span style="color:#757575;">// Logo + texte vertical (fond clair)</span></div>
+<div>&nbsp;&nbsp;gispulse_logo_bold_white.svg&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#757575;">// Logo + texte blanc (fond sombre)</span></div>
+</div>
+
+
+</div><!-- /container -->
+</body>
+</html>

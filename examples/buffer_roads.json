@@ -1,0 +1,9 @@
+[
+  {
+    "name": "buffer_roads_10m",
+    "capability": "buffer",
+    "config": {
+      "distance": 10
+    }
+  }
+]

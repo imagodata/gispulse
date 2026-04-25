@@ -1,0 +1,178 @@
+{
+  "version": 1,
+  "updated_at": "2026-04-17",
+  "presets": [
+    {
+      "id": "ftth_network_analysis",
+      "name": "FTTH Network Analysis",
+      "domain": "telecom",
+      "file": "templates/ftth_network_analysis.json",
+      "format": "v1",
+      "complexity": 2,
+      "requires_pro": false,
+      "tags": ["ftth", "telecom", "nro"]
+    },
+    {
+      "id": "validation_plu_cnig",
+      "name": "Validation PLU CNIG",
+      "domain": "urbanisme",
+      "file": "templates/validation_plu_cnig.json",
+      "format": "v1",
+      "complexity": 2,
+      "requires_pro": false,
+      "tags": ["plu", "cnig", "validation", "qualite"]
+    },
+    {
+      "id": "environmental_monitoring",
+      "name": "Monitoring Environnemental Sentinel-2",
+      "domain": "environnement",
+      "file": "templates/environmental_monitoring.json",
+      "format": "v1",
+      "complexity": 3,
+      "requires_pro": true,
+      "requires_plugins": ["gispulse-cap-stac", "gispulse-cap-raster-extras"],
+      "tags": ["ndvi", "sentinel", "copernicus"]
+    },
+    {
+      "id": "urbanisme_zan_bilan",
+      "name": "Bilan ZAN OCS GE",
+      "domain": "urbanisme",
+      "file": "templates/urbanisme_zan_bilan.json",
+      "format": "v2",
+      "complexity": 3,
+      "requires_pro": false,
+      "tags": ["zan", "ocs-ge", "loi-climat"]
+    },
+    {
+      "id": "urbanisme_permis_conformite",
+      "name": "Instruction Permis de Construire",
+      "domain": "urbanisme",
+      "file": "templates/urbanisme_permis_conformite.json",
+      "format": "v2",
+      "complexity": 2,
+      "requires_pro": false,
+      "tags": ["permis", "plu", "servitudes", "abf"]
+    },
+    {
+      "id": "risques_ppri_exposition",
+      "name": "Exposition PPRI",
+      "domain": "risques_naturels",
+      "file": "templates/risques_ppri_exposition.json",
+      "format": "v2",
+      "complexity": 3,
+      "requires_pro": false,
+      "tags": ["ppri", "inondation", "georisques"]
+    },
+    {
+      "id": "environnement_tvb_ruptures",
+      "name": "Trame Verte et Bleue",
+      "domain": "environnement",
+      "file": "templates/environnement_tvb_ruptures.json",
+      "format": "v2",
+      "complexity": 3,
+      "requires_pro": false,
+      "tags": ["tvb", "biodiversite", "corridors"]
+    },
+    {
+      "id": "environnement_iota_loi_eau",
+      "name": "Pré-diagnostic IOTA",
+      "domain": "environnement",
+      "file": "templates/environnement_iota_loi_eau.json",
+      "format": "v2",
+      "complexity": 2,
+      "requires_pro": false,
+      "tags": ["iota", "loi-eau", "zones-humides"]
+    },
+    {
+      "id": "mobilite_accessibilite_services",
+      "name": "Accessibilite Services",
+      "domain": "mobilite",
+      "file": "templates/mobilite_accessibilite_services.json",
+      "format": "v2",
+      "complexity": 3,
+      "requires_pro": true,
+      "tags": ["isochrone", "accessibilite", "bpe"]
+    },
+    {
+      "id": "foncier_dvf_marche",
+      "name": "Analyse Marche DVF",
+      "domain": "foncier",
+      "file": "templates/foncier_dvf_marche.json",
+      "format": "v1",
+      "complexity": 2,
+      "requires_pro": false,
+      "tags": ["dvf", "prix", "iris"]
+    },
+    {
+      "id": "foncier_parcelles_vacantes",
+      "name": "Friches et Parcelles Vacantes",
+      "domain": "foncier",
+      "file": "templates/foncier_parcelles_vacantes.json",
+      "format": "v2",
+      "complexity": 3,
+      "requires_pro": false,
+      "tags": ["friches", "majic", "zan"]
+    },
+    {
+      "id": "agriculture_rpg_bcae",
+      "name": "Controle Conformite BCAE",
+      "domain": "agriculture",
+      "file": "templates/agriculture_rpg_bcae.json",
+      "format": "v2",
+      "complexity": 3,
+      "requires_pro": false,
+      "tags": ["rpg", "pac", "bcae"]
+    },
+    {
+      "id": "energie_solaire_toiture",
+      "name": "Potentiel Solaire Toiture",
+      "domain": "energie",
+      "file": "templates/energie_solaire_toiture.json",
+      "format": "v2",
+      "complexity": 4,
+      "requires_pro": true,
+      "requires_plugins": ["gispulse-cap-raster-extras"],
+      "tags": ["solaire", "pv", "bdnb", "lidar"]
+    },
+    {
+      "id": "securite_sdis_couverture",
+      "name": "Couverture SDIS SDACR",
+      "domain": "securite_civile",
+      "file": "templates/securite_sdis_couverture.json",
+      "format": "v2",
+      "complexity": 3,
+      "requires_pro": true,
+      "tags": ["sdis", "sdacr", "isochrone"]
+    },
+    {
+      "id": "sante_apl_deserts",
+      "name": "APL Deserts Medicaux",
+      "domain": "sante",
+      "file": "templates/sante_apl_deserts.json",
+      "format": "v2",
+      "complexity": 4,
+      "requires_pro": true,
+      "tags": ["apl", "desert", "rpps", "drees"]
+    },
+    {
+      "id": "batiment_dpe_priorisation",
+      "name": "Priorisation Renovation DPE",
+      "domain": "batiment_renovation",
+      "file": "templates/batiment_dpe_priorisation.json",
+      "format": "v2",
+      "complexity": 3,
+      "requires_pro": false,
+      "tags": ["dpe", "bdnb", "anah", "precarite"]
+    },
+    {
+      "id": "retail_huff_chalandise",
+      "name": "Chalandise Huff Retail",
+      "domain": "retail_geomarketing",
+      "file": "templates/retail_huff_chalandise.json",
+      "format": "v2",
+      "complexity": 4,
+      "requires_pro": true,
+      "tags": ["huff", "chalandise", "whitespace"]
+    }
+  ]
+}

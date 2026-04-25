@@ -1,0 +1,9 @@
+[
+  {
+    "name": "parcels_in_flood_zones",
+    "description": "Filter parcels that intersect flood zones",
+    "capability": "intersects",
+    "config": { "ref_layer": "flood_zones", "order": 0 },
+    "enabled": true
+  }
+]

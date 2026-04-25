@@ -1,0 +1,90 @@
+{
+  "version": 2,
+  "name": "cadastre_topology_cleanup",
+  "description": "Pipeline de nettoyage topologique d'une coverage polygonale (cadastre, PLU, ilots RPG, OCS GE). Repare les geometries invalides, aligne les frontieres partagees sur une grille commune, comble les petits gaps, resout les overlaps et retire les slivers. A lancer avant toute analyse stricte.",
+  "domain": "preparation",
+  "author": "GISPulse",
+  "tags": ["topologie", "coverage", "cadastre", "plu", "nettoyage", "data_prep"],
+  "inputs_notes": "Entree = couche polygonale unique (cadastre, PLU zonage, OCS GE...). Sortie = meme couche avec geometries valides, frontieres snappees, gaps < 50 m2 combles, recouvrements resolus par regle 'smallest', slivers < 1 m2 supprimes.",
+  "steps": [
+    {
+      "id": "repare_geoms",
+      "type": "capability",
+      "capability": "make_valid",
+      "params": {
+        "drop_empty": true,
+        "keep_geom_type": false
+      }
+    },
+    {
+      "id": "snap_precision",
+      "type": "capability",
+      "capability": "snap_to_grid",
+      "params": {
+        "grid_size": 0.01,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "repare_geoms"
+    },
+    {
+      "id": "align_borders",
+      "type": "capability",
+      "capability": "polygon_snap_borders",
+      "params": {
+        "grid_size": 0.05,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "snap_precision"
+    },
+    {
+      "id": "fix_gaps",
+      "type": "capability",
+      "capability": "polygon_fix_gaps",
+      "params": {
+        "max_gap_area": 50.0,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "align_borders"
+    },
+    {
+      "id": "fix_overlaps",
+      "type": "capability",
+      "capability": "polygon_fix_overlaps",
+      "params": {
+        "rule": "smallest",
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "fix_gaps"
+    },
+    {
+      "id": "remove_slivers",
+      "type": "capability",
+      "capability": "polygon_remove_slivers",
+      "params": {
+        "min_area": 1.0,
+        "max_shape_index": 80.0,
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "fix_overlaps"
+    },
+    {
+      "id": "issues_report",
+      "type": "capability",
+      "capability": "topology_check",
+      "params": {
+        "check_overlaps": true,
+        "check_self_intersections": true,
+        "check_validity": true,
+        "tolerance": 0.01
+      },
+      "input": "remove_slivers"
+    },
+    {
+      "id": "surfaces_finales",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "remove_slivers"
+    }
+  ]
+}

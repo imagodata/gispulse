@@ -1,0 +1,290 @@
+[
+  {
+    "epsg_code": 4326,
+    "name": "WGS 84",
+    "description": "World Geodetic System 1984 — GPS standard, global",
+    "area_of_use": "World",
+    "unit": "degree",
+    "bounds": [-180.0, -90.0, 180.0, 90.0],
+    "tags": ["global", "gps", "geographic"]
+  },
+  {
+    "epsg_code": 3857,
+    "name": "WGS 84 / Pseudo-Mercator",
+    "description": "Web Mercator — Google Maps, OSM, MapLibre tiles",
+    "area_of_use": "World (between 85.06°S and 85.06°N)",
+    "unit": "metre",
+    "bounds": [-180.0, -85.06, 180.0, 85.06],
+    "tags": ["global", "web", "tiles", "mercator"]
+  },
+  {
+    "epsg_code": 2154,
+    "name": "RGF93 v1 / Lambert-93",
+    "description": "France métropolitaine — projection officielle",
+    "area_of_use": "France métropolitaine",
+    "unit": "metre",
+    "bounds": [-9.86, 41.15, 10.38, 51.56],
+    "tags": ["france", "lambert", "officiel"]
+  },
+  {
+    "epsg_code": 27572,
+    "name": "NTF (Paris) / Lambert zone II",
+    "description": "Ancien système Lambert II étendu — données historiques France",
+    "area_of_use": "France métropolitaine",
+    "unit": "metre",
+    "bounds": [-4.87, 42.33, 8.23, 51.14],
+    "tags": ["france", "lambert", "historique"]
+  },
+  {
+    "epsg_code": 4559,
+    "name": "RRAF 1991 / UTM zone 20N",
+    "description": "Antilles françaises — Guadeloupe, Martinique",
+    "area_of_use": "Antilles françaises",
+    "unit": "metre",
+    "bounds": [-63.66, 14.08, -60.0, 18.54],
+    "tags": ["france", "outre-mer", "antilles", "utm"]
+  },
+  {
+    "epsg_code": 2975,
+    "name": "RGR92 / UTM zone 40S",
+    "description": "La Réunion",
+    "area_of_use": "La Réunion",
+    "unit": "metre",
+    "bounds": [55.16, -21.42, 55.84, -20.86],
+    "tags": ["france", "outre-mer", "reunion", "utm"]
+  },
+  {
+    "epsg_code": 4471,
+    "name": "RGM04 / UTM zone 38S",
+    "description": "Mayotte",
+    "area_of_use": "Mayotte",
+    "unit": "metre",
+    "bounds": [44.0, -13.05, 45.35, -12.55],
+    "tags": ["france", "outre-mer", "mayotte", "utm"]
+  },
+  {
+    "epsg_code": 2972,
+    "name": "RGFG95 / UTM zone 22N",
+    "description": "Guyane française",
+    "area_of_use": "Guyane française",
+    "unit": "metre",
+    "bounds": [-54.61, 2.11, -51.61, 5.81],
+    "tags": ["france", "outre-mer", "guyane", "utm"]
+  },
+  {
+    "epsg_code": 32601,
+    "name": "WGS 84 / UTM zone 1N",
+    "description": "Universal Transverse Mercator zone 1 Nord",
+    "area_of_use": "Between 180°W and 174°W, northern hemisphere",
+    "unit": "metre",
+    "bounds": [-180.0, 0.0, -174.0, 84.0],
+    "tags": ["global", "utm"]
+  },
+  {
+    "epsg_code": 32631,
+    "name": "WGS 84 / UTM zone 31N",
+    "description": "UTM zone couvrant l'ouest de la France et Benelux",
+    "area_of_use": "Between 0°E and 6°E, northern hemisphere",
+    "unit": "metre",
+    "bounds": [0.0, 0.0, 6.0, 84.0],
+    "tags": ["europe", "france", "utm"]
+  },
+  {
+    "epsg_code": 32632,
+    "name": "WGS 84 / UTM zone 32N",
+    "description": "UTM zone couvrant l'est de la France, Allemagne",
+    "area_of_use": "Between 6°E and 12°E, northern hemisphere",
+    "unit": "metre",
+    "bounds": [6.0, 0.0, 12.0, 84.0],
+    "tags": ["europe", "france", "allemagne", "utm"]
+  },
+  {
+    "epsg_code": 25832,
+    "name": "ETRS89 / UTM zone 32N",
+    "description": "Europe — système de référence terrestre européen",
+    "area_of_use": "Europe between 6°E and 12°E",
+    "unit": "metre",
+    "bounds": [6.0, 38.76, 12.0, 84.33],
+    "tags": ["europe", "etrs89", "utm"]
+  },
+  {
+    "epsg_code": 3035,
+    "name": "ETRS89-extended / LAEA Europe",
+    "description": "Lambert Azimuthal Equal Area — statistiques européennes (Eurostat)",
+    "area_of_use": "Europe",
+    "unit": "metre",
+    "bounds": [-35.58, 24.6, 44.83, 84.73],
+    "tags": ["europe", "laea", "eurostat"]
+  },
+  {
+    "epsg_code": 3034,
+    "name": "ETRS89-extended / LCC Europe",
+    "description": "Lambert Conformal Conic Europe",
+    "area_of_use": "Europe",
+    "unit": "metre",
+    "bounds": [-35.58, 24.6, 44.83, 84.73],
+    "tags": ["europe", "lcc"]
+  },
+  {
+    "epsg_code": 27700,
+    "name": "OSGB36 / British National Grid",
+    "description": "Ordnance Survey Great Britain — UK",
+    "area_of_use": "United Kingdom",
+    "unit": "metre",
+    "bounds": [-8.82, 49.79, 1.92, 60.94],
+    "tags": ["uk", "british"]
+  },
+  {
+    "epsg_code": 2056,
+    "name": "CH1903+ / LV95",
+    "description": "Suisse — système de coordonnées fédéral",
+    "area_of_use": "Suisse, Liechtenstein",
+    "unit": "metre",
+    "bounds": [5.96, 45.82, 10.49, 47.81],
+    "tags": ["suisse", "swiss"]
+  },
+  {
+    "epsg_code": 31370,
+    "name": "Belge 1972 / Belgian Lambert 72",
+    "description": "Belgique — ancien système national",
+    "area_of_use": "Belgique",
+    "unit": "metre",
+    "bounds": [2.5, 49.5, 6.4, 51.51],
+    "tags": ["belgique", "lambert"]
+  },
+  {
+    "epsg_code": 3812,
+    "name": "ETRS89 / Belgian Lambert 2008",
+    "description": "Belgique — système actuel",
+    "area_of_use": "Belgique",
+    "unit": "metre",
+    "bounds": [2.5, 49.5, 6.4, 51.51],
+    "tags": ["belgique", "lambert", "etrs89"]
+  },
+  {
+    "epsg_code": 28992,
+    "name": "Amersfoort / RD New",
+    "description": "Pays-Bas — Rijksdriehoekstelsel",
+    "area_of_use": "Netherlands",
+    "unit": "metre",
+    "bounds": [3.37, 50.75, 7.21, 53.47],
+    "tags": ["netherlands", "dutch"]
+  },
+  {
+    "epsg_code": 25833,
+    "name": "ETRS89 / UTM zone 33N",
+    "description": "Europe between 12°E and 18°E",
+    "area_of_use": "Central Europe",
+    "unit": "metre",
+    "bounds": [12.0, 38.76, 18.0, 84.33],
+    "tags": ["europe", "etrs89", "utm"]
+  },
+  {
+    "epsg_code": 32610,
+    "name": "WGS 84 / UTM zone 10N",
+    "description": "US West Coast (California, Oregon, Washington)",
+    "area_of_use": "Between 126°W and 120°W, northern hemisphere",
+    "unit": "metre",
+    "bounds": [-126.0, 0.0, -120.0, 84.0],
+    "tags": ["usa", "utm", "west-coast"]
+  },
+  {
+    "epsg_code": 32618,
+    "name": "WGS 84 / UTM zone 18N",
+    "description": "US East Coast (New York, DC, Floride nord)",
+    "area_of_use": "Between 78°W and 72°W, northern hemisphere",
+    "unit": "metre",
+    "bounds": [-78.0, 0.0, -72.0, 84.0],
+    "tags": ["usa", "utm", "east-coast"]
+  },
+  {
+    "epsg_code": 2193,
+    "name": "NZGD2000 / New Zealand Transverse Mercator",
+    "description": "Nouvelle-Zélande",
+    "area_of_use": "New Zealand",
+    "unit": "metre",
+    "bounds": [166.37, -47.33, 178.63, -34.1],
+    "tags": ["new-zealand", "oceania"]
+  },
+  {
+    "epsg_code": 32737,
+    "name": "WGS 84 / UTM zone 37S",
+    "description": "Afrique de l'Est (Kenya, Tanzanie)",
+    "area_of_use": "Between 36°E and 42°E, southern hemisphere",
+    "unit": "metre",
+    "bounds": [36.0, -80.0, 42.0, 0.0],
+    "tags": ["africa", "utm"]
+  },
+  {
+    "epsg_code": 32748,
+    "name": "WGS 84 / UTM zone 48S",
+    "description": "Asie du Sud-Est (Indonésie, Australie nord)",
+    "area_of_use": "Between 102°E and 108°E, southern hemisphere",
+    "unit": "metre",
+    "bounds": [102.0, -80.0, 108.0, 0.0],
+    "tags": ["asia", "oceania", "utm"]
+  },
+  {
+    "epsg_code": 4258,
+    "name": "ETRS89",
+    "description": "European Terrestrial Reference System 1989 (geographic)",
+    "area_of_use": "Europe",
+    "unit": "degree",
+    "bounds": [-16.1, 32.88, 40.18, 84.73],
+    "tags": ["europe", "etrs89", "geographic"]
+  },
+  {
+    "epsg_code": 4269,
+    "name": "NAD83",
+    "description": "North American Datum 1983",
+    "area_of_use": "North America",
+    "unit": "degree",
+    "bounds": [-172.54, 14.92, -47.74, 86.46],
+    "tags": ["north-america", "nad83", "geographic"]
+  },
+  {
+    "epsg_code": 5490,
+    "name": "RGAF09 / UTM zone 20N",
+    "description": "Antilles françaises — nouveau datum 2009",
+    "area_of_use": "Antilles françaises",
+    "unit": "metre",
+    "bounds": [-63.66, 14.08, -60.0, 18.54],
+    "tags": ["france", "outre-mer", "antilles", "utm"]
+  },
+  {
+    "epsg_code": 3943,
+    "name": "RGF93 v1 / CC43",
+    "description": "France — Conique Conforme zone 43 (sud)",
+    "area_of_use": "France métropolitaine sud",
+    "unit": "metre",
+    "bounds": [-4.87, 42.0, 8.23, 44.0],
+    "tags": ["france", "conique-conforme"]
+  },
+  {
+    "epsg_code": 3946,
+    "name": "RGF93 v1 / CC46",
+    "description": "France — Conique Conforme zone 46 (Lyon, centre-est)",
+    "area_of_use": "France métropolitaine centre",
+    "unit": "metre",
+    "bounds": [-1.76, 45.0, 8.23, 47.0],
+    "tags": ["france", "conique-conforme"]
+  },
+  {
+    "epsg_code": 3949,
+    "name": "RGF93 v1 / CC49",
+    "description": "France — Conique Conforme zone 49 (Paris, nord)",
+    "area_of_use": "France métropolitaine nord",
+    "unit": "metre",
+    "bounds": [-4.87, 48.0, 8.23, 50.0],
+    "tags": ["france", "conique-conforme"]
+  },
+  {
+    "epsg_code": 3950,
+    "name": "RGF93 v1 / CC50",
+    "description": "France — Conique Conforme zone 50 (Lille, extrême nord)",
+    "area_of_use": "France métropolitaine extrême nord",
+    "unit": "metre",
+    "bounds": [-4.87, 49.0, 8.23, 51.56],
+    "tags": ["france", "conique-conforme"]
+  }
+]

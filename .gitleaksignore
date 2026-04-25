@@ -1,0 +1,8 @@
+# gitleaks ignore list — verified false positives.
+# Each entry uses the format: <commit-sha>:<path>:<rule>:<line>
+# Generated 2026-04-25 by sprint R0 (S0-1) audit before public release.
+
+# Fake API keys used in security/RBAC tests (no real secret).
+1fd2efbc6b5807538cfdd43552bed3ab1bb506a2:tests/unit/test_auth_rbac.py:generic-api-key:838
+61dc8cb04d1534a23d1a9c582607ae34145cb6b5:tests/unit/test_security.py:generic-api-key:208
+61dc8cb04d1534a23d1a9c582607ae34145cb6b5:tests/unit/test_security.py:generic-api-key:209

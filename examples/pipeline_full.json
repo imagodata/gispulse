@@ -1,0 +1,23 @@
+[
+  {
+    "name": "filter_commune",
+    "description": "Keep only parcels owned by the commune",
+    "capability": "filter",
+    "config": { "expression": "owner == 'Commune'", "order": 0 },
+    "enabled": true
+  },
+  {
+    "name": "buffer_50m",
+    "description": "Create 50m buffer zones around commune parcels",
+    "capability": "buffer",
+    "config": { "distance": 50, "order": 1 },
+    "enabled": true
+  },
+  {
+    "name": "dissolve_all",
+    "description": "Merge all buffered geometries into one",
+    "capability": "dissolve",
+    "config": { "order": 2 },
+    "enabled": true
+  }
+]

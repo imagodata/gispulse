@@ -1,0 +1,113 @@
+{
+  "version": 2,
+  "name": "ftth_demande_hotspots",
+  "description": "Detection des hotspots de demande FTTH / marche adressable par clustering density-based (HDBSCAN) sur les prises eligibles. Dessine une enveloppe concave par grappe et agrege la demande + distance au NRO le plus proche, pour prioriser les zones de deploiement.",
+  "domain": "ftth",
+  "author": "GISPulse",
+  "tags": ["ftth", "clustering", "hdbscan", "hotspots", "demande", "marche_adressable"],
+  "ref_layers": {
+    "nro": "data/ftth_nro.gpkg",
+    "ign_communes": "data/bd_topo_communes.gpkg"
+  },
+  "inputs_notes": "Entree = couche Points de prises eligibles FTTH (source IPE ARCEP, locaux BAN, ou prises PM). HDBSCAN adapte automatiquement la densite sans tuning d'eps. min_cluster_size=20 prises capture des micro-poches; montez a 50+ pour du grand prospect.",
+  "steps": [
+    {
+      "id": "prises_eligibles",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "expression": "statut == 'ELIGIBLE' or statut == 'RACCORDABLE'"
+      }
+    },
+    {
+      "id": "clusters",
+      "type": "capability",
+      "capability": "cluster_hdbscan",
+      "params": {
+        "min_cluster_size": 20,
+        "cluster_selection_epsilon": 50.0,
+        "cluster_col": "hotspot_id",
+        "probability_col": "hotspot_prob",
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "prises_eligibles"
+    },
+    {
+      "id": "prises_grappes",
+      "type": "capability",
+      "capability": "filter",
+      "params": {
+        "expression": "hotspot_id >= 0"
+      },
+      "input": "clusters"
+    },
+    {
+      "id": "distance_nro",
+      "type": "capability",
+      "capability": "nearest_neighbor",
+      "params": {
+        "ref_layer": "nro",
+        "k": 1,
+        "distance_col": "dist_nro_m",
+        "columns": ["id_nro", "capacite"],
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "prises_grappes"
+    },
+    {
+      "id": "enveloppe_grappes",
+      "type": "capability",
+      "capability": "concave_hull",
+      "params": {
+        "ratio": 0.3,
+        "allow_holes": false,
+        "by_group": "hotspot_id"
+      },
+      "input": "distance_nro"
+    },
+    {
+      "id": "surface_grappes",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "enveloppe_grappes"
+    },
+    {
+      "id": "stats_grappes",
+      "type": "capability",
+      "capability": "spatial_aggregate",
+      "params": {
+        "group_by_field": "hotspot_id",
+        "aggregations": {
+          "nb_prises":        { "field": "hotspot_id", "func": "count" },
+          "dist_nro_moy_m":   { "field": "dist_nro_m", "func": "mean" },
+          "dist_nro_max_m":   { "field": "dist_nro_m", "func": "max" },
+          "prob_moy":         { "field": "hotspot_prob", "func": "mean" }
+        }
+      },
+      "input": "distance_nro"
+    },
+    {
+      "id": "rattache_commune",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "ign_communes",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["INSEE_COM", "NOM_COM"]
+      },
+      "input": "enveloppe_grappes"
+    },
+    {
+      "id": "priorite_hotspot",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expression": "'P1_FORT' if area_m2 > 50000 else ('P2_MOYEN' if area_m2 > 10000 else 'P3_FAIBLE')",
+        "output_field": "priorite_deploiement"
+      },
+      "input": "rattache_commune"
+    }
+  ]
+}

@@ -1,0 +1,295 @@
+/* ============================================================
+   GISPulse Design Tokens
+   Shared across Portal and Viewer apps.
+   Color space: oklch (perceptually uniform)
+   ============================================================ */
+
+/* --- Primitive scales (not meant for direct use in components) --- */
+
+:root {
+  /* -- Typography -- */
+  --gp-font-sans: 'Rubik Variable', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --gp-font-mono: ui-monospace, 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  --gp-font-size-base: 14px;
+  --gp-font-size-xs: 11px;
+  --gp-font-size-sm: 12px;
+  --gp-font-size-md: 14px;
+  --gp-font-size-lg: 16px;
+  --gp-font-size-xl: 20px;
+  --gp-font-size-2xl: 24px;
+  --gp-font-size-3xl: 32px;
+  --gp-font-size-4xl: 48px;
+  --gp-line-height-tight: 1.18;
+  --gp-line-height-normal: 1.45;
+  --gp-line-height-relaxed: 1.65;
+
+  /* -- Spacing -- */
+  --gp-space-1: 4px;
+  --gp-space-2: 8px;
+  --gp-space-3: 12px;
+  --gp-space-4: 16px;
+  --gp-space-5: 20px;
+  --gp-space-6: 24px;
+  --gp-space-8: 32px;
+  --gp-space-10: 40px;
+  --gp-space-12: 48px;
+
+  /* -- Radius -- */
+  --gp-radius-sm: 6px;
+  --gp-radius-md: 8px;
+  --gp-radius-lg: 10px;
+  --gp-radius-xl: 14px;
+  --gp-radius-full: 9999px;
+
+  /* -- Shadows -- */
+  --gp-shadow-sm: 0 1px 2px oklch(0 0 0 / 5%);
+  --gp-shadow-md: 0 2px 8px oklch(0 0 0 / 10%), 0 1px 3px oklch(0 0 0 / 6%);
+  --gp-shadow-lg: 0 10px 15px oklch(0 0 0 / 10%), 0 4px 6px oklch(0 0 0 / 5%);
+
+  /* -- Z-index -- */
+  --gp-z-base: 0;
+  --gp-z-dropdown: 100;
+  --gp-z-sticky: 200;
+  --gp-z-overlay: 300;
+  --gp-z-modal: 400;
+  --gp-z-toast: 500;
+
+  /* -- Transition -- */
+  --gp-transition-fast: 120ms ease;
+  --gp-transition-normal: 200ms ease;
+  --gp-transition-slow: 350ms ease;
+}
+
+
+/* ============================================================
+   Light Mode (default)
+   ============================================================ */
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* -- Neutral scale -- */
+  --gp-neutral-0: oklch(1 0 0);
+  --gp-neutral-50: oklch(0.985 0 0);
+  --gp-neutral-100: oklch(0.97 0 0);
+  --gp-neutral-200: oklch(0.922 0 0);
+  --gp-neutral-300: oklch(0.87 0 0);
+  --gp-neutral-400: oklch(0.708 0 0);
+  --gp-neutral-500: oklch(0.556 0 0);
+  --gp-neutral-600: oklch(0.439 0 0);
+  --gp-neutral-700: oklch(0.371 0 0);
+  --gp-neutral-800: oklch(0.269 0 0);
+  --gp-neutral-900: oklch(0.205 0 0);
+  --gp-neutral-950: oklch(0.145 0 0);
+
+  /* -- Accent (blue) -- */
+  --gp-accent: oklch(0.488 0.243 264.376);
+  --gp-accent-light: oklch(0.62 0.18 264);
+  --gp-accent-lighter: oklch(0.85 0.08 264);
+  --gp-accent-dark: oklch(0.38 0.20 264);
+  --gp-accent-fg: oklch(0.985 0 0);
+
+  /* -- Semantic: Surface -- */
+  --gp-bg: var(--gp-neutral-0);
+  --gp-bg-subtle: var(--gp-neutral-50);
+  --gp-bg-muted: var(--gp-neutral-100);
+  --gp-surface: var(--gp-neutral-0);
+  --gp-surface-raised: var(--gp-neutral-50);
+
+  /* -- Semantic: Text -- */
+  --gp-text: var(--gp-neutral-950);
+  --gp-text-secondary: var(--gp-neutral-500);
+  --gp-text-muted: var(--gp-neutral-400);
+  --gp-text-inverse: var(--gp-neutral-0);
+
+  /* -- Semantic: Border -- */
+  --gp-border: var(--gp-neutral-200);
+  --gp-border-subtle: var(--gp-neutral-100);
+  --gp-border-strong: var(--gp-neutral-300);
+
+  /* -- Semantic: Status -- */
+  --gp-success: oklch(0.52 0.17 145);
+  --gp-success-light: oklch(0.88 0.06 145);
+  --gp-success-fg: oklch(0.985 0 0);
+  --gp-warning: oklch(0.75 0.18 75);
+  --gp-warning-light: oklch(0.92 0.08 75);
+  --gp-warning-fg: oklch(0.25 0.05 75);
+  --gp-error: oklch(0.577 0.245 27.325);
+  --gp-error-light: oklch(0.90 0.06 27);
+  --gp-error-fg: oklch(0.985 0 0);
+  --gp-info: oklch(0.55 0.15 245);
+  --gp-info-light: oklch(0.88 0.06 245);
+  --gp-info-fg: oklch(0.985 0 0);
+
+  /* -- Node-specific colors (pipeline editor) -- */
+  --gp-node-dataset: oklch(0.52 0.17 145);
+  --gp-node-dataset-bg: oklch(0.92 0.04 145);
+  --gp-node-capability: oklch(0.488 0.243 264.376);
+  --gp-node-capability-bg: oklch(0.92 0.04 264);
+  --gp-node-output: oklch(0.55 0.20 300);
+  --gp-node-output-bg: oklch(0.92 0.04 300);
+  --gp-node-trigger: oklch(0.65 0.20 50);
+  --gp-node-trigger-bg: oklch(0.92 0.04 50);
+
+  /* -- Code -- */
+  --gp-code-bg: oklch(0.97 0.005 90);
+  --gp-code-text: var(--gp-neutral-900);
+}
+
+
+/* ============================================================
+   Dark Mode
+   ============================================================ */
+
+[data-theme="dark"],
+.dark {
+  color-scheme: dark;
+
+  /* -- Neutral scale (inverted) -- */
+  --gp-neutral-0: oklch(0.145 0 0);
+  --gp-neutral-50: oklch(0.175 0 0);
+  --gp-neutral-100: oklch(0.205 0 0);
+  --gp-neutral-200: oklch(0.269 0 0);
+  --gp-neutral-300: oklch(0.371 0 0);
+  --gp-neutral-400: oklch(0.556 0 0);
+  --gp-neutral-500: oklch(0.708 0 0);
+  --gp-neutral-600: oklch(0.87 0 0);
+  --gp-neutral-700: oklch(0.922 0 0);
+  --gp-neutral-800: oklch(0.97 0 0);
+  --gp-neutral-900: oklch(0.985 0 0);
+  --gp-neutral-950: oklch(1 0 0);
+
+  /* -- Accent (blue — slightly brighter for dark bg) -- */
+  --gp-accent: oklch(0.62 0.22 264);
+  --gp-accent-light: oklch(0.50 0.18 264);
+  --gp-accent-lighter: oklch(0.30 0.10 264);
+  --gp-accent-dark: oklch(0.75 0.15 264);
+  --gp-accent-fg: oklch(0.985 0 0);
+
+  /* -- Semantic: Surface -- */
+  --gp-bg: var(--gp-neutral-0);
+  --gp-bg-subtle: var(--gp-neutral-50);
+  --gp-bg-muted: var(--gp-neutral-100);
+  --gp-surface: var(--gp-neutral-100);
+  --gp-surface-raised: var(--gp-neutral-200);
+
+  /* -- Semantic: Text -- */
+  --gp-text: var(--gp-neutral-900);
+  --gp-text-secondary: var(--gp-neutral-500);
+  --gp-text-muted: var(--gp-neutral-400);
+  --gp-text-inverse: oklch(0.145 0 0);
+
+  /* -- Semantic: Border -- */
+  --gp-border: oklch(1 0 0 / 10%);
+  --gp-border-subtle: oklch(1 0 0 / 6%);
+  --gp-border-strong: oklch(1 0 0 / 18%);
+
+  /* -- Semantic: Status -- */
+  --gp-success: oklch(0.65 0.17 145);
+  --gp-success-light: oklch(0.25 0.06 145);
+  --gp-success-fg: oklch(0.985 0 0);
+  --gp-warning: oklch(0.80 0.16 75);
+  --gp-warning-light: oklch(0.28 0.06 75);
+  --gp-warning-fg: oklch(0.15 0.02 75);
+  --gp-error: oklch(0.704 0.191 22.216);
+  --gp-error-light: oklch(0.28 0.06 27);
+  --gp-error-fg: oklch(0.985 0 0);
+  --gp-info: oklch(0.65 0.14 245);
+  --gp-info-light: oklch(0.25 0.06 245);
+  --gp-info-fg: oklch(0.985 0 0);
+
+  /* -- Node-specific colors (pipeline editor) -- */
+  --gp-node-dataset: oklch(0.65 0.17 145);
+  --gp-node-dataset-bg: oklch(0.22 0.04 145);
+  --gp-node-capability: oklch(0.62 0.22 264);
+  --gp-node-capability-bg: oklch(0.22 0.04 264);
+  --gp-node-output: oklch(0.65 0.18 300);
+  --gp-node-output-bg: oklch(0.22 0.04 300);
+  --gp-node-trigger: oklch(0.72 0.18 50);
+  --gp-node-trigger-bg: oklch(0.22 0.04 50);
+
+  /* -- Code -- */
+  --gp-code-bg: oklch(0.20 0.005 264);
+  --gp-code-text: var(--gp-neutral-800);
+
+  /* -- Shadows (darker in dark mode) -- */
+  --gp-shadow-sm: 0 1px 2px oklch(0 0 0 / 15%);
+  --gp-shadow-md: 0 2px 8px oklch(0 0 0 / 25%), 0 1px 3px oklch(0 0 0 / 15%);
+  --gp-shadow-lg: 0 10px 15px oklch(0 0 0 / 35%), 0 4px 6px oklch(0 0 0 / 20%);
+}
+
+
+/* ============================================================
+   Dark mode via prefers-color-scheme (auto)
+   Applies when no explicit data-theme or .dark class is set.
+   ============================================================ */
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not(:has(.dark)) {
+    color-scheme: dark;
+
+    --gp-neutral-0: oklch(0.145 0 0);
+    --gp-neutral-50: oklch(0.175 0 0);
+    --gp-neutral-100: oklch(0.205 0 0);
+    --gp-neutral-200: oklch(0.269 0 0);
+    --gp-neutral-300: oklch(0.371 0 0);
+    --gp-neutral-400: oklch(0.556 0 0);
+    --gp-neutral-500: oklch(0.708 0 0);
+    --gp-neutral-600: oklch(0.87 0 0);
+    --gp-neutral-700: oklch(0.922 0 0);
+    --gp-neutral-800: oklch(0.97 0 0);
+    --gp-neutral-900: oklch(0.985 0 0);
+    --gp-neutral-950: oklch(1 0 0);
+
+    --gp-accent: oklch(0.62 0.22 264);
+    --gp-accent-light: oklch(0.50 0.18 264);
+    --gp-accent-lighter: oklch(0.30 0.10 264);
+    --gp-accent-dark: oklch(0.75 0.15 264);
+    --gp-accent-fg: oklch(0.985 0 0);
+
+    --gp-bg: var(--gp-neutral-0);
+    --gp-bg-subtle: var(--gp-neutral-50);
+    --gp-bg-muted: var(--gp-neutral-100);
+    --gp-surface: var(--gp-neutral-100);
+    --gp-surface-raised: var(--gp-neutral-200);
+
+    --gp-text: var(--gp-neutral-900);
+    --gp-text-secondary: var(--gp-neutral-500);
+    --gp-text-muted: var(--gp-neutral-400);
+    --gp-text-inverse: oklch(0.145 0 0);
+
+    --gp-border: oklch(1 0 0 / 10%);
+    --gp-border-subtle: oklch(1 0 0 / 6%);
+    --gp-border-strong: oklch(1 0 0 / 18%);
+
+    --gp-success: oklch(0.65 0.17 145);
+    --gp-success-light: oklch(0.25 0.06 145);
+    --gp-success-fg: oklch(0.985 0 0);
+    --gp-warning: oklch(0.80 0.16 75);
+    --gp-warning-light: oklch(0.28 0.06 75);
+    --gp-warning-fg: oklch(0.15 0.02 75);
+    --gp-error: oklch(0.704 0.191 22.216);
+    --gp-error-light: oklch(0.28 0.06 27);
+    --gp-error-fg: oklch(0.985 0 0);
+    --gp-info: oklch(0.65 0.14 245);
+    --gp-info-light: oklch(0.25 0.06 245);
+    --gp-info-fg: oklch(0.985 0 0);
+
+    --gp-node-dataset: oklch(0.65 0.17 145);
+    --gp-node-dataset-bg: oklch(0.22 0.04 145);
+    --gp-node-capability: oklch(0.62 0.22 264);
+    --gp-node-capability-bg: oklch(0.22 0.04 264);
+    --gp-node-output: oklch(0.65 0.18 300);
+    --gp-node-output-bg: oklch(0.22 0.04 300);
+    --gp-node-trigger: oklch(0.72 0.18 50);
+    --gp-node-trigger-bg: oklch(0.22 0.04 50);
+
+    --gp-code-bg: oklch(0.20 0.005 264);
+    --gp-code-text: var(--gp-neutral-800);
+
+    --gp-shadow-sm: 0 1px 2px oklch(0 0 0 / 15%);
+    --gp-shadow-md: 0 2px 8px oklch(0 0 0 / 25%), 0 1px 3px oklch(0 0 0 / 15%);
+    --gp-shadow-lg: 0 10px 15px oklch(0 0 0 / 35%), 0 4px 6px oklch(0 0 0 / 20%);
+  }
+}
