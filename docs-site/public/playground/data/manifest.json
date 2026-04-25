@@ -89,12 +89,12 @@
           "file": "accessibility/routes.geojson.gz"
         },
         "batiments": {
-          "features": 77465,
-          "size_bytes": 2463294,
+          "features": 7747,
+          "size_bytes": 252491,
           "file": "accessibility/batiments.geojson.gz"
         }
       },
-      "total_size_bytes": 2492980
+      "total_size_bytes": 282177
     },
     {
       "slug": "road-setback",

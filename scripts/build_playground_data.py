@@ -209,12 +209,17 @@ SCENARIOS: list[ScenarioSpec] = [
             ),
             "batiments": LayerSpec(
                 source_layer="batiments",
-                # No cap: classify_by_ring colors every building in the bbox,
-                # so any decimation leaves visible holes on the map. ~77k
-                # buildings within bbox compress to a few MB with simplify 3e-5
-                # and a single kept field.
-                max_features=200000,
-                simplify=3e-5,
+                # Cap at ~8k via deterministic every-k-th decimation (k≈10):
+                # the source bbox holds ~77k batiments which gzip to 2.4 MB
+                # — 24× over the 100 kB scenario budget and a guaranteed
+                # browser freeze on mobile / GitHub Pages.
+                # The pipeline (server side) still operates on the full
+                # dataset; classify_by_ring overlays the decimated subset on
+                # top of the same isochrone rings, so the user keeps a
+                # representative spatial sample without the bandwidth cost.
+                # 5e-5 deg ≈ 5 m at 45 N — invisible at zoom ≤ 14.
+                max_features=8000,
+                simplify=5e-5,
                 keep_fields=("usage_1",),
             ),
         },
