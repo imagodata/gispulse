@@ -60,8 +60,13 @@ class OverlayIntersectionCapability(Capability):
         suffix_right: str = "_2",
         **_,
     ) -> gpd.GeoDataFrame:
+        # P2 (beta-test 2026-04-24): align with ``erase`` and the rest of
+        # the overlay family — when ``ref_gdf`` is missing the operation
+        # degenerates to its identity. ``A ∩ ∅ = ∅`` so we return an empty
+        # GeoDataFrame with the primary layer's schema instead of raising.
+        # Raising was inconsistent with ``erase`` which passes ``A`` through.
         if ref_gdf is None or ref_gdf.empty:
-            raise ValueError("overlay_intersection requires a reference layer.")
+            return gdf.iloc[0:0].copy()
         if gdf.empty:
             return gdf.copy()
         ref = _aligned_ref(gdf, ref_gdf)
@@ -106,8 +111,11 @@ class OverlayUnionCapability(Capability):
         suffix_right: str = "_2",
         **_,
     ) -> gpd.GeoDataFrame:
+        # P2 (beta-test 2026-04-24): consistency with ``erase``. ``A ∪ ∅ = A``
+        # so a missing reference returns the primary layer unchanged instead
+        # of raising.
         if ref_gdf is None or ref_gdf.empty:
-            raise ValueError("overlay_union requires a reference layer.")
+            return gdf.copy()
         if gdf.empty:
             return ref_gdf.copy()
         ref = _aligned_ref(gdf, ref_gdf)

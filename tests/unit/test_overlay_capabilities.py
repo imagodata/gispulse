@@ -70,9 +70,20 @@ class TestOverlayIntersection:
         for area in out.geometry.area:
             assert area == pytest.approx(8.0)
 
-    def test_empty_ref_raises(self, parcels):
-        with pytest.raises(ValueError, match="reference layer"):
-            OverlayIntersectionCapability().execute(parcels, ref_gdf=None)
+    def test_empty_ref_returns_empty(self, parcels):
+        """Beta P2 (2026-04-24): aligning with ``erase`` — a missing
+        reference makes the operation degenerate to its identity. For
+        intersection, ``A ∩ ∅ = ∅`` so we return an empty GeoDataFrame
+        with the primary layer's schema instead of raising. ``erase``
+        passes ``A`` through and ``overlay_union`` returns ``A`` —
+        consistent semantics across the family.
+        """
+        out = OverlayIntersectionCapability().execute(parcels, ref_gdf=None)
+        assert isinstance(out, gpd.GeoDataFrame)
+        assert len(out) == 0
+        # Schema preserved so downstream nodes can introspect columns.
+        for col in parcels.columns:
+            assert col in out.columns
 
     def test_custom_suffixes_on_collision(self):
         a = gpd.GeoDataFrame(
@@ -117,6 +128,14 @@ class TestOverlayUnion:
         )
         out = OverlayUnionCapability().execute(empty, ref_gdf=ref)
         assert len(out) == 1
+
+    def test_empty_ref_returns_primary(self, parcels):
+        """Beta P2 (2026-04-24): ``A ∪ ∅ = A``. Aligned with the rest of
+        the overlay family (intersection returns ∅, erase returns A)."""
+        out = OverlayUnionCapability().execute(parcels, ref_gdf=None)
+        assert len(out) == len(parcels)
+        for col in parcels.columns:
+            assert col in out.columns
 
 
 # ---------------------------------------------------------------------------
