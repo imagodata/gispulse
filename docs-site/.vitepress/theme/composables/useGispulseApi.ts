@@ -1,6 +1,13 @@
 const DEFAULT_API = 'https://demo.gispulse.dev'
 const API_KEY = 'demo-playground-key'
 
+/** Hard cap per request. The demo API is fronted by Caddy + Cloud Run; cold
+ *  starts can stretch past 5 s, so 8 s leaves slack without making the user
+ *  stare at a frozen page on a real outage. */
+const REQUEST_TIMEOUT_MS = 8000
+/** Backoff before a single retry on transient network/timeout failures. */
+const RETRY_DELAY_MS = 600
+
 let _baseUrl = DEFAULT_API
 
 export function setApiBase(url: string) {
@@ -11,18 +18,44 @@ function getBaseUrl(): string {
   return _baseUrl
 }
 
-async function apiFetch(path: string, opts: RequestInit = {}) {
+/**
+ * Fetch wrapper hardened for the public demo:
+ *   - 8 s AbortController timeout — prevents a stalled `demo.gispulse.dev`
+ *     from leaving the page on a never-resolving spinner.
+ *   - 1 retry with backoff on network / timeout errors only. 4xx/5xx with a
+ *     body resolve to a thrown "API NNN" — those are deterministic and not
+ *     worth retrying.
+ *   - Mutations (non-GET) are NEVER retried. Re-running an `executePipeline`
+ *     or `createFeature` could double-execute a side-effect.
+ */
+async function apiFetch(path: string, opts: RequestInit = {}, retries = 1): Promise<any> {
   const base = getBaseUrl()
-  const res = await fetch(`${base}${path}`, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-API-Key': API_KEY,
-      ...(opts.headers || {}),
-    },
-  })
-  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`)
-  return res.json()
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const isMutation = (opts.method || 'GET').toUpperCase() !== 'GET'
+
+  try {
+    const res = await fetch(`${base}${path}`, {
+      ...opts,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': API_KEY,
+        ...(opts.headers || {}),
+      },
+    })
+    if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`)
+    return await res.json()
+  } catch (e: any) {
+    const isTransient = e?.name === 'AbortError' || e?.name === 'TypeError'
+    if (retries > 0 && !isMutation && isTransient) {
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS))
+      return apiFetch(path, opts, retries - 1)
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export function useGispulseApi() {

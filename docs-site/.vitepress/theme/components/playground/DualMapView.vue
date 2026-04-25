@@ -41,6 +41,29 @@ const loading = ref(true)
 const error = ref('')
 const datasetId = ref('')
 
+/**
+ * Defer Leaflet mount so MapLibre wins LCP and the page becomes interactive
+ * faster. Sticky once true (we never tear Leaflet down again, even on tab
+ * switch back to MapLibre — the sync watch keeps both viewports aligned).
+ *
+ * - `tabs` layout: mounted as soon as the user opens the Leaflet tab.
+ * - `split` layout: mounted after `requestIdleCallback` (~ MapLibre's first
+ *   paint), so the side-by-side comparison still appears within ~1 s on a
+ *   fresh load but doesn't fight MapLibre for main-thread time during the
+ *   crucial first frames.
+ */
+const leafletMounted = ref(false)
+function ensureLeaflet() {
+  if (!leafletMounted.value) leafletMounted.value = true
+}
+
+/**
+ * Latest scenario bbox from the static manifest. Stored at component scope so
+ * a late-mounting Leaflet (idle callback or tab switch after scenario load)
+ * can catch up to MapLibre's fitBounds without waiting for the next reload.
+ */
+const currentBbox = ref<[number, number, number, number] | null>(null)
+
 // Drawing state surfaced to the toolbar. Mirrors whichever map is actively
 // receiving clicks — the other map emits empty state, so "last non-zero wins"
 // would get stale; we refresh on every emit (even 0) to stay in sync with the
@@ -94,6 +117,43 @@ function onToolbarFinish() {
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
+// Lazy-mount Leaflet after MapLibre's first paint in split layout.
+// `requestIdleCallback` falls back to a 1 s timer on Safari (no native impl).
+let leafletIdleHandle: number | null = null
+function scheduleLeafletMount() {
+  if (leafletMounted.value || layout.value !== 'split') return
+  const ric = (globalThis as any).requestIdleCallback as
+    | ((cb: () => void, opts?: { timeout: number }) => number)
+    | undefined
+  if (ric) {
+    leafletIdleHandle = ric(() => ensureLeaflet(), { timeout: 1500 })
+  } else {
+    leafletIdleHandle = window.setTimeout(ensureLeaflet, 1000)
+  }
+}
+onMounted(scheduleLeafletMount)
+onUnmounted(() => {
+  if (leafletIdleHandle === null) return
+  const cic = (globalThis as any).cancelIdleCallback as ((h: number) => void) | undefined
+  if (cic) cic(leafletIdleHandle)
+  else window.clearTimeout(leafletIdleHandle)
+})
+
+// Tab switch / layout change → mount Leaflet immediately so the user never
+// waits on the idle scheduler when they explicitly ask to see it.
+watch(activeTab, (tab) => { if (tab === 'leaflet') ensureLeaflet() })
+watch(layout, (l) => { if (l === 'split') ensureLeaflet() })
+
+// When Leaflet mounts AFTER the scenario was already loaded (idle callback
+// or tab switch on a populated page), it would otherwise sit on the config
+// center/zoom and wait for the user to pan MapLibre before catching up.
+// Re-apply the cached bbox once its ref is wired.
+watch(leafletMounted, async (mounted) => {
+  if (!mounted) return
+  await nextTick()
+  if (currentBbox.value) leafletRef.value?.fitBounds?.(currentBbox.value)
+})
+
 const config = computed<ScenarioConfig | undefined>(() => scenarios[props.scenario])
 
 const displayedLayers = computed(() => {
@@ -125,6 +185,13 @@ watch(activeTab, async () => {
  * Load the scenario pointed to by `config`: resolve the dataset id, fetch the
  * configured base layers, then rules and (optionally) triggers. Safe to call
  * repeatedly; callers must invoke `resetView()` first when switching scenarios.
+ *
+ * Strategy: static-first. Every scenario ships a precomputed bundle under
+ * `public/playground/data/<slug>/` that is faster (~50 ms gzip-decompress vs
+ * ~500-3000 ms API round-trip + simplify), works offline, and survives demo
+ * API outages. The live API is still queried for rules / pipeline / triggers
+ * because those mutate / compute server-side. If the static bundle is missing
+ * or partial, we fall back to fetching base layers from the live API.
  */
 async function loadScenario() {
   const cfg = config.value
@@ -138,36 +205,81 @@ async function loadScenario() {
   error.value = ''
 
   try {
-    // Reuse the cached datasets list when we already have it — avoids a second
-    // round-trip when the user jumps between scenarios backed by the same API.
-    const datasets = store.state.datasets.length
-      ? store.state.datasets
-      : await api.listDatasets()
-    const matches = datasets.filter((d: any) => d.name === cfg.datasetName)
-    const ds = matches.length > 1
-      ? [...matches].sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))[0]
-      : matches[0]
-    if (!ds) {
-      error.value = `Dataset "${cfg.datasetName}" not found on demo server`
-      loading.value = false
-      return
-    }
-    datasetId.value = ds.id
-    store.state.activeDatasetId = ds.id
-    store.state.datasets = datasets
+    const slug = props.scenario
 
-    // Load layers in parallel, then insert in reverse scenario order so the
-    // first-listed layer renders on top.
-    const geojsons = await Promise.all(
-      cfg.layers.map(layerName =>
-        api.getFeatures(ds.id, layerName, { limit: 100000, bbox: cfg.bbox, simplify: 0.00001 }),
-      ),
-    )
-    for (let i = cfg.layers.length - 1; i >= 0; i--) {
-      store.setLayer(cfg.layers[i], geojsons[i])
+    // 1. Try the static bundle first for base layers — fast and offline-safe.
+    let staticOk = false
+    let manifestBbox: [number, number, number, number] | null = null
+    try {
+      const sm = await staticApi.loadScenario(slug)
+      manifestBbox = (sm.bbox?.length === 4 ? sm.bbox : null) as
+        | [number, number, number, number]
+        | null
+      const wanted = cfg.layers.filter((n) => sm.layers[n]?.file)
+      if (wanted.length === cfg.layers.length) {
+        const geos = await Promise.all(wanted.map((n) => staticApi.loadLayer(slug, n)))
+        // Insert in reverse scenario order so the first-listed layer paints on top.
+        for (let i = wanted.length - 1; i >= 0; i--) {
+          store.setLayer(wanted[i], geos[i])
+        }
+        staticOk = true
+      }
+    } catch {
+      // No bundle for this scenario — silent fall-through to live API.
     }
 
-    if (!store.state.rules.length) store.state.rules = await api.listRules()
+    // 2. Resolve datasetId for pipeline / mutations / triggers. This is the
+    //    only call that *requires* the demo API to be reachable; if it fails
+    //    while the static bundle succeeded, we still render base layers and
+    //    only disable the pipeline button.
+    const needLiveApi = props.showPipeline || (props.showTriggers && !cfg.clientTriggerUrl)
+    let liveApiReachable = false
+    try {
+      const datasets = store.state.datasets.length
+        ? store.state.datasets
+        : await api.listDatasets()
+      const matches = datasets.filter((d: any) => d.name === cfg.datasetName)
+      const ds = matches.length > 1
+        ? [...matches].sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))[0]
+        : matches[0]
+      if (ds) {
+        datasetId.value = ds.id
+        store.state.activeDatasetId = ds.id
+        store.state.datasets = datasets
+        liveApiReachable = true
+      } else if (!staticOk) {
+        error.value = `Dataset "${cfg.datasetName}" not found on demo server`
+        loading.value = false
+        return
+      }
+    } catch (e: any) {
+      if (needLiveApi && !staticOk) {
+        error.value = `API GISPulse injoignable et aucun bundle statique pour "${slug}": ${e.message}`
+        loading.value = false
+        return
+      }
+      // Static bundle saved us — pipeline panel will display its own error.
+    }
+
+    // 3. Fall back to the live API for base layers when the static bundle is
+    //    missing or incomplete (one or more required layers absent).
+    if (!staticOk) {
+      if (!datasetId.value) {
+        error.value = `Aucun bundle statique pour "${slug}" et dataset live indisponible`
+        loading.value = false
+        return
+      }
+      const geojsons = await Promise.all(
+        cfg.layers.map(layerName =>
+          api.getFeatures(datasetId.value, layerName, { limit: 100000, bbox: cfg.bbox, simplify: 0.00001 }),
+        ),
+      )
+      for (let i = cfg.layers.length - 1; i >= 0; i--) {
+        store.setLayer(cfg.layers[i], geojsons[i])
+      }
+    }
+
+    if (liveApiReachable && !store.state.rules.length) store.state.rules = await api.listRules()
     if (props.showTriggers) {
       // When the scenario ships its own trigger JSON (e.g. road-setback, whose
       // S4 DML trigger isn't registered on the public demo API), use it as the
@@ -178,14 +290,14 @@ async function loadScenario() {
           if (res.ok) {
             const trig = await res.json()
             store.state.triggers = [trig]
-          } else {
+          } else if (liveApiReachable) {
             store.state.triggers = await api.listTriggers()
           }
         } catch (e) {
           console.warn('[playground] clientTriggerUrl load failed, falling back to API', e)
-          store.state.triggers = await api.listTriggers()
+          if (liveApiReachable) store.state.triggers = await api.listTriggers()
         }
-      } else {
+      } else if (liveApiReachable) {
         store.state.triggers = await api.listTriggers()
       }
     }
@@ -211,6 +323,16 @@ async function loadScenario() {
           }
         }),
       )
+    }
+
+    // Cadre la vue sur le bbox réel des données chargées plutôt que sur le
+    // center/zoom du config — utile quand le bundle statique a été clippé sur
+    // un bbox plus serré que celui de scenarioConfig.
+    currentBbox.value = manifestBbox
+    if (manifestBbox) {
+      await nextTick()
+      maplibreRef.value?.fitBounds?.(manifestBbox)
+      leafletRef.value?.fitBounds?.(manifestBbox)
     }
 
     loading.value = false
@@ -705,7 +827,11 @@ function onLeafletView(v: { center: [number, number]; zoom: number }) {
             @draw-state="onDrawState"
           />
         </div>
-        <div class="gp-map-panel" v-show="layout === 'split' || activeTab === 'leaflet'">
+        <div
+          v-if="leafletMounted"
+          class="gp-map-panel"
+          v-show="layout === 'split' || activeTab === 'leaflet'"
+        >
           <div class="gp-map-label gp-label-leaflet">Leaflet</div>
           <PlaygroundMap
             ref="leafletRef"
@@ -719,6 +845,15 @@ function onLeafletView(v: { center: [number, number]; zoom: number }) {
             @view-change="onLeafletView"
             @draw-state="onDrawState"
           />
+        </div>
+        <div
+          v-else
+          class="gp-map-panel gp-map-panel-pending"
+          v-show="layout === 'split' || activeTab === 'leaflet'"
+          @click="ensureLeaflet"
+        >
+          <div class="gp-map-label gp-label-leaflet">Leaflet</div>
+          <div class="gp-map-pending-msg">Chargement Leaflet…</div>
         </div>
       </div>
 
