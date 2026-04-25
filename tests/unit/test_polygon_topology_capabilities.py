@@ -60,9 +60,24 @@ class TestFixGaps:
         # Hole (36 m²) is filled back into the polygon
         assert new_total > original_total + 30.0
 
-    def test_invalid_area(self, coverage_with_gap):
+    def test_negative_area_raises(self, coverage_with_gap):
         with pytest.raises(ValueError, match="max_gap_area"):
-            FixGapsCapability().execute(coverage_with_gap, max_gap_area=0)
+            FixGapsCapability().execute(coverage_with_gap, max_gap_area=-1.0)
+
+    def test_zero_area_is_noop(self, coverage_with_gap):
+        """Beta P3 (2026-04-24): the schema declares ``minimum: 0`` for
+        ``max_gap_area`` so 0 is a valid contract input meaning "do not
+        fill any gap". The execute used to raise ``ValueError`` on
+        ``max_gap_area <= 0`` — inconsistent with the schema and
+        surprising to callers programmatically setting the threshold to 0
+        to disable the fix step. It is now a clean no-op (input returned
+        unchanged).
+        """
+        result = FixGapsCapability().execute(
+            coverage_with_gap, max_gap_area=0, crs_meters="EPSG:2154"
+        )
+        # No gap filled — total area unchanged from input.
+        assert result.geometry.area.sum() == coverage_with_gap.geometry.area.sum()
 
 
 class TestFixOverlaps:

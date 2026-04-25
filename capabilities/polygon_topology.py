@@ -75,9 +75,13 @@ class FixGapsCapability(Capability):
         from shapely.geometry import Polygon, MultiPolygon
         from shapely.ops import unary_union
 
-        if max_gap_area <= 0:
-            raise ValueError("max_gap_area must be > 0.")
-        if gdf.empty:
+        if max_gap_area < 0:
+            raise ValueError("max_gap_area must be >= 0.")
+        # P3 (beta-test 2026-04-24): ``max_gap_area=0`` is a documented input
+        # in the schema (``minimum: 0``) and means "do not fill any gap" —
+        # no gap can have area < 0, the loop body would never match. Return
+        # early so the call is a clean no-op instead of raising.
+        if max_gap_area == 0 or gdf.empty:
             return gdf.copy()
 
         work, original_crs = _work_in_metric(gdf, crs_meters)
