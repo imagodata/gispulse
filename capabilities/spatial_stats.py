@@ -272,6 +272,30 @@ class MoransICapability(Capability):
 
         W, neighbours = _build_weights(gdf, method, k, threshold, crs_meters)
         z = x - x.mean()
+        # P1 (beta-test 2026-04-24): a constant field has zero variance so
+        # Moran's I is mathematically undefined. The permutation-based pseudo
+        # p-value used to silently land near 0.01 because the NaN-vs-NaN
+        # comparison ``np.abs(sim - expected) >= abs(i_stat - expected)``
+        # evaluates to False for every simulation — making a constant field
+        # look statistically significant. Short-circuit to all-NaN here so
+        # downstream visualisations don't paint a false signal.
+        if not np.any(z != 0.0):
+            return gpd.GeoDataFrame(
+                {
+                    "morans_i": [float("nan")],
+                    "expected_i": [-1.0 / (len(x) - 1)] if len(x) > 1 else [float("nan")],
+                    "z_score": [float("nan")],
+                    "p_value": [float("nan")],
+                    "n": [len(x)],
+                    "n_neighbours_avg": [
+                        float(np.mean([len(nb) for nb in neighbours]))
+                        if neighbours else float("nan")
+                    ],
+                    "geometry": [gdf.geometry.union_all()],
+                },
+                crs=gdf.crs,
+            )
+
         i_stat = _moran_i(z, W)
         expected = -1.0 / (len(x) - 1)
 

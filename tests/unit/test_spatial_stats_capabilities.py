@@ -157,6 +157,36 @@ class TestMoransI:
         with pytest.raises(ValueError, match="non-numeric or NaN"):
             MoransICapability().execute(grid_polygons, field="value")
 
+    def test_morans_i_constant_field_returns_nan_pvalue(self):
+        """Beta P1 (2026-04-24): a constant field used to produce a false
+        ``p_value`` near 0.01 (looks significant) because the NaN-vs-NaN
+        comparison inside the permutation loop evaluated to False for every
+        simulation — so ``more_extreme = 0`` and ``p ≈ 1/permutations``.
+
+        Constant fields have zero variance, Moran's I is mathematically
+        undefined, and the p_value must be NaN — not a tiny number masking
+        the absence of signal.
+        """
+        polys = [
+            Polygon([(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)])
+            for i in range(4)
+            for j in range(4)
+        ]
+        gdf = gpd.GeoDataFrame(
+            {"value": [5.0] * len(polys), "geometry": polys},
+            crs="EPSG:2154",
+        )
+        result = MoransICapability().execute(
+            gdf, field="value", method="queen", permutations=99
+        )
+        assert len(result) == 1
+        assert np.isnan(result["morans_i"].iloc[0])
+        assert np.isnan(result["z_score"].iloc[0])
+        assert np.isnan(result["p_value"].iloc[0]), (
+            "constant field must yield p_value=NaN, not a false-significant value"
+        )
+        assert int(result["n"].iloc[0]) == len(polys)
+
 
 # ---------------------------------------------------------------------------
 # GetisOrdGStarCapability
