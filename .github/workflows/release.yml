@@ -7,230 +7,15 @@ on:
 
 permissions:
   contents: write
-  packages: write
   id-token: write
 
 env:
   PYTHON_VERSION: "3.12"
-  NODE_VERSION: "20"
 
 jobs:
-  # ── 1. Build Python sidecar binary ──────────────────────────────────
-  build-sidecar:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-22.04
-            target_triple: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target_triple: aarch64-apple-darwin
-          - os: macos-13
-            target_triple: x86_64-apple-darwin
-          - os: windows-latest
-            target_triple: x86_64-pc-windows-msvc
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install system deps (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgdal-dev gdal-bin
-
-      - name: Install system deps (macOS)
-        if: runner.os == 'macOS'
-        run: brew install gdal
-
-      - name: Install Python deps
-        run: |
-          pip install -e ".[api]"
-          pip install pyinstaller
-
-      - name: Build portal frontend
-        run: |
-          cd portal && npm ci && npm run build
-
-      - name: Build viewer frontend
-        run: |
-          cd viewer && npm ci && npm run build
-
-      - name: Build sidecar with PyInstaller
-        run: pyinstaller gispulse.spec
-
-      - name: Rename binary with target triple
-        shell: bash
-        run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            mv dist/gispulse-engine.exe dist/gispulse-engine-${{ matrix.target_triple }}.exe
-          else
-            mv dist/gispulse-engine dist/gispulse-engine-${{ matrix.target_triple }}
-          fi
-
-      - name: Upload sidecar artifact
-        uses: actions/upload-artifact@v5
-        with:
-          name: sidecar-${{ matrix.target_triple }}
-          path: dist/gispulse-engine-*
-
-  # ── 2. Build Tauri desktop app ──────────────────────────────────────
-  build-desktop:
-    needs: build-sidecar
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-22.04
-            target_triple: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target_triple: aarch64-apple-darwin
-          - os: macos-13
-            target_triple: x86_64-apple-darwin
-          - os: windows-latest
-            target_triple: x86_64-pc-windows-msvc
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Linux deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Download sidecar binary
-        uses: actions/download-artifact@v5
-        with:
-          name: sidecar-${{ matrix.target_triple }}
-          path: clients/desktop/src-tauri/binaries/
-
-      - name: Make sidecar executable
-        if: runner.os != 'Windows'
-        run: chmod +x clients/desktop/src-tauri/binaries/gispulse-engine-*
-
-      - name: Install frontend deps
-        working-directory: clients/desktop
-        run: npm ci
-
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: clients/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: "GISPulse ${{ github.ref_name }}"
-          releaseBody: "Desktop application release for ${{ github.ref_name }}"
-          releaseDraft: true
-          prerelease: false
-
-  # ── 3. Publish Docker image ─────────────────────────────────────────
-  publish-docker:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract version
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
-            ghcr.io/${{ github.repository }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ── 4. Attach sidecar binaries to GitHub Release ────────────────────
-  publish-sidecar:
-    needs: [build-sidecar, build-desktop]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download all sidecar artifacts
-        uses: actions/download-artifact@v5
-        with:
-          pattern: sidecar-*
-          path: sidecar-bins/
-          merge-multiple: true
-
-      - name: Generate checksums
-        run: |
-          cd sidecar-bins
-          sha256sum gispulse-engine-* > checksums.txt
-          cat checksums.txt
-
-      - name: Upload binaries and checksums to release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "${{ github.ref_name }}" \
-            sidecar-bins/gispulse-engine-* \
-            sidecar-bins/checksums.txt \
-            --repo "${{ github.repository }}" \
-            --clobber
-
-  # ── 5. Publish SDK to PyPI ──────────────────────────────────────────
-  publish-sdk:
-    runs-on: ubuntu-latest
-    environment: pypi
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Build SDK
-        working-directory: sdk
-        run: |
-          pip install build twine
-          python -m build
-          twine check dist/*
-
-      - name: Publish SDK to PyPI (trusted publisher)
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: sdk/dist/
-          skip-existing: true
-
-  # ── 6. Publish gispulse to PyPI ────────────────────────────────────
+  # ── 1. Build wheel + sdist, publish to TestPyPI then PyPI ───────────
   publish-pypi:
+    name: Publish gispulse to PyPI
     runs-on: ubuntu-latest
     environment: pypi
 
@@ -242,77 +27,54 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: ${{ env.NODE_VERSION }}
+      - name: Install build tooling
+        run: pip install build twine
 
-      - name: Build portal frontend
-        working-directory: portal
-        run: npm ci && npm run build
-
-      - name: Build viewer frontend
-        if: hashFiles('viewer/package.json') != ''
-        working-directory: viewer
-        run: npm ci && npm run build
-
-      - name: Build Python package
+      - name: Verify version matches tag
         run: |
-          pip install build twine
-          python -m build
-
-      - name: Verify package with twine
-        run: twine check dist/*
-
-      - name: Verify portal assets in wheel
-        run: |
-          echo "=== Checking portal assets in wheel ==="
-          unzip -l dist/*.whl | grep portal
-          PORTAL_COUNT=$(unzip -l dist/*.whl | grep -c "portal/dist/")
-          if [ "$PORTAL_COUNT" -lt 1 ]; then
-            echo "FATAL: No portal assets found in wheel"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PYPROJECT_VERSION=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/version = "(.*)"/\1/')
+          echo "Tag: $TAG_VERSION"
+          echo "pyproject.toml: $PYPROJECT_VERSION"
+          if [ "$TAG_VERSION" != "$PYPROJECT_VERSION" ]; then
+            echo "ERROR: tag and pyproject.toml versions differ"
             exit 1
           fi
-          echo "Found $PORTAL_COUNT portal asset entries"
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: Verify package metadata
+        run: twine check dist/*
 
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
-      - name: Install from TestPyPI and verify
+      - name: Smoke test from TestPyPI
         run: |
-          # Extract version from tag
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "Expected version: $VERSION"
-
-          # Wait for TestPyPI index to propagate
-          sleep 15
-
-          # Install from TestPyPI, falling back to PyPI for deps
-          pip install \
+          # Allow TestPyPI index to settle
+          sleep 20
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --upgrade pip
+          /tmp/smoke/bin/pip install \
             --index-url https://test.pypi.org/simple/ \
             --extra-index-url https://pypi.org/simple/ \
             "gispulse==$VERSION"
-
-          # Verify import works
-          python -c "import gispulse; print('Import OK')"
-
-          # Verify CLI returns correct version
-          CLI_VERSION=$(gispulse --version 2>&1 || true)
-          echo "CLI output: $CLI_VERSION"
-
-          # Uninstall before production publish
-          pip uninstall -y gispulse
+          /tmp/smoke/bin/python -c "import gispulse; print('import ok')"
+          /tmp/smoke/bin/gispulse --help >/dev/null
 
       - name: Publish to PyPI (production)
         uses: pypa/gh-action-pypi-publish@release/v1
 
-  # ── 7. Publish gispulse-pro meta-package to PyPI ──────────────────
-  publish-pro:
+  # ── 2. Create GitHub Release with sdist + wheel attached ────────────
+  github-release:
+    name: Create GitHub Release
     needs: publish-pypi
     runs-on: ubuntu-latest
-    environment: pypi
 
     steps:
       - uses: actions/checkout@v5
@@ -322,25 +84,41 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Sync version from tag
-        working-directory: packaging/gispulse-pro
+      - name: Build artifacts
+        run: |
+          pip install build
+          python -m build
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+
+      - name: Extract changelog section
+        id: changelog
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
-          # Also update the gispulse dependency pin
-          sed -i "s/gispulse\[postgis,api,redis,s3,scheduling\]>=.*/gispulse[postgis,api,redis,s3,scheduling]>=$VERSION\",/" pyproject.toml
-          sed -i "s/gispulse\[all\]>=.*/gispulse[all]>=$VERSION\",/" pyproject.toml
-          echo "=== pyproject.toml ==="
-          cat pyproject.toml
+          # Pull the section between "## [VERSION]" and the next "## [" header
+          awk -v v="$VERSION" '
+            /^## \[/ {
+              if (in_section) exit
+              if ($0 ~ "## \\[" v "\\]") in_section = 1
+              else next
+            }
+            in_section { print }
+          ' CHANGELOG.md > release-notes.md
+          echo "Notes :"
+          cat release-notes.md
 
-      - name: Build gispulse-pro
-        working-directory: packaging/gispulse-pro
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pip install build twine
-          python -m build
-          twine check dist/*
+          gh release create "${{ github.ref_name }}" \
+            --title "GISPulse ${{ github.ref_name }}" \
+            --notes-file release-notes.md \
+            dist/*.whl dist/*.tar.gz dist/SHA256SUMS
 
-      - name: Publish gispulse-pro to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: packaging/gispulse-pro/dist/
+  # ── 3. Docker image to GHCR (deferred — current Dockerfile bundles portal/
+  #      which now lives in gispulse-portal repo. Will reinstate once the
+  #      Dockerfile is rewritten as engine-only API container.)

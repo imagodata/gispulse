@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gispulse"
-version = "1.1.1"
+version = "1.2.0"
 description = "Modular geospatial engine with business rules, triggers, and dual operating modes (DuckDB/PostGIS)"
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.10"
@@ -65,11 +65,10 @@ Issues = "https://github.com/imagodata/gispulse/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["gispulse*", "core*", "capabilities*", "rules*", "orchestration*", "persistence*", "catalog*", "portal*", "viewer*"]
+include = ["gispulse*", "core*", "capabilities*", "rules*", "orchestration*", "persistence*", "catalog*", "viewer*"]
 exclude = ["docs*", "tests*"]
 
 [tool.setuptools.package-data]
-portal = ["dist/**/*", "dist/*"]
 viewer = ["dist/**/*", "dist/*"]
 
 [tool.ruff]

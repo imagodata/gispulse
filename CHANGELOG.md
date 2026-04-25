@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-04-25
+
+### Added
+- **Open source release** — first AGPL-3.0 publication on PyPI as `gispulse`. Source at https://github.com/imagodata/gispulse.
+- `core/plugin_hub.py` + `core/plugin_contracts.py` — plugin discovery via Python entry-points, six groups (`gispulse.routers`, `gispulse.middleware`, `gispulse.auth_provider`, `gispulse.billing_provider`, `gispulse.licence_provider`, `gispulse.connectors`).
+- `core/pricing_catalog.json` — tier→features catalog (community / pro / team / enterprise) with `inherits` chain.
+- `team` tier in `persistence.tier.VALID_TIERS` and `core.config.EngineSettings`, between `pro` and `enterprise`.
+- Multi-project gate on `POST /projects` (community=1, pro=5, team+=∞).
+- Pro-tier gate on `triggers_router` (router-level) and `pipelines_router` (`/execute`, `/execute-steps` for multi-step DAG).
+
+### Changed
+- **Repository layout** — proprietary modules (Stripe billing, OIDC SSO, RBAC admin, production auth middleware, licence Stripe sync) moved to a private companion package `gispulse-enterprise` distributed under a commercial EULA. The OSS engine ships only AGPL components and discovers enterprise via entry-points at runtime.
+- `gispulse/adapters/http/app.py` — billing, auth, admin router mounting now driven by `PluginHub` discovery instead of hard-coded imports; degrades cleanly when no enterprise plugin is installed.
+
+### Removed
+- `gispulse/adapters/billing/` — moved to `gispulse-enterprise`.
+- `gispulse/adapters/http/oidc.py`, `middleware/production_auth.py`, `routers/{auth,billing,admin}_router.py` — moved to `gispulse-enterprise`.
+- `pricing.yml` (with EUR amounts and early-adopter terms) — moved to `gispulse-enterprise/config/pricing_commercial.yml`. The technical tier→features mapping stays here as `core/pricing_catalog.json`.
+- Test files specific to enterprise modules (`test_oidc.py`, `test_billing*`, `test_admin_router.py`, `test_security_a10.py`, `test_rate_limit.py`, `test_auth_rbac.py`, `test_security.py`, `test_licence_repo.py`, `test_e2e_flows.py` partial).
+
 ## [1.1.1] - 2026-04-25
 
 ### Added
