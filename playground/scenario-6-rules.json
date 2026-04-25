@@ -1,7 +1,7 @@
 {
   "version": 2,
   "name": "real_estate_price_map",
-  "description": "Versailles €/m² map from DVF (Etalab) mutations: keep residential sales, compute price_per_m2, drop outliers, classify into quintiles with a YlOrRd color ramp. Then tile the area with a regular 50 m × 50 m fishnet, aggregate the mean price per m² per tile (spatial_aggregate, predicate=contains), and paint the YlOrRd choropleth as a high-resolution heatmap.",
+  "description": "Versailles €/m² map from DVF (Etalab) mutations on the wider S5 extent (Versailles + Le Chesnay + Viroflay + Buc + Jouy, ~21 × 11 km): keep residential sales, compute price_per_m2, drop outliers, classify into quintiles with a YlOrRd color ramp. Then tile the area with a regular 100 m × 100 m fishnet, aggregate the mean price per m² per tile (spatial_aggregate, predicate=contains), and paint the YlOrRd choropleth as a high-resolution heatmap.",
   "ref_layers": {
     "dvf_ventes": "dvf_ventes"
   },
@@ -60,7 +60,7 @@
       "capability": "grid_create",
       "params": {
         "ref_layer": "drop_price_outliers",
-        "cell_size": 50,
+        "cell_size": 100,
         "crs_meters": "EPSG:2154",
         "clip_to_extent": true
       },

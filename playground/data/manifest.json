@@ -89,12 +89,12 @@
           "file": "accessibility/routes.geojson.gz"
         },
         "batiments": {
-          "features": 77465,
-          "size_bytes": 2463294,
+          "features": 7747,
+          "size_bytes": 252491,
           "file": "accessibility/batiments.geojson.gz"
         }
       },
-      "total_size_bytes": 2492980
+      "total_size_bytes": 282177
     },
     {
       "slug": "road-setback",
@@ -161,24 +161,24 @@
       "slug": "real-estate",
       "title": "S6 - Versailles / Carte prix au m2 DVF",
       "center": [
-        2.125,
-        48.805
-      ],
-      "zoom": 13,
-      "bbox": [
-        2.1,
-        48.79,
-        2.15,
+        2.095,
         48.82
+      ],
+      "zoom": 12,
+      "bbox": [
+        1.96,
+        48.77,
+        2.17,
+        48.87
       ],
       "layers": {
         "dvf_ventes": {
-          "features": 1618,
-          "size_bytes": 31031,
+          "features": 3929,
+          "size_bytes": 68382,
           "file": "real-estate/dvf_ventes.geojson.gz"
         }
       },
-      "total_size_bytes": 31031
+      "total_size_bytes": 68382
     }
   ]
 }
