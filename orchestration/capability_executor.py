@@ -70,13 +70,15 @@ class CapabilityExecutor:
             )
             return capability.execute_with_context(gdf, ctx)
 
-        # Legacy fallback — plain execute()
+        # Legacy fallback — validated execute() (catches typo'd kwargs
+        # via Capability.execute_safe instead of swallowing them via
+        # the legacy ``**_`` placeholder).
         log.debug(
             "capability_executor_fallback",
             capability=capability_name,
             reason="no_strategies",
         )
-        return capability.execute(gdf, **params)
+        return capability.execute_safe(gdf, **params)
 
 
 def _has_spatial_index(gdf: gpd.GeoDataFrame) -> bool:

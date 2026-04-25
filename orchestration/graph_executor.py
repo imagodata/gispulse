@@ -140,7 +140,9 @@ class GraphExecutor:
         # expect a reference layer (filter, isochrone, spatial_join, …)
         # receive it in DAG mode too. The spec_to_graph converter keys
         # dataset nodes as ``_input_<alias>`` so we probe both forms.
-        ref_alias = resolved.get("ref_layer")
+        # ``pop`` (not ``get``) so the alias key doesn't leak into the
+        # capability call — execute_safe rejects unknown kwargs.
+        ref_alias = resolved.pop("ref_layer", None)
         if ref_alias:
             if ref_alias in global_inputs:
                 resolved["ref_gdf"] = global_inputs[ref_alias]
@@ -149,7 +151,7 @@ class GraphExecutor:
 
         # Plural variant: ref_layers (list) → ref_gdfs (list). Mirrors the
         # singular resolution above; used by merge_layers to stack N layers.
-        ref_aliases = resolved.get("ref_layers")
+        ref_aliases = resolved.pop("ref_layers", None)
         if isinstance(ref_aliases, list) and ref_aliases:
             resolved["ref_gdfs"] = [
                 global_inputs[a] if a in global_inputs else global_inputs[f"_input_{a}"]
@@ -176,9 +178,14 @@ class GraphExecutor:
                     params=resolved,
                 )
                 return cap.execute_with_context(gdf, ctx)
-            return cap.execute(gdf, **resolved)
+            from capabilities.base import safe_execute
+            return safe_execute(cap, gdf, **resolved)
 
-        # multi-input: pass as named kwargs
+        # multi-input: pass as named kwargs. The legacy contract here is
+        # that ``execute()`` declares each input by name (e.g.,
+        # ``def execute(self, layer_a, layer_b, ...)``), so a typo would
+        # raise ``TypeError`` directly from Python's binding — no
+        # kwarg-swallow risk to neutralise here.
         return cap.execute(**inputs, **resolved)
 
     def _handle_rule(

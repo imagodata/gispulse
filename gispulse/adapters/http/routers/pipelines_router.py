@@ -495,7 +495,7 @@ def execute_pipeline_steps(
             from orchestration.pipeline_executor import _auto_inject_crs_meters
             _auto_inject_crs_meters(cap, step.id, params, step_input_gdf)
 
-            current_gdf = cap.execute(step_input_gdf, **params)
+            current_gdf = cap.execute_safe(step_input_gdf, **params)
             step_outputs_cache[step.id] = current_gdf
 
             step_ms = int((time.monotonic() - step_start) * 1000)

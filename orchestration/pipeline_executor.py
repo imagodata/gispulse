@@ -161,9 +161,13 @@ class PipelineExecutor:
 
             cap = self._get_cap(step.capability)
 
-            # Resolve ref_layer from spec.ref_layers if present
+            # Resolve ref_layer from spec.ref_layers if present. ``pop``
+            # (not ``get``) so the original alias key doesn't leak into
+            # the capability call — execute_safe rejects unknown kwargs,
+            # and ``ref_layer`` is a pipeline-level routing field that
+            # capabilities never see directly (they consume ``ref_gdf``).
             params = dict(step.params)
-            ref_layer_alias = params.get("ref_layer")
+            ref_layer_alias = params.pop("ref_layer", None)
             if ref_layer_alias and ref_layer_alias in inputs:
                 params["ref_gdf"] = inputs[ref_layer_alias]
 
@@ -171,7 +175,7 @@ class PipelineExecutor:
             # by merge_layers to stack N layers at once; sibling of the scalar
             # ``ref_layer``/``ref_gdf`` plumbing above. Silently skips aliases
             # not yet produced so the capability can tolerate partial inputs.
-            ref_layers_aliases = params.get("ref_layers")
+            ref_layers_aliases = params.pop("ref_layers", None)
             if isinstance(ref_layers_aliases, list) and ref_layers_aliases:
                 params["ref_gdfs"] = [
                     inputs[a] for a in ref_layers_aliases if a in inputs
@@ -190,7 +194,8 @@ class PipelineExecutor:
                 )
                 gdf = cap.execute_with_context(gdf, ctx)
             else:
-                gdf = cap.execute(gdf, **params)
+                from capabilities.base import safe_execute
+                gdf = safe_execute(cap, gdf, **params)
 
             results[step.id] = gdf
             log.debug("pipeline_step_done", step_id=step.id, features=len(gdf))

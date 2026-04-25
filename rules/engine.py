@@ -99,6 +99,14 @@ class RuleEngine:
 
         # Build effective params — resolve cross-layer references
         params = dict(rule.config)
+        # Strip rule-level keys that authors sometimes nest inside config by
+        # mistake (the legacy ``**_`` swallow used to hide these). ``order``
+        # is the canonical Rule attribute and is read off ``rule.order`` —
+        # never from ``rule.config``. Stripping silently to keep
+        # backwards-compat with existing rule fixtures and YAML configs;
+        # validate_rule() handles deprecation messaging.
+        for _legacy_key in ("order", "name", "description", "enabled", "target_layer"):
+            params.pop(_legacy_key, None)
         ref_layer = params.pop("ref_layer", None)
         if ref_layer is not None:
             if layer_resolver is None:
@@ -122,7 +130,7 @@ class RuleEngine:
             )
             result = cap.execute_with_context(gdf, ctx)
         else:
-            result = cap.execute(gdf, **params)
+            result = cap.execute_safe(gdf, **params)
 
         _metrics.inc("rules_applied_total")
         return result
