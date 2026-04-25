@@ -5,12 +5,13 @@ const API_KEY = 'demo-playground-key'
  *  starts can stretch past 5 s, so 8 s leaves slack without making the user
  *  stare at a frozen page on a real outage. */
 const REQUEST_TIMEOUT_MS = 8000
-/** Heavy-compute override for pipeline runs. S6 real-estate over greater
- *  Versailles emits ~14 MB of GeoJSON across 8 steps and a 100 m fishnet —
- *  an 8 s budget aborts even on healthy connections once download/serialise
- *  costs are counted. 30 s covers cold starts + slow links without hiding
- *  real outages. */
-const PIPELINE_TIMEOUT_MS = 30000
+/** Heavy-compute override for pipeline runs. S3 accessibility runs
+ *  classify_by_ring on the full 77k Clermont batiments source and emits
+ *  ~69 MB of GeoJSON; measured at ~44 s server-side on the demo Cloud Run.
+ *  30 s aborted before the response landed and the UI surfaced a generic
+ *  500. 90 s covers worst-case cold start + that compute budget without
+ *  hiding real outages. */
+const PIPELINE_TIMEOUT_MS = 90000
 /** Backoff before a single retry on transient network/timeout failures. */
 const RETRY_DELAY_MS = 600
 
