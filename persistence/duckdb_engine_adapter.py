@@ -240,7 +240,10 @@ class DuckDBSpatialEngine(DuckDBSession):
                 "table_name": r[1],
                 "operation": r[2],
                 "row_pk": r[3],
-                "changed_at": r[4],
+                # DuckDB returns TIMESTAMP as datetime.datetime; SQLite/GPKG
+                # returns TEXT. Normalize to ISO-8601 string so the broadcast
+                # payload (json.dumps) doesn't trip on a non-serializable type.
+                "changed_at": r[4].isoformat(sep=" ") if hasattr(r[4], "isoformat") else r[4],
                 "processed": int(r[5]) if r[5] is not None else 0,
             }
             for r in rows
