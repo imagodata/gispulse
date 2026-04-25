@@ -94,6 +94,15 @@ def get_event_hub(request: Request) -> EventHub:
     return request.app.state.event_hub  # type: ignore[return-value]
 
 
+def get_watcher_registry(request: Request):
+    """Return the shared WatcherRegistry from app state.
+
+    May be ``None`` if the app was started in portal mode or before the
+    lifespan finished its startup phase. Callers must handle ``None``.
+    """
+    return getattr(request.app.state, "watcher_registry", None)
+
+
 from persistence.storage import DatasetStorage  # noqa: E402
 
 

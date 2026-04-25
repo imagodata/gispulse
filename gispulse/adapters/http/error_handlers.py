@@ -71,7 +71,34 @@ def _apply_cors_headers(request: Request, response: JSONResponse) -> None:
 async def _http_exception_handler(
     request: Request, exc: StarletteHTTPException
 ) -> JSONResponse:
-    """Handle Starlette / FastAPI HTTP exceptions (400, 401, 403, 404, …)."""
+    """Handle Starlette / FastAPI HTTP exceptions (400, 401, 403, 404, …).
+
+    Endpoints can opt into a custom error code by raising
+    ``HTTPException(status_code=4xx, detail={"error": {"code": "...",
+    "message": "...", ...}})``. When the handler sees that shape it
+    forwards the structured envelope verbatim instead of collapsing it
+    to the generic ``BAD_REQUEST`` / ``NOT_FOUND`` family — that pattern
+    is used by ``/datasets/{id}/enable_tracking`` to expose
+    ``tracking_unsupported_format`` and friends.
+    """
+    # Structured-detail passthrough.
+    if isinstance(exc.detail, dict) and isinstance(
+        exc.detail.get("error"), dict
+    ) and "code" in exc.detail["error"]:
+        err = dict(exc.detail["error"])
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_error_body(
+                code=str(err.get("code")),
+                message=str(err.get("message") or err.get("code") or ""),
+                detail={
+                    k: v
+                    for k, v in err.items()
+                    if k not in {"code", "message"}
+                } or None,
+            ),
+        )
+
     status_to_code: dict[int, str] = {
         400: "BAD_REQUEST",
         401: "UNAUTHORIZED",

@@ -47,6 +47,10 @@ class EventHub:
 
     def __init__(self) -> None:
         self._subscribers: list[Subscription] = []
+        # P0-4b (Beta): drop-counter so QueueFull events are observable.
+        # Slow subscribers silently lose events when their per-sub queue
+        # saturates at maxsize=1000; we now log error + bump the counter.
+        self._dropped_total: int = 0
 
     def subscribe(
         self,
@@ -119,11 +123,25 @@ class EventHub:
             try:
                 sub.queue.put_nowait(payload)
             except asyncio.QueueFull:
-                log.warning("event_hub_queue_full")
+                # P0-4b (Beta): bump from warning -> error and expose a
+                # counter. A slow subscriber dropping events used to be
+                # invisible; ops now have a metric to alert on.
+                self._dropped_total += 1
+                log.error(
+                    "event_hub_queue_full_dropped",
+                    subscriber_count=len(self._subscribers),
+                    total_drops=self._dropped_total,
+                )
 
     @property
     def subscriber_count(self) -> int:
         return len(self._subscribers)
+
+    @property
+    def dropped_total(self) -> int:
+        """Cumulative number of events dropped because a subscriber queue
+        was full. Reset only on process restart (not by ``unsubscribe``)."""
+        return self._dropped_total
 
 
 # Singleton — attached to app.state in create_app

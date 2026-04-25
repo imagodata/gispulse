@@ -181,6 +181,19 @@ def create_app(
                 "Set GISPULSE_API_KEYS to enable authentication.",
                 stacklevel=2,
             )
+            # P0-1: scream loud in production. The /ws/events router will
+            # also fail-closed when this combination ships; the boot-time
+            # CRITICAL gives ops a single grep target.
+            if cfg.api.env == "production":
+                log.critical(
+                    "ws_fail_closed_production_boot",
+                    reason="no_api_keys_and_no_oidc",
+                    detail=(
+                        "GISPULSE_ENV=production with no GISPULSE_API_KEYS "
+                        "and no OIDC provider — /ws/events will refuse every "
+                        "connection. Configure auth or downgrade GISPULSE_ENV."
+                    ),
+                )
     validate_api_key = get_api_key_validator(api_keys)
 
     # ------------------------------------------------------------------ Storage
@@ -251,9 +264,83 @@ def create_app(
                 log.info("scheduler_not_started", reason=str(exc))
                 app.state.scheduler = None
 
+            # Lot 2 v2 (P0-2): WatcherRegistry replaces the single
+            # lifespan-bound ChangeLogWatcher. The registry holds one
+            # (engine, watcher) pair per *registered* GPKG dataset.
+            #
+            # Compat: when the project engine itself is GPKG, we register
+            # it under the synthetic id "__project__" so
+            # ``app.state.change_log_watcher`` keeps working for tests
+            # that asserted on the lifespan watcher (Lot 2 v1 contract).
+            from persistence.watcher_registry import WatcherRegistry
+
+            registry = WatcherRegistry(event_hub=app.state.event_hub)
+            app.state.watcher_registry = registry
+            app.state.change_log_watcher = None  # back-compat sentinel
+
+            backend = getattr(spatial_engine, "backend_name", "")
+            if backend == "gpkg" and hasattr(
+                spatial_engine, "get_pending_changes"
+            ):
+                try:
+                    from persistence.change_log_watcher import ChangeLogWatcher
+
+                    trigger_repo = app.state.trigger_repo
+
+                    def _active_triggers():
+                        try:
+                            items = trigger_repo.list_all()
+                        except Exception:
+                            return []
+                        return [t for t in items if getattr(t, "enabled", True)]
+
+                    # The registry would normally open its own engine on
+                    # the project GPKG, but the SpatialEngine factory has
+                    # already opened the project engine. Reuse it directly
+                    # to avoid a second SQLite handle on the same WAL.
+                    watcher = ChangeLogWatcher(
+                        engine=spatial_engine,
+                        event_hub=app.state.event_hub,
+                        triggers_provider=_active_triggers,
+                    )
+                    watcher.start()
+                    # Stash inside the registry under the synthetic id so
+                    # shutdown_all() stops the project watcher too. We
+                    # bypass register() because the engine is already open
+                    # and owned by the lifespan.
+                    registry._entries["__project__"] = (spatial_engine, watcher)  # noqa: SLF001
+                    app.state.change_log_watcher = watcher
+                    log.info(
+                        "change_log_watcher_started",
+                        backend=backend,
+                        dataset_id="__project__",
+                    )
+                except Exception as exc:
+                    log.warning("change_log_watcher_failed", error=str(exc))
+
         yield
 
         if not is_portal:
+            # Graceful watcher registry shutdown — stops every per-dataset
+            # watcher started via /enable_tracking. The project engine
+            # was registered as ``__project__`` and is owned by the
+            # lifespan, so we pop it before shutdown_all to avoid a
+            # double-close on the SpatialEngine.
+            registry = getattr(app.state, "watcher_registry", None)
+            if registry is not None:
+                project_entry = registry._entries.pop("__project__", None)  # noqa: SLF001
+                if project_entry is not None:
+                    _project_engine, project_watcher = project_entry
+                    try:
+                        project_watcher.stop()
+                    except Exception as exc:
+                        log.warning(
+                            "change_log_watcher_stop_failed", error=str(exc)
+                        )
+                try:
+                    registry.shutdown_all()
+                except Exception as exc:
+                    log.warning("watcher_registry_shutdown_failed", error=str(exc))
             # Graceful scheduler shutdown
             if getattr(app.state, "scheduler", None) is not None:
                 await app.state.scheduler.stop()

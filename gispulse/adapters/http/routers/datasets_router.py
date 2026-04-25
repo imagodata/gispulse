@@ -1,17 +1,29 @@
 """
 Datasets router for the GISPulse HTTP API.
 
+NOTE: Uploads are NOT auto-tracked. Call POST /datasets/{id}/enable_tracking
+explicitly to start receiving DML events on /ws/events. Lot 2 v1's silent
+"best-effort auto-enable" was removed in Lot 2 v2 — it called
+``engine.enable_change_tracking(layer)`` on the *project* GPKG, which
+almost never contained the uploaded layer, so tracking was a silent no-op
+(Beta shadow-zone ``test_app_state_holds_only_one_change_log_watcher``).
+
 Endpoints:
-    POST /datasets/upload   — upload a spatial file and register a dataset
-    POST /datasets/ogc      — register a remote OGC service as a dataset (lazy)
-    GET  /datasets          — list all datasets
-    GET  /datasets/{id}     — detail for a single dataset
+    POST /datasets/upload                       — upload a spatial file and register a dataset
+    POST /datasets/ogc                          — register a remote OGC service as a dataset (lazy)
+    GET  /datasets                              — list all datasets
+    GET  /datasets/{id}                         — detail for a single dataset
+    POST /datasets/{id}/enable_tracking         — start change-log watcher for the dataset (GPKG only)
+    POST /datasets/{id}/disable_tracking        — stop watcher and drop triggers
+    GET  /datasets/{id}/tracking_status         — report current tracking state
 """
 
 from __future__ import annotations
 
 import ipaddress
+import logging
 import shutil
+import sqlite3
 import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
@@ -27,6 +39,8 @@ from core.models import Dataset, OGCSourceConfig
 from persistence.io import dataset_from_file, supported_extensions
 from persistence.repository import Repository
 from persistence.storage import DatasetStorage
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -177,6 +191,13 @@ async def upload_dataset(
                 detail=f"Failed to process file: {exc}",
             )
 
+        # ------------------------------------------------------------------
+        # Lot 2 v2 — change tracking is NO LONGER auto-enabled on upload.
+        # The previous implementation called engine.enable_change_tracking
+        # on the *project* GPKG (which doesn't contain the uploaded layer)
+        # so live-sync was a silent no-op. Clients must now POST to
+        # /datasets/{id}/enable_tracking to opt in.
+        # ------------------------------------------------------------------
         return _dataset_to_response(dataset)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -264,3 +285,341 @@ def get_dataset(
             detail=f"Dataset '{dataset_id}' not found.",
         )
     return _dataset_to_response(ds)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Change-tracking lifecycle endpoints (Lot 2 v2 — Q1)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_gpkg_path(ds: Dataset) -> Path:
+    """Return the absolute path to the dataset's GPKG file.
+
+    Raises:
+        HTTPException(400): If the dataset is not a local GPKG.
+        HTTPException(500): If the path is missing/unreadable.
+    """
+    if (ds.format or "").lower() != "gpkg":
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "tracking_unsupported_format",
+                    "format": ds.format,
+                    "message": (
+                        "Change tracking is only supported for local GPKG "
+                        "datasets. PostGIS uses pg_notify (Pro tier) and "
+                        "DuckDB tracking ships in Lot 3."
+                    ),
+                }
+            },
+        )
+    src = ds.source_path or ""
+    if not src or src.startswith("s3://"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "tracking_remote_not_supported",
+                    "message": (
+                        "Cannot enable tracking on a remote-only GPKG. "
+                        "Tracking requires direct SQLite access."
+                    ),
+                }
+            },
+        )
+    p = Path(src)
+    if not p.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Dataset source file not found on disk: {src}",
+        )
+    return p
+
+
+def _layers_in_gpkg(path: Path) -> list[str]:
+    """Return user-visible spatial layer names from a GPKG.
+
+    Excludes ``_gispulse_*`` internal tables and the OGC ``gpkg_*`` system
+    tables. Falls back to a SQLite scan when ``pyogrio.list_layers`` is
+    unavailable for some reason (legacy GDAL).
+    """
+    try:
+        import pyogrio
+
+        info = pyogrio.list_layers(str(path))
+        # pyogrio.list_layers returns ndarray (name, geom_type) — first col
+        # is layer name.
+        names = [str(row[0]) for row in info]
+    except Exception:
+        names = []
+        with sqlite3.connect(str(path)) as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT table_name FROM gpkg_contents WHERE data_type='features'"
+                ).fetchall()
+                names = [str(r[0]) for r in rows]
+            except sqlite3.Error:
+                names = []
+    return [
+        n
+        for n in names
+        if not n.startswith("_gispulse_") and not n.startswith("gpkg_")
+    ]
+
+
+@router.post("/{dataset_id}/enable_tracking")
+def enable_tracking(
+    dataset_id: UUID,
+    request: Request,
+    repo: Repository = Depends(get_dataset_repo),
+) -> dict:
+    """Enable change-tracking on every layer of a GPKG dataset.
+
+    Steps:
+        1. Tier gate (``local_triggers``).
+        2. Resolve the GPKG file from the dataset's ``source_path``.
+        3. ``CREATE TRIGGER IF NOT EXISTS`` for INSERT/UPDATE/DELETE on
+           every layer (idempotent — re-calling is a no-op).
+        4. Register the dataset with the :class:`WatcherRegistry` so
+           ``dml.changed`` events start landing on ``/ws/events``.
+
+    Returns ``{"dataset_id", "tracking_enabled": True, "layers_tracked": [...]}``.
+
+    Raises:
+        400: ``tracking_unsupported_format`` if dataset is not GPKG.
+        400: ``invalid_layer_name`` if a layer name fails the identifier
+             check (quotes, semicolons, spaces — see SQLi guard).
+        402: Tier doesn't grant ``local_triggers``.
+        404: Dataset not found.
+    """
+    ds = repo.get(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found.")
+
+    # Tier gating — propagate the original 402 contract from Lot 1.
+    from persistence.tier import TierError, enforce_feature
+
+    try:
+        enforce_feature("local_triggers")
+    except TierError as exc:
+        raise HTTPException(status_code=402, detail=str(exc))
+
+    gpkg_path = _resolve_gpkg_path(ds)
+
+    # Idempotency short-circuit: if the registry already holds a watcher
+    # for this dataset, opening another engine on the same GPKG (and a
+    # pyogrio handle for layer listing) collides with the watcher's
+    # SQLite connection in WAL mode and surfaces as "disk I/O error".
+    # Return the cached layer snapshot from the registry instead — no
+    # filesystem touch, no second handle.
+    registry = getattr(request.app.state, "watcher_registry", None)
+    if registry is not None and registry.is_registered(str(dataset_id)):
+        return {
+            "dataset_id": str(dataset_id),
+            "tracking_enabled": True,
+            "layers_tracked": registry.get_layers(str(dataset_id)),
+        }
+
+    layers = _layers_in_gpkg(gpkg_path)
+    if not layers:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "tracking_no_layers",
+                    "message": "GPKG file has no spatial layers to track.",
+                }
+            },
+        )
+
+    # Open a short-lived engine to install the triggers idempotently.
+    # The WatcherRegistry will open its own engine on register() — we
+    # cannot share this one without leaking it on the hot path.
+    from persistence.gpkg_engine import GeoPackageEngine
+
+    tracked: list[str] = []
+    invalid: list[str] = []
+    install_engine = GeoPackageEngine(gpkg_path)
+    install_engine.open()
+    try:
+        for layer in layers:
+            try:
+                install_engine.enable_change_tracking(layer)
+                tracked.append(layer)
+            except ValueError as exc:
+                # SQLi guard rejected an exotic identifier — surface to caller.
+                invalid.append(layer)
+                logger.warning(
+                    "enable_tracking_invalid_layer dataset_id=%s layer=%s err=%s",
+                    dataset_id,
+                    layer,
+                    exc,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "enable_tracking_install_failed dataset_id=%s layer=%s err=%s",
+                    dataset_id,
+                    layer,
+                    exc,
+                )
+    finally:
+        install_engine.close()
+
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "invalid_layer_name",
+                    "invalid_layers": invalid,
+                    "message": (
+                        "One or more layers have names that are unsafe for "
+                        "trigger DDL (quotes, semicolons, spaces, dots). "
+                        "Rename them to plain identifiers before enabling "
+                        "tracking."
+                    ),
+                }
+            },
+        )
+
+    if not tracked:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to install change-tracking on any layer.",
+        )
+
+    # Hook up to the watcher registry so events flow.
+    if registry is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Watcher registry not initialised — check app lifespan.",
+        )
+
+    trigger_repo = getattr(request.app.state, "trigger_repo", None)
+
+    def _active_triggers():
+        if trigger_repo is None:
+            return []
+        try:
+            items = trigger_repo.list_all()
+        except Exception:
+            return []
+        return [t for t in items if getattr(t, "enabled", True)]
+
+    registry.register(
+        str(dataset_id),
+        gpkg_path,
+        triggers_provider=_active_triggers,
+        layers=tracked,
+    )
+
+    return {
+        "dataset_id": str(dataset_id),
+        "tracking_enabled": True,
+        "layers_tracked": tracked,
+    }
+
+
+@router.post("/{dataset_id}/disable_tracking")
+def disable_tracking(
+    dataset_id: UUID,
+    request: Request,
+    repo: Repository = Depends(get_dataset_repo),
+) -> dict:
+    """Stop the watcher and drop the SQLite triggers on every layer.
+
+    Idempotent: calling on a non-tracked dataset returns
+    ``{"tracking_enabled": False, "layers_tracked": []}`` without error.
+    """
+    ds = repo.get(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found.")
+
+    registry = getattr(request.app.state, "watcher_registry", None)
+    if registry is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Watcher registry not initialised — check app lifespan.",
+        )
+
+    if not registry.is_registered(str(dataset_id)):
+        return {
+            "dataset_id": str(dataset_id),
+            "tracking_enabled": False,
+            "layers_tracked": [],
+        }
+
+    # Drop triggers via a fresh engine — the registry's engine will be
+    # closed when we unregister, and we want the DDL to land before that.
+    try:
+        gpkg_path = _resolve_gpkg_path(ds)
+    except HTTPException:
+        # If resolve fails (file moved, format flipped) we still want to
+        # tear down the watcher to avoid leaking a thread.
+        registry.unregister(str(dataset_id))
+        return {
+            "dataset_id": str(dataset_id),
+            "tracking_enabled": False,
+            "layers_tracked": [],
+        }
+
+    layers = _layers_in_gpkg(gpkg_path)
+    from persistence.gpkg_engine import GeoPackageEngine
+
+    drop_engine = GeoPackageEngine(gpkg_path)
+    drop_engine.open()
+    try:
+        for layer in layers:
+            try:
+                drop_engine.disable_change_tracking(layer)
+            except Exception as exc:
+                logger.warning(
+                    "disable_tracking_drop_failed dataset_id=%s layer=%s err=%s",
+                    dataset_id,
+                    layer,
+                    exc,
+                )
+    finally:
+        drop_engine.close()
+
+    registry.unregister(str(dataset_id))
+
+    return {
+        "dataset_id": str(dataset_id),
+        "tracking_enabled": False,
+        "layers_tracked": [],
+    }
+
+
+@router.get("/{dataset_id}/tracking_status")
+def tracking_status(
+    dataset_id: UUID,
+    request: Request,
+    repo: Repository = Depends(get_dataset_repo),
+) -> dict:
+    """Return the current tracking state for a dataset.
+
+    Layer list is the GPKG's user layers when tracking is enabled, empty
+    otherwise. The watcher's running flag is reported via ``enabled``.
+    """
+    ds = repo.get(dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found.")
+
+    registry = getattr(request.app.state, "watcher_registry", None)
+    enabled = bool(registry and registry.is_registered(str(dataset_id)))
+
+    layers: list[str] = []
+    if enabled:
+        try:
+            gpkg_path = _resolve_gpkg_path(ds)
+            layers = _layers_in_gpkg(gpkg_path)
+        except HTTPException:
+            layers = []
+
+    return {
+        "dataset_id": str(dataset_id),
+        "enabled": enabled,
+        "layers_tracked": layers,
+    }

@@ -3,14 +3,23 @@
 WebSocket support requires the ``ws`` extra::
 
     pip install gispulse-sdk[ws]
+
+## At-least-once delivery
+
+The server's ``dml.changed`` events are at-least-once: a bad subscriber,
+a transient ``mark_changes_processed`` failure (e.g. read-only GPKG), or
+a watcher restart with un-acked rows can replay the same ``change_id``
+to clients. Use :func:`dedupe_by_change_id` (or :meth:`subscribe_events`
+with the default ``dedupe=True``) to filter duplicates client-side.
 """
 
 from __future__ import annotations
 
+import collections
 import json
 import threading
 import time
-from typing import Any, Callable, Iterator, Optional
+from typing import Any, AsyncIterator, Callable, Iterator, Optional
 
 
 class WebSocketListener:
@@ -86,6 +95,67 @@ class WebSocketListener:
                     break
                 time.sleep(delay)
                 delay = min(delay * 2, self._max_delay)
+
+
+async def dedupe_by_change_id(
+    events: AsyncIterator[dict],
+    *,
+    window_size: int = 1024,
+) -> AsyncIterator[dict]:
+    """Drop duplicate ``dml.changed`` events using a fixed-size LRU window.
+
+    The GISPulse server emits at-least-once: the same ``change_id`` may
+    appear more than once after a transient broadcast or ack failure.
+    Wrap your event iterator with this helper to get exactly-once
+    semantics from the application's perspective.
+
+    Args:
+        events:      Async iterator of event dicts (matches the
+                     ``{"type", "data": {...}, "timestamp"}`` envelope
+                     produced by ``EventHub.broadcast`` and forwarded
+                     through ``/ws/events``).
+        window_size: Maximum number of recently-seen ``change_id`` values
+                     to remember. FIFO eviction once the window is full.
+                     Defaults to 1024 — big enough for typical bursts,
+                     small enough to keep memory bounded.
+
+    Yields:
+        Events whose ``change_id`` was not seen inside the current window.
+        Events lacking a ``change_id`` (heartbeats, ``trigger.fired``
+        without an associated change) pass through unchanged.
+
+    Example::
+
+        async for event in dedupe_by_change_id(ws_events()):
+            print(event["data"]["change_id"], event["type"])
+    """
+    if window_size <= 0:
+        raise ValueError("window_size must be > 0")
+
+    seen_order: collections.deque = collections.deque(maxlen=window_size)
+    seen_set: set = set()
+
+    async for ev in events:
+        try:
+            cid = ev.get("data", {}).get("change_id")
+        except AttributeError:
+            cid = None
+
+        if cid is None:
+            yield ev
+            continue
+
+        if cid in seen_set:
+            # Duplicate within the current window — drop silently.
+            continue
+
+        if len(seen_order) == window_size:
+            # FIFO eviction: oldest id falls out of both structures.
+            oldest = seen_order[0]
+            seen_set.discard(oldest)
+        seen_order.append(cid)
+        seen_set.add(cid)
+        yield ev
 
 
 def iter_sse(response) -> Iterator[dict]:
