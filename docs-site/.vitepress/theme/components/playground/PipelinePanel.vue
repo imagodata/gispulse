@@ -309,7 +309,13 @@ async function runPipeline(): Promise<boolean> {
       steps: pipelineSteps,
       ref_layers: refLayers,
       simplify: 0.00001,
-      limit: 100000,
+      // Cap per-step GeoJSON return at 3000 features. The backend still uses
+      // the full set internally — only the response payload is truncated, so
+      // stats and downstream steps stay correct. 100000 left S6 emitting a
+      // ~14 MB response that aborted on the 30 s client timeout over slow
+      // links; 3000 keeps each step under ~1 MB while preserving the visual
+      // density needed to read the map at zoom 12.
+      limit: 3000,
     })
 
     for (let i = 0; i < response.steps.length; i++) {

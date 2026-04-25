@@ -5,6 +5,12 @@ const API_KEY = 'demo-playground-key'
  *  starts can stretch past 5 s, so 8 s leaves slack without making the user
  *  stare at a frozen page on a real outage. */
 const REQUEST_TIMEOUT_MS = 8000
+/** Heavy-compute override for pipeline runs. S6 real-estate over greater
+ *  Versailles emits ~14 MB of GeoJSON across 8 steps and a 100 m fishnet —
+ *  an 8 s budget aborts even on healthy connections once download/serialise
+ *  costs are counted. 30 s covers cold starts + slow links without hiding
+ *  real outages. */
+const PIPELINE_TIMEOUT_MS = 30000
 /** Backoff before a single retry on transient network/timeout failures. */
 const RETRY_DELAY_MS = 600
 
@@ -28,10 +34,15 @@ function getBaseUrl(): string {
  *   - Mutations (non-GET) are NEVER retried. Re-running an `executePipeline`
  *     or `createFeature` could double-execute a side-effect.
  */
-async function apiFetch(path: string, opts: RequestInit = {}, retries = 1): Promise<any> {
+async function apiFetch(
+  path: string,
+  opts: RequestInit = {},
+  retries = 1,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): Promise<any> {
   const base = getBaseUrl()
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   const isMutation = (opts.method || 'GET').toUpperCase() !== 'GET'
 
   try {
@@ -50,7 +61,7 @@ async function apiFetch(path: string, opts: RequestInit = {}, retries = 1): Prom
     const isTransient = e?.name === 'AbortError' || e?.name === 'TypeError'
     if (retries > 0 && !isMutation && isTransient) {
       await new Promise((r) => setTimeout(r, RETRY_DELAY_MS))
-      return apiFetch(path, opts, retries - 1)
+      return apiFetch(path, opts, retries - 1, timeoutMs)
     }
     throw e
   } finally {
@@ -158,15 +169,22 @@ export function useGispulseApi() {
       if (payload.simplify) qs.set('simplify', String(payload.simplify))
       if (payload.limit) qs.set('limit', String(payload.limit))
       const qsStr = qs.toString() ? `?${qs}` : ''
-      return apiFetch(`/pipelines/execute-steps${qsStr}`, {
-        method: 'POST',
-        body: JSON.stringify({
-          dataset_id: payload.dataset_id,
-          layer: payload.layer,
-          steps: payload.steps,
-          ref_layers: payload.ref_layers || {},
-        }),
-      })
+      return apiFetch(
+        `/pipelines/execute-steps${qsStr}`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            dataset_id: payload.dataset_id,
+            layer: payload.layer,
+            steps: payload.steps,
+            ref_layers: payload.ref_layers || {},
+          }),
+        },
+        // executePipelineSteps is a mutation-shaped POST but it's idempotent
+        // (pure compute, no DB writes) — allow 1 retry on transient errors.
+        1,
+        PIPELINE_TIMEOUT_MS,
+      )
     },
   }
 }
