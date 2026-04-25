@@ -547,6 +547,28 @@ Liste les fournisseurs de données (IGN, data.gouv.fr, STAC, etc.).
 
 WebSocket pour les événements temps réel (notifications de triggers, mises à jour de jobs, collaboration).
 
+**Authentification** : `?token=<api_key>` quand `GISPULSE_API_KEYS` est configuré.
+
+**Filtrage** (optionnel — sans paramètre, le client reçoit tous les événements) :
+
+| Paramètre | Format | Effet |
+|-----------|--------|-------|
+| `topics` | CSV : `topics=trigger_fired,layer_updated` | Limite aux types d'événements listés |
+| `trigger_id` | Répétable : `trigger_id=<uuid>&trigger_id=<uuid>` | Limite aux événements dont `data.trigger_id` est listé |
+| `table` | Répétable : `table=public.parcels&table=public.batiments` | Limite aux événements dont `data.table` est listé |
+
+Les filtres se combinent en **AND**. Un événement dont la donnée ne contient pas la clé attendue (`trigger_id`/`table`) **n'est pas exclu** — défensif, pour ne pas perdre les événements génériques.
+
+```js
+// Recevoir uniquement les déclenchements du trigger 42 sur la table parcels
+const ws = new WebSocket(
+  "wss://api.gispulse.dev/ws/events?token=KEY" +
+  "&topics=trigger_fired" +
+  "&trigger_id=42" +
+  "&table=public.parcels"
+);
+```
+
 ---
 
 ## Streaming / SSE

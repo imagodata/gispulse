@@ -55,7 +55,18 @@ async def ws_events(websocket: WebSocket) -> None:
 
     await websocket.accept()
     hub = get_event_hub()
-    queue = hub.subscribe()
+
+    # Optional filters — see #452 / OSSi-C3
+    # ?topics=trigger_fired,layer_updated   (csv, single param)
+    # ?trigger_id=<uuid>                    (repeatable)
+    # ?table=public.parcels                 (repeatable)
+    qp = websocket.query_params
+    topics_csv = qp.get("topics")
+    topics = [t.strip() for t in topics_csv.split(",") if t.strip()] if topics_csv else None
+    trigger_ids = qp.getlist("trigger_id") or None
+    tables = qp.getlist("table") or None
+
+    queue = hub.subscribe(topics=topics, trigger_ids=trigger_ids, tables=tables)
     log.info("ws_client_connected", clients=hub.subscriber_count)
 
     async def _heartbeat() -> None:
