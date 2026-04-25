@@ -104,6 +104,128 @@ def _is_pro_or_above() -> bool:
     return True
 
 
+# Forbidden ``action_type`` values for inline actions / operation extras
+# in Community. Any attempt to use one of these — including in operation
+# ``extra`` payloads — is a privilege escalation toward the ESB pipeline.
+_LOCAL_TRIGGER_FORBIDDEN_ACTION_TYPES = frozenset(
+    {"webhook", "http", "outbound_webhook"}
+)
+
+# Forbidden keys at the *operation extra* level (Bug #2). Superset of
+# _LOCAL_TRIGGER_FORBIDDEN_KEYS — operations are merged into
+# ``trigger.conditions.operations[N]`` and later consumed by the ESB
+# worker, so any URL / cron / DLQ / cascade hook there is the same
+# privilege escalation as a top-level conditions key.
+_LOCAL_TRIGGER_FORBIDDEN_OP_KEYS = frozenset(
+    {
+        "webhook",
+        "webhook_url",
+        "outbound_action",
+        "outbound_webhook",
+        "outbound_url",
+        "cron",
+        "cron_schedule",
+        "schedule",
+        "dlq",
+        "dlq_enabled",
+        "cascade",
+        "cascade_depth",
+        "http",
+        "http_url",
+    }
+)
+
+
+def _normalize_action_type(value: object) -> str:
+    """Canonicalize ``action_type`` for comparison: trim + lowercase.
+
+    Defends against bypasses like ``"webhook "`` (trailing space) or
+    ``"WEBHOOK"`` (case). Always returns a string (empty if value is None).
+    """
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
+def _normalize_key(value: object) -> str:
+    """Canonicalize a config-key for forbidden-key comparison."""
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
+def _check_active_count(
+    repo: "Repository",
+    *,
+    exclude_id: UUID | None = None,
+    will_be_enabled: bool = True,
+) -> None:
+    """Raise 402 if enabling one more trigger would exceed Community cap.
+
+    Counts enabled triggers, optionally excluding ``exclude_id`` (the
+    trigger being updated/toggled). When ``will_be_enabled`` is True we
+    require strictly fewer than ``_LOCAL_TRIGGER_MAX_ACTIVE`` *other*
+    active triggers — i.e. the new one would land at index ``cap-1``.
+    """
+    if not will_be_enabled:
+        return
+    try:
+        current_triggers = repo.list_all()
+    except Exception:
+        current_triggers = []
+    active = sum(
+        1
+        for t in current_triggers
+        if getattr(t, "enabled", False)
+        and (exclude_id is None or getattr(t, "id", None) != exclude_id)
+    )
+    if active >= _LOCAL_TRIGGER_MAX_ACTIVE:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"Community tier is capped at {_LOCAL_TRIGGER_MAX_ACTIVE} "
+                "active local triggers. Upgrade to Pro for unlimited "
+                "triggers (esb_triggers feature)."
+            ),
+        )
+
+
+def _check_forbidden_extra_keys(extra: object) -> None:
+    """Raise 402 if a free-form payload contains an ESB-only key.
+
+    Used by operation create/update endpoints where Pydantic accepts an
+    arbitrary ``extra: dict[str, Any]`` that is later merged into
+    ``trigger.conditions.operations[N]``. Without this check, an
+    attacker can attach a ``webhook`` URL Community-side.
+
+    Bypassed for Pro+.
+    """
+    if _is_pro_or_above():
+        return
+    if not isinstance(extra, dict):
+        return
+    bad: list[str] = []
+    for k, v in extra.items():
+        norm = _normalize_key(k)
+        if norm in _LOCAL_TRIGGER_FORBIDDEN_OP_KEYS:
+            bad.append(str(k))
+            continue
+        # Defense in depth: a key like ``action_type`` whose *value*
+        # is "webhook" / "http" / "outbound_webhook" is also a vector.
+        if norm == "action_type" and _normalize_action_type(v) in _LOCAL_TRIGGER_FORBIDDEN_ACTION_TYPES:
+            bad.append(str(k))
+    if bad:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"Operation extra keys {sorted(set(bad))} require the "
+                "esb_triggers feature (Pro). "
+                "Community local_triggers do not support webhooks, "
+                "cron, DLQ, or cascade>1."
+            ),
+        )
+
+
 def _enforce_community_trigger_caps(
     payload: "TriggerCreate",
     repo: "Repository",
@@ -113,6 +235,12 @@ def _enforce_community_trigger_caps(
     """Enforce the Community caps for ``local_triggers`` at create/update time.
 
     Pro+ skips all caps (it has the richer ``esb_triggers`` feature).
+
+    ``exclude_id`` excludes one trigger from the active-count (used on
+    PUT/toggle so the trigger being mutated is not double-counted —
+    the count already reflects whether that trigger was active before
+    the call, which is irrelevant since we only care about the *other*
+    triggers vs the cap-1 budget).
 
     The structural cap ``single_process_only`` is **not** enforced here:
     Community has no PostGIS engine and therefore no ``pg_notify`` —
@@ -125,33 +253,20 @@ def _enforce_community_trigger_caps(
     if _is_pro_or_above():
         return
 
-    # 1. max_active_triggers cap (only counts enabled triggers, excludes
-    #    the trigger being updated to allow toggling without 402).
+    # 1. max_active_triggers cap (only counts enabled triggers, excluding
+    #    the trigger being mutated so e.g. a same-state PUT does not 402).
     if payload.enabled:
-        try:
-            current_triggers = repo.list_all()
-        except Exception:
-            current_triggers = []
-        active = sum(
-            1
-            for t in current_triggers
-            if getattr(t, "enabled", False)
-            and (exclude_id is None or getattr(t, "id", None) != exclude_id)
+        _check_active_count(
+            repo,
+            exclude_id=exclude_id,
+            will_be_enabled=True,
         )
-        if active >= _LOCAL_TRIGGER_MAX_ACTIVE:
-            raise HTTPException(
-                status_code=402,
-                detail=(
-                    f"Community tier is capped at {_LOCAL_TRIGGER_MAX_ACTIVE} "
-                    "active local triggers. Upgrade to Pro for unlimited "
-                    "triggers (esb_triggers feature)."
-                ),
-            )
 
     # 2. Forbidden config shapes (webhook / cron / DLQ / cascade > 1).
     conditions = payload.conditions or {}
     if isinstance(conditions, dict):
-        bad = _LOCAL_TRIGGER_FORBIDDEN_KEYS.intersection(conditions.keys())
+        normalized_keys = {_normalize_key(k) for k in conditions.keys()}
+        bad = _LOCAL_TRIGGER_FORBIDDEN_KEYS.intersection(normalized_keys)
         if bad:
             raise HTTPException(
                 status_code=402,
@@ -178,8 +293,8 @@ def _enforce_community_trigger_caps(
             for action in actions:
                 if not isinstance(action, dict):
                     continue
-                action_type = str(action.get("action_type", "")).lower()
-                if action_type in {"webhook", "http", "outbound_webhook"}:
+                action_type = _normalize_action_type(action.get("action_type"))
+                if action_type in _LOCAL_TRIGGER_FORBIDDEN_ACTION_TYPES:
                     raise HTTPException(
                         status_code=402,
                         detail=(
@@ -389,10 +504,26 @@ def toggle_trigger(
     trigger_id: UUID,
     repo: Repository = Depends(get_trigger_repo),
 ) -> TriggerResponse:
-    """Toggle the enabled state of a trigger."""
+    """Toggle the enabled state of a trigger.
+
+    Community: a transition ``False -> True`` is gated by the
+    ``max_active_triggers`` cap. Disabling (``True -> False``) is always
+    allowed.
+    """
     trigger = repo.get(trigger_id)
     if trigger is None:
         raise HTTPException(status_code=404, detail=f"Trigger '{trigger_id}' not found.")
+
+    # Re-enable transition needs cap enforcement (Bug #1: toggle was a
+    # bypass for the create-time cap). Exclude the trigger from the count
+    # because it is currently disabled — only the *other* active triggers
+    # consume the cap budget.
+    if not trigger.enabled:
+        _check_active_count(
+            repo,
+            exclude_id=trigger_id,
+            will_be_enabled=True,
+        )
 
     trigger.enabled = not trigger.enabled
     repo.save(trigger)
@@ -555,10 +686,18 @@ def add_operation(
     payload: TriggerOperationIn,
     repo: Repository = Depends(get_trigger_repo),
 ) -> TriggerOperationOut:
-    """Add an operation to a trigger's conditions.operations list."""
+    """Add an operation to a trigger's conditions.operations list.
+
+    Community: ``payload.extra`` is gated against ESB-only keys
+    (webhook, cron, DLQ, cascade, http) — see Bug #2: operation extras
+    were merged unchecked into ``trigger.conditions.operations[N]`` and
+    later consumed by the ESB worker, allowing exfiltration.
+    """
     trigger = repo.get(trigger_id)
     if trigger is None:
         raise HTTPException(status_code=404, detail=f"Trigger '{trigger_id}' not found.")
+
+    _check_forbidden_extra_keys(payload.extra)
 
     operations = _get_operations(trigger)
 
@@ -592,10 +731,16 @@ def update_operation(
     payload: TriggerOperationIn,
     repo: Repository = Depends(get_trigger_repo),
 ) -> TriggerOperationOut:
-    """Update a specific operation by index."""
+    """Update a specific operation by index.
+
+    Community: ``payload.extra`` is gated against ESB-only keys (same
+    vector as :func:`add_operation`, Bug #2).
+    """
     trigger = repo.get(trigger_id)
     if trigger is None:
         raise HTTPException(status_code=404, detail=f"Trigger '{trigger_id}' not found.")
+
+    _check_forbidden_extra_keys(payload.extra)
 
     operations = _get_operations(trigger)
     if op_id < 0 or op_id >= len(operations):
