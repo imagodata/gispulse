@@ -212,12 +212,27 @@ class TestIsochrone:
         result = cap.execute(gdf, start_x=0, start_y=0, cost_budget=1_000_000.0, dissolve=False)
         assert len(result) == len(gdf)
 
-    def test_zero_budget_returns_geodataframe(self, monkeypatch):
+    def test_zero_budget_returns_empty_isochrone(self, monkeypatch):
+        """Beta P2 (2026-04-24): a budget of 0 used to produce a degenerate
+        ~30 m buffer ring around the start node because the start itself
+        has ``d == 0`` so the edge-buffer step still ran. "Reach with zero
+        budget" must yield an empty isochrone — anything else is a false
+        coverage signal that downstream classification picks up.
+        """
         _pro_env(monkeypatch)
         gdf = _grid_network()
         cap = IsochroneCapability()
         result = cap.execute(gdf, start_x=0, start_y=0, cost_budget=0.0, dissolve=False)
         assert isinstance(result, gpd.GeoDataFrame)
+        assert len(result) == 0
+        assert "geometry" in result.columns
+
+    def test_negative_budget_raises(self, monkeypatch):
+        _pro_env(monkeypatch)
+        gdf = _grid_network()
+        cap = IsochroneCapability()
+        with pytest.raises(ValueError, match="cost_budget"):
+            cap.execute(gdf, start_x=0, start_y=0, cost_budget=-1.0)
 
     def test_crs_preserved(self, monkeypatch):
         _pro_env(monkeypatch)

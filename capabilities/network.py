@@ -287,6 +287,21 @@ class IsochroneCapability(Capability):
         budgets: list[float] = (
             sorted({float(b) for b in cost_budgets}) if multi_budget else [float(cost_budget)]
         )
+        if any(b < 0 for b in budgets):
+            raise ValueError("isochrone: cost_budget(s) must be >= 0.")
+        # P2 (beta-test 2026-04-24): a budget of 0 used to produce a
+        # degenerate ~30 m buffer ring around the start node because the
+        # start itself has ``d == 0`` so ``reachable`` was non-empty and
+        # the edge-buffer step still ran. Semantically "reach with zero
+        # budget" means nothing is reachable beyond the seed point, so
+        # the only honest answer is an empty isochrone — short-circuit
+        # before invoking Dijkstra. Result CRS mirrors the regular
+        # path: ``gdf.crs`` in batch mode, ``ref_gdf or gdf`` in point
+        # mode (resolved below as ``result_crs``).
+        if all(b == 0 for b in budgets):
+            return gpd.GeoDataFrame(
+                columns=["geometry", "cost_budget"], crs=gdf.crs
+            )
 
         batch_mode = ref_gdf is not None and not ref_gdf.empty
 
