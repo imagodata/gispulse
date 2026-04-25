@@ -106,6 +106,18 @@ class TriggerManager:
         The trigger model must have ``conditions`` with keys:
         - ``table``:  target table name
         - ``schema``: target schema (default "public")
+
+        .. note::
+            This method is part of the **Pro-only** ``esb_triggers`` feature.
+            It runs ``CREATE TRIGGER`` DDL plus a ``pg_notify`` plpgsql
+            function on a PostGIS connection — by definition unreachable
+            from a Community deployment (which has no PostGIS engine).
+            The Community-tier ``local_triggers`` feature bypasses this
+            entire path and dispatches via the in-process event hub
+            instead. Caps for ``local_triggers`` (max 5 active triggers,
+            no webhook / cron / DLQ / cascade>1) are enforced at the HTTP
+            layer in
+            :func:`gispulse.adapters.http.routers.triggers_router._enforce_community_trigger_caps`.
         """
         table = trigger.conditions.get("table", "")
         schema = trigger.conditions.get("schema", "public")

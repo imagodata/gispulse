@@ -39,22 +39,160 @@ from core.models import (
     TriggerType,
 )
 from persistence.repository import Repository
-from persistence.tier import TierError, check_tier
+from persistence.tier import TierError, check_tier, enforce_feature, get_current_tier
 from rules.trigger_evaluator import TriggerEvaluator
 
 
-def _require_pro_tier() -> None:
-    """ESB triggers require Pro tier (cf. pricing.yml feature `esb_triggers`)."""
+# ---------------------------------------------------------------------------
+# Tier gating
+# ---------------------------------------------------------------------------
+#
+# Triggers come in two flavours, gated independently:
+#
+#   * ``local_triggers``  — Community + Pro. In-process bus + WebSocket
+#     dispatch, single-process, best-effort durability. Capped at 5 active
+#     triggers per process and forbids advanced action types (webhook,
+#     cron, cascade>1, DLQ).
+#   * ``esb_triggers``    — Pro only. Backed by PostgreSQL ``pg_notify``,
+#     DLQ, circuit breakers, cron schedules, outbound webhooks. The
+#     enforcement of this gate lives in :mod:`gispulse.adapters.esb`
+#     (workers, ``TriggerManager.install``, ``esb_router``) — not here.
+#
+# The router only owns CRUD on ``Trigger`` model objects; persisting a
+# Trigger does not by itself install a pg_notify trigger function. So
+# every endpoint here is gated at the ``local_triggers`` level (Community
+# OK), and the per-tier caps for Community accounts are enforced in
+# :func:`_enforce_community_trigger_caps` at create/update time.
+# ---------------------------------------------------------------------------
+
+
+def _require_local_triggers() -> None:
+    """Triggers CRUD requires the ``local_triggers`` feature (Community + Pro)."""
     try:
-        check_tier("pro")
+        enforce_feature("local_triggers")
     except TierError as exc:
         raise HTTPException(status_code=402, detail=str(exc))
+
+
+# Cap rules for Community-tier ``local_triggers``. Pro has no caps
+# (esb_triggers feature, full pg_notify pipeline).
+_LOCAL_TRIGGER_MAX_ACTIVE = 5
+_LOCAL_TRIGGER_MAX_CASCADE_DEPTH = 1
+# Forbidden top-level keys / action shapes in trigger.conditions for Community.
+# Anything that requires the ESB pipeline (DLQ, cron, outbound HTTP) lives
+# behind the esb_triggers feature.
+_LOCAL_TRIGGER_FORBIDDEN_KEYS = frozenset(
+    {
+        "webhook",
+        "outbound_action",
+        "outbound_webhook",
+        "cron_schedule",
+        "cron",
+        "schedule",
+        "dlq_enabled",
+        "dlq",
+    }
+)
+
+
+def _is_pro_or_above() -> bool:
+    """Return True if the current tier has the ``esb_triggers`` feature."""
+    try:
+        check_tier("pro")
+    except TierError:
+        return False
+    return True
+
+
+def _enforce_community_trigger_caps(
+    payload: "TriggerCreate",
+    repo: "Repository",
+    *,
+    exclude_id: UUID | None = None,
+) -> None:
+    """Enforce the Community caps for ``local_triggers`` at create/update time.
+
+    Pro+ skips all caps (it has the richer ``esb_triggers`` feature).
+
+    The structural cap ``single_process_only`` is **not** enforced here:
+    Community has no PostGIS engine and therefore no ``pg_notify`` —
+    durability is single-process by construction. See pricing_catalog.yml
+    `features.local_triggers.caps.single_process_only`.
+
+    Raises:
+        HTTPException(402): On any Community cap violation.
+    """
+    if _is_pro_or_above():
+        return
+
+    # 1. max_active_triggers cap (only counts enabled triggers, excludes
+    #    the trigger being updated to allow toggling without 402).
+    if payload.enabled:
+        try:
+            current_triggers = repo.list_all()
+        except Exception:
+            current_triggers = []
+        active = sum(
+            1
+            for t in current_triggers
+            if getattr(t, "enabled", False)
+            and (exclude_id is None or getattr(t, "id", None) != exclude_id)
+        )
+        if active >= _LOCAL_TRIGGER_MAX_ACTIVE:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"Community tier is capped at {_LOCAL_TRIGGER_MAX_ACTIVE} "
+                    "active local triggers. Upgrade to Pro for unlimited "
+                    "triggers (esb_triggers feature)."
+                ),
+            )
+
+    # 2. Forbidden config shapes (webhook / cron / DLQ / cascade > 1).
+    conditions = payload.conditions or {}
+    if isinstance(conditions, dict):
+        bad = _LOCAL_TRIGGER_FORBIDDEN_KEYS.intersection(conditions.keys())
+        if bad:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"Trigger config keys {sorted(bad)} require the "
+                    "esb_triggers feature (Pro). "
+                    "Community local_triggers do not support webhooks, "
+                    "cron, DLQ, or cascade>1."
+                ),
+            )
+        cascade = conditions.get("cascade_depth") or conditions.get("cascade")
+        if isinstance(cascade, int) and cascade > _LOCAL_TRIGGER_MAX_CASCADE_DEPTH:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"cascade_depth={cascade} exceeds the Community cap of "
+                    f"{_LOCAL_TRIGGER_MAX_CASCADE_DEPTH}. Upgrade to Pro."
+                ),
+            )
+
+        # Inline action defs may also carry a forbidden shape.
+        actions = conditions.get("actions") or []
+        if isinstance(actions, list):
+            for action in actions:
+                if not isinstance(action, dict):
+                    continue
+                action_type = str(action.get("action_type", "")).lower()
+                if action_type in {"webhook", "http", "outbound_webhook"}:
+                    raise HTTPException(
+                        status_code=402,
+                        detail=(
+                            "Outbound webhook actions require the "
+                            "esb_triggers feature (Pro)."
+                        ),
+                    )
 
 
 router = APIRouter(
     prefix="/triggers",
     tags=["triggers"],
-    dependencies=[Depends(_require_pro_tier)],
+    dependencies=[Depends(_require_local_triggers)],
 )
 
 
@@ -110,6 +248,8 @@ def create_trigger(
     repo: Repository = Depends(get_trigger_repo),
 ) -> TriggerResponse:
     """Create a new Trigger and persist it."""
+    _enforce_community_trigger_caps(payload, repo)
+
     from core.models import TriggerCategory
     trigger = Trigger(
         name=payload.name,
@@ -215,6 +355,8 @@ def update_trigger(
     trigger = repo.get(trigger_id)
     if trigger is None:
         raise HTTPException(status_code=404, detail=f"Trigger '{trigger_id}' not found.")
+
+    _enforce_community_trigger_caps(payload, repo, exclude_id=trigger_id)
 
     from core.models import TriggerCategory
     trigger.name = payload.name

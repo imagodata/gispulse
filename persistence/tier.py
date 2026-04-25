@@ -204,6 +204,46 @@ def check_tier(required_tier: str) -> bool:
     return True
 
 
+def enforce_feature(feature: str) -> None:
+    """Gate a named capability by the feature catalog (``core/pricing_catalog.yml``).
+
+    Unlike :func:`check_tier` which only knows about the tier hierarchy,
+    this resolves the full feature set for the current tier (walking the
+    ``inherits`` chain) and raises if *feature* is not granted.
+
+    Useful for features that are not strictly tier-ranked — e.g.
+    ``local_triggers`` is available in **both** Community and Pro
+    (Community is capped, Pro maps to the richer ``esb_triggers`` feature).
+
+    Args:
+        feature: A feature name as listed under ``tiers.<tier>.features``
+                 in ``core/pricing_catalog.yml``.
+
+    Raises:
+        TierError: If the current tier does not include *feature*.
+    """
+    if settings.engine.demo_mode and _demo_token_valid():
+        logger.warning("feature_check_bypassed_demo_mode feature=%s", feature)
+        return
+
+    current = get_current_tier()
+    # Validate licence for paid tiers (community needs none).
+    _validate_license(current)
+
+    # Local import to avoid a circular dependency:
+    # core.plugin_hub -> persistence.tier -> core.plugin_hub
+    from core.plugin_hub import _features_for_tier
+
+    granted = _features_for_tier(current)
+    if feature not in granted:
+        raise TierError(
+            f"Feature {feature!r} is not available in the {current} tier. "
+            f"Upgrade at https://gispulse.com/pricing"
+        )
+
+    logger.debug("Feature check passed: feature=%s, tier=%s", feature, current)
+
+
 def enforce_engine_tier(backend: str) -> None:
     """Gate engine backends by tier.
 

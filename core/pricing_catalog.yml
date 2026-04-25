@@ -20,6 +20,7 @@ tiers:
       - sdk
       - qgis_plugin
       - docker
+      - local_triggers
     limits:
       datasets: unlimited_local
       api_keys: 0
@@ -69,3 +70,38 @@ tiers:
       api_keys: unlimited
       datasets: unlimited
       projects: unlimited
+
+# ---------------------------------------------------------------------------
+# Feature descriptions / per-feature caps
+#
+# Informational metadata consumed by docs / UI. Caps under `local_triggers`
+# are also enforced at runtime in `gispulse.adapters.http.routers.triggers_router`
+# when the active tier == "community". Pro+ has the parallel feature
+# `esb_triggers` (uncapped, pg_notify-backed, cluster-grade).
+# ---------------------------------------------------------------------------
+features:
+  local_triggers:
+    description: >
+      Local DML triggers via in-process bus + WebSocket. Single-process,
+      best-effort, no DLQ/cron/webhook. Pro tier (esb_triggers) for
+      cluster/durability.
+    caps:
+      max_active_triggers: 5
+      single_process_only: true
+      durability: "best_effort"
+      cron: false
+      outbound_webhook: false
+      max_cascade_depth: 1
+
+  esb_triggers:
+    description: >
+      Cluster-grade DML triggers via PostgreSQL pg_notify, with DLQ,
+      circuit breakers, cron schedules, and outbound webhooks. Requires
+      Pro tier and a PostGIS engine.
+    caps:
+      max_active_triggers: unlimited
+      single_process_only: false
+      durability: "at_least_once"
+      cron: true
+      outbound_webhook: true
+      max_cascade_depth: unlimited
