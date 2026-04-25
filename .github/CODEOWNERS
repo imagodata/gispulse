@@ -1,0 +1,28 @@
+# CODEOWNERS — auto-assigns reviewers on PRs.
+# Lines further down win over earlier ones (last match wins).
+# Anyone in the approver team is a default reviewer for everything.
+
+* @sducournau
+
+# Core engine — strict review by maintainers.
+/core/                          @sducournau
+/capabilities/                  @sducournau
+/rules/                         @sducournau
+/orchestration/                 @sducournau
+/persistence/                   @sducournau
+
+# HTTP/MCP/OGC adapters
+/gispulse/                      @sducournau
+
+# Plugin contract — breaking changes need extra scrutiny.
+/core/plugin_contracts.py       @sducournau
+/core/plugin_hub.py             @sducournau
+
+# Release / packaging — release-managers only.
+/pyproject.toml                 @sducournau
+/.github/workflows/release.yml  @sducournau
+/CHANGELOG.md                   @sducournau
+
+# Documentation — looser review.
+/docs-site/                     @sducournau
+/README.md                      @sducournau

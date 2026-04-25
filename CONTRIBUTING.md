@@ -38,12 +38,68 @@ Les tests doivent passer avant soumission. Les PRs avec tests en echec ne seront
 
 By submitting a pull request, you agree that your contributions will be licensed under AGPL-3.0-or-later, the same license that covers the project. You certify that you have the right to submit the contribution under these terms.
 
+## Developer Certificate of Origin (DCO)
+
+GISPulse uses the **DCO** (instead of a CLA) to keep contributor friction low.
+Every commit you push must carry a `Signed-off-by` trailer certifying that
+you have the right to submit it under the project's licence. The full text
+is at https://developercertificate.org/.
+
+In practice, just add `-s` when you commit :
+
+```bash
+git commit -s -m "fix: my contribution"
+```
+
+This appends a line like :
+
+```
+Signed-off-by: Your Name <your@email.com>
+```
+
+CI checks every commit on every PR and rejects unsigned commits. To
+backfill a missing trailer on an existing PR :
+
+```bash
+git rebase --signoff @{upstream}
+git push --force-with-lease
+```
+
+By signing off, you certify that your contribution is licensed under
+**AGPL-3.0-or-later** (the project's open-source licence) AND grant
+ImagoData the right to dual-license the project commercially under
+[LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md). This is what makes
+the dual-licence model viable without a separate CLA signing flow.
+
+## Where to file what
+
+| What | Where |
+|---|---|
+| Bug report | [GitHub Issues](https://github.com/imagodata/gispulse/issues) (use the bug template) |
+| Feature request | [GitHub Issues](https://github.com/imagodata/gispulse/issues) (use the feature template) |
+| Question / discussion | [GitHub Discussions](https://github.com/imagodata/gispulse/discussions) |
+| Security finding | **security@imagodata.com** — see [SECURITY.md](SECURITY.md) |
+| Commercial / Enterprise | **sales@imagodata.com** — see [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md) |
+
 ## Code of Conduct
 
-Ce projet adopte un code de conduite base sur le respect mutuel et la collaboration constructive. Tout comportement abusif, discriminatoire ou harcelant ne sera pas tolere.
+This project adopts the [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
+See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Violations can be reported
+to **conduct@imagodata.com**.
 
-Signalez tout probleme via les issues GitHub ou par email aux mainteneurs.
+## Scope of contributions
 
-## Questions
+`gispulse` is the **AGPL OSS engine**. Some features live in the private
+`gispulse-enterprise` companion package (Stripe billing, OIDC SSO, RBAC
+admin, premium connectors). Contributions to those modules cannot be
+accepted in this repo — please open an issue describing the integration
+need and we will route it appropriately.
 
-Ouvrez une issue GitHub pour toute question technique ou suggestion.
+What we welcome here :
+
+- New capabilities (spatial operations, classification, analytics)
+- New persistence backends or formats
+- New adapters (HTTP, MCP, OGC, ESB, CLI)
+- Performance, accessibility, internationalisation
+- Tests and documentation
+- Examples and template plugins under `plugins/`
