@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from gispulse.adapters.http.layer_utils import build_layer_meta, get_layer_styles, load_layers, sanitize_datetime_columns
 from gispulse.adapters.http.rate_limit import limiter
+from core.config import settings as _cfg
 from core.logging import get_logger
 from persistence.io import write_vector
 
@@ -55,7 +56,8 @@ async def list_datasets(request: Request) -> list[dict]:
         result.append({
             "id": ds_id,
             "name": ds.name,
-            "source_path": ds.source_path,
+            # Hide server filesystem paths in read-only / public-demo deployments.
+            "source_path": None if _cfg.api.read_only else ds.source_path,
             "format": ds.format,
             "crs": ds.crs,
             "file_size": file_size,

@@ -306,6 +306,23 @@ def create_app(
     app.state.cors_origins = cors_origins
     _setup_cors(app, cors_origins)
 
+    # ------------------------------------------------------------------ Read-only mode (public demo)
+    # When GISPULSE_READ_ONLY=true, block all state-mutating HTTP methods
+    # except a small allowlist of compute-only POSTs (preview/validate/etc.).
+    # The configured admin key (GISPULSE_SQL_ADMIN_KEY) is honored so the
+    # seed worker can still write at boot.
+    if cfg.api.read_only and not is_portal:
+        from gispulse.adapters.http.middleware.read_only import ReadOnlyMiddleware
+
+        admin_keys: set[str] = set()
+        if cfg.api.sql_admin_key.strip():
+            admin_keys.add(cfg.api.sql_admin_key.strip())
+        app.add_middleware(ReadOnlyMiddleware, admin_keys=admin_keys)
+        app.state.read_only = True
+        log.info("read_only_mode_active", admin_keys_count=len(admin_keys))
+    else:
+        app.state.read_only = False
+
     # ------------------------------------------------------------------ Production auth middleware (#242)
     # Unified auth: accepts both X-API-Key header and Authorization: Bearer.
     # Keys are sourced from the same GISPULSE_API_KEYS store used by the
@@ -413,7 +430,9 @@ def create_app(
                 checks["database"] = {"status": "error", "detail": "database check failed"}
                 all_ok = False
         else:
-            checks["database"] = {"status": "ok", "detail": "no RBAC (dev mode)"}
+            # Don't disclose RBAC mode to anonymous callers — internals are
+            # not visible from /health.
+            checks["database"] = {"status": "ok", "detail": ""}
 
         # Check Redis (job queue)
         job_queue = getattr(request.app.state, "job_queue", None)
@@ -678,7 +697,10 @@ def create_app(
 
         @app.get("/{path:path}", include_in_schema=False)
         async def spa_fallback_full(request: Request, path: str):
-            if path.rstrip("/") in _SPA_ROUTES:
+            # Match the first path segment so deep-links like /explorer/foo/bar
+            # also fall back to the SPA index.
+            first_segment = path.lstrip("/").split("/", 1)[0]
+            if first_segment in _SPA_ROUTES:
                 if _index_html.exists():
                     return HTMLResponse(_index_html.read_text())
                 return PlainTextResponse(

@@ -341,6 +341,7 @@ class ApiSettings(BaseSettings):
     max_upload_mb: int = 500
     metrics_token: str = ""
     sql_admin_key: str = ""
+    read_only: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -369,6 +370,11 @@ class ApiSettings(BaseSettings):
             values["metrics_token"] = _resolve("GISPULSE_METRICS_TOKEN", S, "metrics_token")
         if "sql_admin_key" not in values:
             values["sql_admin_key"] = _resolve("GISPULSE_SQL_ADMIN_KEY", S, "sql_admin_key")
+        if "read_only" not in values:
+            raw = _resolve("GISPULSE_READ_ONLY", S, "read_only", "")
+            values["read_only"] = (
+                raw if isinstance(raw, bool) else str(raw).lower() in ("true", "1", "yes")
+            )
         return values
 
     def get_api_keys_set(self) -> set[str] | None:

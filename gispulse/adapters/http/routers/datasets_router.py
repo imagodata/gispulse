@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from gispulse.adapters.http.dependencies import get_data_dir, get_dataset_repo, get_storage
 from gispulse.adapters.http.rate_limit import limiter
 from gispulse.adapters.http.schemas import DatasetResponse, OGCDatasetCreate
+from core.config import settings as _cfg
 from core.models import Dataset, OGCSourceConfig
 from persistence.io import dataset_from_file, supported_extensions
 from persistence.repository import Repository
@@ -75,10 +76,12 @@ def _is_safe_url(url: str) -> bool:
 
 
 def _dataset_to_response(ds: Dataset) -> DatasetResponse:
+    # Hide server filesystem paths in read-only / public-demo deployments.
+    source_path = None if _cfg.api.read_only else ds.source_path
     return DatasetResponse(
         id=ds.id,
         name=ds.name,
-        source_path=ds.source_path,
+        source_path=source_path,
         data_category=ds.data_category,
         crs=ds.crs,
         format=ds.format,
