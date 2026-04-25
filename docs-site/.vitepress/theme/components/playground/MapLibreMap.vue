@@ -246,6 +246,25 @@ function syncLayers() {
     const vis = layer.visible ? 'visible' : 'none'
     const op = layer.opacity ?? 1
     const isBuilding = name.includes('batiment')
+    // Step layers (key prefixed `step_`) are added to the store hidden and
+    // only revealed when the user navigates to that step. Defer their
+    // MapLibre source creation until first visibility flip — keeps S3-class
+    // pipelines (8 K-feature classify_by_ring step) out of GPU memory until
+    // the user actually views them.
+    const isStep = name.startsWith('step_')
+    const sourceExists = !!map.getSource(srcId)
+    if (isStep && !sourceExists && !layer.visible) {
+      // Track in prevState so future data/color/opacity diffs still trigger
+      // creation when the layer flips to visible.
+      prevState.set(name, {
+        dataRef: layer.geojson,
+        color: layer.color,
+        visible: false,
+        opacity: op,
+        colorField: layer.colorField,
+      })
+      continue
+    }
 
     const paintFor = (kind: 'fill' | 'outline' | 'line' | 'casing' | 'circle') => {
       switch (kind) {
@@ -257,7 +276,10 @@ function syncLayers() {
       }
     }
 
-    if (prev) {
+    // `prev` may exist for a deferred step layer that has never been
+    // materialized — branch on actual MapLibre source presence so the
+    // creation path runs on the first visible flip.
+    if (sourceExists) {
       // --- Existing layer: diff and update only what changed ---
 
       // Data changed?

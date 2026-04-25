@@ -41,9 +41,11 @@ const SNAP_CLOSE_PX = 18
 // the peer map, preventing A→B→A feedback in split-mode sync.
 let suppressViewEmit = false
 
-/** Cached layer groups and their state for diffing */
+/** Cached layer groups and their state for diffing.
+ *  `group: null` marks a step layer that has been seen by the diff but whose
+ *  L.geoJSON instance was deferred (lazy creation, see syncLayers). */
 const layerCache = new Map<string, {
-  group: any
+  group: any | null
   dataRef: any
   color: string
   visible: boolean
@@ -215,7 +217,7 @@ function syncLayers() {
   // Remove layers no longer in store
   for (const [name, cached] of layerCache) {
     if (!currentKeys.has(name)) {
-      if (map.hasLayer(cached.group)) map.removeLayer(cached.group)
+      if (cached.group && map.hasLayer(cached.group)) map.removeLayer(cached.group)
       layerCache.delete(name)
     }
   }
@@ -225,9 +227,27 @@ function syncLayers() {
     const cached = layerCache.get(name)
 
     const op = layer.opacity ?? 1
+    // Step layers: defer L.geoJSON creation while invisible. The pipeline
+    // pushes step results to the store hidden; only the active step needs a
+    // real Leaflet layer. Materialize on first visibility flip.
+    const isStep = name.startsWith('step_')
 
     if (cached) {
       // --- Existing layer: diff ---
+
+      // Materialize a deferred step layer when it becomes visible.
+      if (cached.group === null) {
+        if (layer.visible) {
+          const geoLayer = createGeoLayer(name, layer, baseColor)
+          geoLayer.addTo(map)
+          cached.group = geoLayer
+        }
+        cached.dataRef = layer.geojson
+        cached.color = layer.color
+        cached.visible = layer.visible
+        cached.opacity = op
+        continue
+      }
 
       // Visibility changed?
       if (cached.visible !== layer.visible) {
@@ -274,6 +294,16 @@ function syncLayers() {
         cached.color = layer.color
         cached.opacity = op
       }
+    } else if (isStep && !layer.visible) {
+      // First sight of a hidden step layer — record state but skip the
+      // L.geoJSON cost. The diff branch above will materialize when needed.
+      layerCache.set(name, {
+        group: null,
+        dataRef: layer.geojson,
+        color: layer.color,
+        visible: false,
+        opacity: op,
+      })
     } else {
       // --- New layer ---
       const geoLayer = createGeoLayer(name, layer, baseColor)
@@ -458,7 +488,7 @@ function setView(center: [number, number], zoom: number) {
 function clearCache() {
   if (map) {
     for (const [, cached] of layerCache) {
-      if (map.hasLayer(cached.group)) map.removeLayer(cached.group)
+      if (cached.group && map.hasLayer(cached.group)) map.removeLayer(cached.group)
     }
   }
   layerCache.clear()
