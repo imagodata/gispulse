@@ -301,11 +301,15 @@ SCENARIOS: list[ScenarioSpec] = [
             ),
             "batiments": LayerSpec(
                 source_layer="batiments",
-                # Decimation keeps usage_1 proportional — fine for a proximity
-                # demo where any residential sample suffices. ~30 % of BD TOPO
-                # Versailles buildings are "Residentiel" so the pipeline's
-                # filter_residential step ends up with ~150-200 features.
-                max_features=600,
+                # Aligned on S3 accessibility cap: source bbox holds ~47k
+                # batiments and the previous 600 cap (k=79 decimation) left
+                # the map nearly empty. 8k keeps usage_1 proportional, lets
+                # filter_residential land on ~2.4k samples, and stays under
+                # the per-scenario bandwidth budget once simplify shrinks
+                # the footprints. 5e-5 deg ≈ 5 m at 48 N — invisible at
+                # zoom 12.
+                max_features=8000,
+                simplify=5e-5,
                 keep_fields=("usage_1", "hauteur"),
             ),
         },
