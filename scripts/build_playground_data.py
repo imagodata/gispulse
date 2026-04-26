@@ -207,9 +207,15 @@ SCENARIOS: list[ScenarioSpec] = [
             ),
             "routes": LayerSpec(
                 source_layer="routes",
+                # Full BD TOPO routes (~15k troncons in the Clermont bbox) —
+                # no `where` filter. The isochrone Dijkstra runs on the
+                # complete network (incl. importance 5/6 local streets and
+                # service roads), so the static base layer must mirror that
+                # to keep the visualisation honest. Filtering here would
+                # have hidden ~78% of the troncons and made the rendered
+                # rings look disconnected from the underlying graph.
                 simplify=5e-5,
                 keep_fields=("nature", "importance"),
-                where="importance in ['1', '2', '3', '4']",
             ),
             "batiments": LayerSpec(
                 source_layer="batiments",
