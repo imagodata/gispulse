@@ -96,22 +96,55 @@ const matchedRules = computed(() =>
   store.state.rules.filter(r => props.ruleNames.includes(r.name))
 )
 
-/** Capability lookup for ruleNames when the live API rules aren't loaded
- *  (offline / static-replay scenarios). Keys mirror rules in
- *  `docs-site/public/playground/scenario-*-rules.json`; only listed here
- *  because the static-replay path can't ask the server. */
-const STATIC_RULE_CAPABILITIES: Record<string, string> = {
-  filter_sante: 'filter',
-  isochrone_rings: 'isochrone',
-  classify_by_ring: 'classify_by_ring',
+/** Static-replay rule metadata. Mirrors the on-disk
+ *  `docs-site/public/playground/scenario-*-rules.json` payloads — needed
+ *  here because the static-replay path can't ask the live API for the
+ *  rule catalogue, and `decorateStepGeojson` reads `config.color_col`
+ *  to wire per-feature colour columns through to MapLibre/Leaflet.
+ *  Without it, a `classify_by_ring` step with a custom `color_col` (e.g.
+ *  S3's `access_color`) silently falls back to the generic `ring_color`
+ *  default and every feature paints with the layer fallback colour. */
+interface StaticRuleMeta {
+  capability: string
+  config: Record<string, any>
+}
+const STATIC_RULES: Record<string, StaticRuleMeta> = {
+  filter_sante: {
+    capability: 'filter',
+    config: { expression: "categorie == 'Santé'" },
+  },
+  isochrone_rings: {
+    capability: 'isochrone',
+    config: {
+      ref_layer: 'routes',
+      cost_budgets: [500, 750, 1000, 1500],
+      crs_meters: 'EPSG:2154',
+      edge_buffer_m: 200,
+      dissolve: true,
+    },
+  },
+  classify_by_ring: {
+    capability: 'classify_by_ring',
+    config: {
+      ref_layers: ['isochrone_rings'],
+      ring_field: 'cost_budget',
+      class_col: 'access_class',
+      color_col: 'access_color',
+      value_col: 'access_ring',
+      palette: ['#1a9850', '#fee08b', '#fdae61', '#f46d43', '#a50026'],
+      use_centroid: true,
+      ring_simplify_tolerance: 10.0,
+    },
+  },
 }
 
-function emptyStep(name: string, capability: string): StepState {
+function emptyStep(name: string): StepState {
+  const meta = STATIC_RULES[name]
   return {
     name,
-    capability,
+    capability: meta?.capability ?? 'filter',
     ruleId: name,
-    config: {},
+    config: meta?.config ?? {},
     status: 'pending',
     featureCount: null,
     featuresIn: null,
@@ -136,9 +169,7 @@ watch(
     // catalogue — synthesize the step list directly from ruleNames so the
     // panel renders even when the demo backend is unreachable.
     if (props.staticPipelineResults) {
-      steps.value = props.ruleNames.map((name) =>
-        emptyStep(name, STATIC_RULE_CAPABILITIES[name] ?? 'filter'),
-      )
+      steps.value = props.ruleNames.map((name) => emptyStep(name))
       missingRules.value = []
       return
     }
