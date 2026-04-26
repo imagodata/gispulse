@@ -46,6 +46,22 @@ jobs:
           name: coverage-report
           path: coverage.xml
 
+  capability-matrix-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install project (runtime deps only)
+        run: pip install -e .
+
+      - name: Verify capability coverage matrix is up to date
+        run: python scripts/build_capability_matrix.py --check
+
   security-audit:
     runs-on: ubuntu-latest
     steps:
