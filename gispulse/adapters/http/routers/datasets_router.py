@@ -311,36 +311,20 @@ def delete_dataset(
     Raises:
         404: If the dataset does not exist.
     """
-    ds = repo.get(dataset_id)
-    if ds is None:
+    from gispulse.adapters.http.dataset_ops import delete_dataset as _delete
+
+    layer_cache = getattr(request.app.state, "layer_cache", None)
+    try:
+        _delete(
+            dataset_id=dataset_id,
+            repo=repo,
+            layer_cache=layer_cache if isinstance(layer_cache, dict) else None,
+        )
+    except KeyError:
         raise HTTPException(
             status_code=404,
             detail=f"Dataset '{dataset_id}' not found.",
         )
-
-    # Drop the in-memory layer cache for this dataset (mirrors portal).
-    layer_cache = getattr(request.app.state, "layer_cache", None)
-    if isinstance(layer_cache, dict):
-        layer_cache.pop(str(dataset_id), None)
-
-    # Best-effort filesystem cleanup. Wrap in try/except so a stale
-    # FS reference can't block the repo deletion — the repo is the
-    # source of truth, an orphan file is recoverable, an orphan repo
-    # row is not (the user has no UI handle to retry the delete).
-    if ds.source_path and not str(ds.source_path).startswith("s3://"):
-        try:
-            dataset_dir = Path(ds.source_path).parent
-            if dataset_dir.exists():
-                shutil.rmtree(dataset_dir, ignore_errors=True)
-        except Exception as exc:
-            logger.warning(
-                "dataset_delete_fs_cleanup_failed dataset_id=%s err=%s",
-                dataset_id,
-                exc,
-            )
-
-    repo.delete(dataset_id)
-    logger.info("dataset_deleted id=%s name=%s", dataset_id, ds.name)
     return Response(status_code=204)
 
 

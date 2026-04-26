@@ -177,24 +177,27 @@ async def get_layer_features(
 @router.delete("/datasets/{dataset_id}")
 @limiter.limit("30/minute")
 async def delete_dataset(request: Request, dataset_id: str) -> JSONResponse:
-    """Delete a dataset and its files from disk."""
+    """Delete a dataset and its files from disk.
+
+    Shares its body with the public ``/datasets/{id}`` endpoint via
+    :func:`gispulse.adapters.http.dataset_ops.delete_dataset` so the two
+    URL spaces can never drift on cleanup ordering / FS error handling
+    (the duplication that motivated #416).
+    """
+    from gispulse.adapters.http.dataset_ops import delete_dataset as _delete
+
     dataset_repo = request.app.state.dataset_repo
     layer_cache: dict = request.app.state.layer_cache
 
-    ds = dataset_repo.get(uuid.UUID(dataset_id))
-    if ds is None:
+    try:
+        ds = _delete(
+            dataset_id=uuid.UUID(dataset_id),
+            repo=dataset_repo,
+            layer_cache=layer_cache,
+        )
+    except KeyError:
         raise HTTPException(404, f"Dataset {dataset_id} not found")
-
-    layer_cache.pop(dataset_id, None)
-
-    if ds.source_path:
-        dataset_dir = Path(ds.source_path).parent
-        if dataset_dir.exists():
-            shutil.rmtree(dataset_dir, ignore_errors=True)
-
-    dataset_repo.delete(uuid.UUID(dataset_id))
-    log.info("dataset_deleted", id=dataset_id, name=ds.name)
-    return JSONResponse(content={"status": "deleted", "id": dataset_id})
+    return JSONResponse(content={"status": "deleted", "id": dataset_id, "name": ds.name})
 
 
 class RenameDatasetBody(BaseModel):
