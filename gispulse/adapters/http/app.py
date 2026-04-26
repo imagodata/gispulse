@@ -321,6 +321,30 @@ def create_app(
                             return []
                         return [t for t in items if getattr(t, "enabled", True)]
 
+                    # ESB pipeline wiring (#458): bridge fired triggers
+                    # to ActionDispatcher so NOTIFY / WEBHOOK / SET_FIELD
+                    # / RUN_SQL run end-to-end, not just /ws/events
+                    # broadcast. Each handler is wrapped in try/except by
+                    # the dispatcher (see action_dispatcher.dispatch_all)
+                    # so a single failing action cannot abort the tick.
+                    action_dispatcher = None
+                    try:
+                        from gispulse.adapters.esb.action_dispatcher import (
+                            ActionDispatcher,
+                        )
+                        from gispulse.adapters.webhooks import HttpWebhookClient
+
+                        action_dispatcher = ActionDispatcher(
+                            event_hub=app.state.event_hub,
+                            sql_executor=getattr(spatial_engine, "execute", None),
+                            webhook_client=HttpWebhookClient().post,
+                        )
+                    except Exception as exc:
+                        log.warning(
+                            "action_dispatcher_init_failed",
+                            error=str(exc),
+                        )
+
                     # The registry would normally open its own engine on
                     # the project file, but the SpatialEngine factory has
                     # already opened the project engine. Reuse it directly
@@ -332,6 +356,7 @@ def create_app(
                         event_hub=app.state.event_hub,
                         dataset_id="__project__",
                         triggers_provider=_active_triggers,
+                        action_dispatcher=action_dispatcher,
                     )
                     watcher.start()
                     # Stash inside the registry under the synthetic id so
@@ -345,10 +370,12 @@ def create_app(
                         [],
                     )
                     app.state.change_log_watcher = watcher
+                    app.state.action_dispatcher = action_dispatcher
                     log.info(
                         "change_log_watcher_started",
                         backend=backend,
                         dataset_id="__project__",
+                        action_dispatcher_wired=action_dispatcher is not None,
                     )
                     if backend == "duckdb":
                         # Lot 3: surface the limitation loudly at boot so

@@ -352,16 +352,28 @@ Les triggers peuvent déclencher d'autres triggers. La profondeur maximale de ca
 
 ### Webhook actions (Zapier, ArcGIS GeoEvent, Make, n8n, …)
 
-Une action `WEBHOOK` envoie le payload du trigger en POST JSON à une URL externe. Câbler le client une seule fois à l'instanciation du dispatcher :
+Une action `WEBHOOK` envoie le payload du trigger en POST JSON à une URL externe.
+
+En **HTTP runtime** (FastAPI app), l'`ActionDispatcher` + `HttpWebhookClient` sont câblés automatiquement dans le lifespan de l'app : tu définis le trigger via l'API et les actions s'exécutent à chaque DML matché. En usage embarqué (Python script, worker custom), instancier manuellement :
 
 ```python
 from gispulse.adapters.webhooks import HttpWebhookClient
 from gispulse.adapters.esb.action_dispatcher import ActionDispatcher
+from persistence.change_log_watcher import ChangeLogWatcher
 
 dispatcher = ActionDispatcher(
     webhook_client=HttpWebhookClient().post,
-    # ... autres callables (sql_executor, event_hub, …)
+    sql_executor=engine.execute,
+    event_hub=hub,
 )
+watcher = ChangeLogWatcher(
+    engine=engine,
+    event_hub=hub,
+    dataset_id="my-dataset",
+    triggers_provider=lambda: [t for t in repo.list_all() if t.enabled],
+    action_dispatcher=dispatcher,  # ← bridge fired triggers → actions
+)
+watcher.start()
 ```
 
 Configuration de l'action côté trigger :

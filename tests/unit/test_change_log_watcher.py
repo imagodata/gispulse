@@ -376,3 +376,225 @@ class TestChangeLogWatcher:
         change_ids = [e[1]["change_id"] for e in hub.events]
         assert change_ids == [2]
         assert engine.processed_calls == [2]
+
+
+# ---------------------------------------------------------------------------
+# Bridge to ActionDispatcher (#458)
+# ---------------------------------------------------------------------------
+
+
+class TestActionDispatchBridge:
+    """Triggers fired by the watcher are dispatched to ActionDispatcher
+    (NOTIFY / WEBHOOK / SET_FIELD / RUN_SQL …) — not just broadcast on
+    /ws/events. Without this bridge, the entire ESB pipeline + webhook
+    client (#451) is dead-code in HTTP runtime.
+    """
+
+    def _build_trigger(self, trigger_id, *, actions):
+        from core.models import Trigger
+
+        return Trigger(id=trigger_id, name=f"t-{trigger_id}", actions=actions)
+
+    def test_dispatches_when_action_dispatcher_wired(self) -> None:
+        from uuid import uuid4
+
+        from core.graph import ActionDef, ActionType
+
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+
+        trig_id = uuid4()
+        trigger = self._build_trigger(
+            trig_id,
+            actions=[
+                ActionDef(
+                    action_type=ActionType.WEBHOOK,
+                    config={"url": "https://example.com/hook"},
+                )
+            ],
+        )
+
+        class _Fired:
+            def __init__(self, trigger_id, matched):
+                self.trigger_id = trigger_id
+                self.matched = matched
+                self.actions_dispatched = ["webhook"] if matched else []
+                self.eval_time_ms = 0.5
+
+        class _Evaluator:
+            def evaluate(self, change_record, triggers):
+                return [_Fired(trig_id, True)]
+
+        dispatched: list[tuple[list, Any]] = []
+
+        class _RecordingDispatcher:
+            def dispatch_all(self, actions, ctx):
+                dispatched.append((list(actions), ctx))
+                return len(actions)
+
+        watcher = ChangeLogWatcher(
+            engine,
+            hub,
+            dataset_id="ds-bridge",
+            poll_interval=0.02,
+            trigger_evaluator=_Evaluator(),
+            triggers_provider=lambda: [trigger],
+            action_dispatcher=_RecordingDispatcher(),
+        )
+
+        engine.push("parcels", "INSERT", "42")
+        watcher.start()
+        try:
+            assert _wait_until(lambda: dispatched)
+        finally:
+            watcher.stop()
+
+        assert len(dispatched) == 1
+        actions, ctx = dispatched[0]
+        assert len(actions) == 1
+        assert actions[0].action_type == ActionType.WEBHOOK
+        # Context built from the change row
+        assert ctx.trigger.id == trig_id
+        assert ctx.table == "parcels"
+        assert ctx.operation == "INSERT"
+        assert ctx.row_id == "42"
+        assert ctx.eval_result.matched is True
+
+    def test_no_dispatch_when_dispatcher_is_none(self) -> None:
+        """Backward-compat: omitting action_dispatcher reverts to broadcast-only."""
+        from uuid import uuid4
+
+        from core.graph import ActionDef, ActionType
+
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+        trig_id = uuid4()
+        trigger = self._build_trigger(
+            trig_id,
+            actions=[ActionDef(action_type=ActionType.WEBHOOK, config={"url": "x"})],
+        )
+
+        class _Fired:
+            def __init__(self):
+                self.trigger_id = trig_id
+                self.matched = True
+                self.actions_dispatched = ["webhook"]
+                self.eval_time_ms = 0.0
+
+        class _Evaluator:
+            def evaluate(self, change_record, triggers):
+                return [_Fired()]
+
+        watcher = ChangeLogWatcher(
+            engine,
+            hub,
+            dataset_id="ds-no-bridge",
+            poll_interval=0.02,
+            trigger_evaluator=_Evaluator(),
+            triggers_provider=lambda: [trigger],
+            # action_dispatcher omitted → broadcast-only
+        )
+
+        engine.push("parcels", "INSERT", "1")
+        watcher.start()
+        try:
+            assert _wait_until(
+                lambda: any(e[0] == "trigger.fired" for e in hub.events)
+            )
+        finally:
+            watcher.stop()
+        # No raise — broadcast happened, dispatch was just skipped.
+
+    def test_dispatcher_failure_does_not_block_tick(self) -> None:
+        """A buggy dispatcher must not pin the change-log backlog."""
+        from uuid import uuid4
+
+        from core.graph import ActionDef, ActionType
+
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+        trig_id = uuid4()
+        trigger = self._build_trigger(
+            trig_id,
+            actions=[ActionDef(action_type=ActionType.WEBHOOK, config={"url": "x"})],
+        )
+
+        class _Fired:
+            def __init__(self):
+                self.trigger_id = trig_id
+                self.matched = True
+                self.actions_dispatched = []
+                self.eval_time_ms = 0.0
+
+        class _Evaluator:
+            def evaluate(self, change_record, triggers):
+                return [_Fired()]
+
+        class _ExplodingDispatcher:
+            def dispatch_all(self, actions, ctx):
+                raise RuntimeError("dispatcher boom")
+
+        watcher = ChangeLogWatcher(
+            engine,
+            hub,
+            dataset_id="ds-explode",
+            poll_interval=0.02,
+            trigger_evaluator=_Evaluator(),
+            triggers_provider=lambda: [trigger],
+            action_dispatcher=_ExplodingDispatcher(),
+        )
+
+        engine.push("parcels", "INSERT", "1")
+        watcher.start()
+        try:
+            assert _wait_until(lambda: engine.processed_calls)
+        finally:
+            watcher.stop()
+        # Ack happened despite dispatcher raising — backlog not stuck.
+        assert engine.processed_calls == [1]
+
+    def test_skips_unknown_trigger_id(self) -> None:
+        """If the FiredTrigger references an id absent from the lookup
+        (e.g. trigger removed mid-tick), dispatch is a no-op."""
+        from uuid import uuid4
+
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+        ghost_id = uuid4()
+
+        class _Fired:
+            def __init__(self):
+                self.trigger_id = ghost_id
+                self.matched = True
+                self.actions_dispatched = []
+                self.eval_time_ms = 0.0
+
+        class _Evaluator:
+            def evaluate(self, change_record, triggers):
+                return [_Fired()]
+
+        dispatched: list = []
+
+        class _Dispatcher:
+            def dispatch_all(self, actions, ctx):
+                dispatched.append((actions, ctx))
+                return 0
+
+        watcher = ChangeLogWatcher(
+            engine,
+            hub,
+            dataset_id="ds-ghost",
+            poll_interval=0.02,
+            trigger_evaluator=_Evaluator(),
+            triggers_provider=lambda: [],  # ghost is not in the active list
+            action_dispatcher=_Dispatcher(),
+        )
+
+        engine.push("parcels", "INSERT", "1")
+        watcher.start()
+        try:
+            # Wait for one tick to complete (broadcast still happens)
+            assert _wait_until(lambda: engine.processed_calls)
+        finally:
+            watcher.stop()
+        assert dispatched == []  # no dispatch because trigger_id unknown

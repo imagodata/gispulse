@@ -90,6 +90,15 @@ class _TriggerEvaluatorProtocol(Protocol):
     ) -> list[Any]: ...  # pragma: no cover
 
 
+class _ActionDispatcherProtocol(Protocol):
+    """Minimal dispatcher surface (matches
+    :class:`gispulse.adapters.esb.action_dispatcher.ActionDispatcher`)."""
+
+    def dispatch_all(
+        self, actions: list[Any], context: Any
+    ) -> int: ...  # pragma: no cover
+
+
 # ---------------------------------------------------------------------------
 # Watcher
 # ---------------------------------------------------------------------------
@@ -131,6 +140,14 @@ class ChangeLogWatcher:
                             edits made via the API take effect on the
                             next batch). When *None*, only ``dml.changed``
                             events are broadcast.
+        action_dispatcher:  Optional :class:`ActionDispatcher`. When set,
+                            matched triggers are dispatched (NOTIFY,
+                            WEBHOOK, SET_FIELD, RUN_SQL, …) in addition
+                            to the WS broadcast. Each handler is wrapped
+                            in try/except by the dispatcher so a single
+                            failing action cannot abort the tick. When
+                            *None*, fired triggers are broadcast-only
+                            (current default — backward-compatible).
 
     Lifecycle:
         - :meth:`start` spawns the daemon thread.
@@ -148,6 +165,7 @@ class ChangeLogWatcher:
         batch_limit: int = 100,
         trigger_evaluator: _TriggerEvaluatorProtocol | None = None,
         triggers_provider: Callable[[], list[Trigger]] | None = None,
+        action_dispatcher: _ActionDispatcherProtocol | None = None,
     ) -> None:
         if poll_interval <= 0:
             raise ValueError("poll_interval must be > 0")
@@ -169,6 +187,11 @@ class ChangeLogWatcher:
         self._batch_limit = int(batch_limit)
         self._evaluator = trigger_evaluator
         self._triggers_provider = triggers_provider
+        self._action_dispatcher = action_dispatcher
+        # Cache active triggers indexed by id within a tick so the
+        # dispatcher can recover the full Trigger (with .actions) from
+        # the FiredTrigger summary, without re-querying the repo.
+        self._trigger_lookup: dict[Any, Trigger] = {}
 
         self._running = False
         self._thread: threading.Thread | None = None
@@ -254,6 +277,17 @@ class ChangeLogWatcher:
             except Exception as exc:
                 logger.warning("change_log_triggers_provider_failed: %s", exc)
                 active_triggers = []
+        # Refresh the per-tick lookup so dispatch can recover full
+        # Trigger objects from FiredTrigger.trigger_id. Only built when
+        # an action_dispatcher is wired (otherwise pure overhead — and
+        # tolerates triggers_provider implementations that pass in
+        # placeholder strings rather than full :class:`Trigger`).
+        if self._action_dispatcher is not None:
+            self._trigger_lookup = {
+                t.id: t for t in active_triggers if hasattr(t, "id")
+            }
+        else:
+            self._trigger_lookup = {}
 
         evaluator = self._evaluator
         if active_triggers and evaluator is None:
@@ -364,6 +398,23 @@ class ChangeLogWatcher:
                         )
                         # Continue — don't abort the row.
 
+                    # ---- Dispatch actions (#458) ----------------------
+                    # Bridge to ActionDispatcher so NOTIFY / WEBHOOK /
+                    # SET_FIELD / RUN_SQL / … run end-to-end, not just
+                    # broadcast over WS. Wrapped in try/except: the
+                    # dispatcher already wraps each handler too, but a
+                    # bad Trigger lookup or context build must not abort
+                    # the tick.
+                    if self._action_dispatcher is not None:
+                        self._dispatch_fired(
+                            ft,
+                            table=table,
+                            operation=op,
+                            row_id=fid,
+                            change_id=change_id,
+                            ts=ts,
+                        )
+
             if change_id > max_id:
                 max_id = change_id
 
@@ -382,6 +433,64 @@ class ChangeLogWatcher:
                 logger.warning("change_log_mark_processed_failed: %s", exc)
 
         return len(rows)
+
+    # ------------------------------------------------------------------
+    # Action dispatch bridge (#458)
+    # ------------------------------------------------------------------
+
+    def _dispatch_fired(
+        self,
+        ft: Any,
+        *,
+        table: str,
+        operation: str,
+        row_id: str | None,
+        change_id: int,
+        ts: Any,
+    ) -> None:
+        """Translate a FiredTrigger into a TriggerContext + dispatch_all.
+
+        Imports are local so persistence stays free of a hard dependency
+        on the ESB / rules layer (matches the lazy-import pattern used
+        for :class:`TriggerEvaluator`).
+        """
+        trigger_id = getattr(ft, "trigger_id", None)
+        if trigger_id is None:
+            return
+
+        trigger = self._trigger_lookup.get(trigger_id)
+        if trigger is None or not getattr(trigger, "actions", None):
+            # No actions to run, or trigger evaporated between provider
+            # call and dispatch — nothing to do.
+            return
+
+        try:
+            from datetime import datetime, timezone
+
+            from gispulse.adapters.esb.action_dispatcher import TriggerContext
+            from core.models import EvalResult
+
+            timestamp = ts if isinstance(ts, datetime) else datetime.now(timezone.utc)
+            ctx = TriggerContext(
+                trigger=trigger,
+                eval_result=EvalResult(matched=True, transition=None),
+                table=table,
+                operation=str(operation),
+                row_id=str(row_id) if row_id else "",
+                new_attrs={},
+                timestamp=timestamp,
+            )
+            self._action_dispatcher.dispatch_all(list(trigger.actions), ctx)
+        except Exception as exc:
+            # The dispatcher already wraps each action handler — this
+            # outer guard catches construction failures (bad Trigger
+            # shape, import errors). Never abort the watcher tick.
+            logger.warning(
+                "change_log_action_dispatch_failed change_id=%d trigger_id=%s err=%s",
+                change_id,
+                trigger_id,
+                exc,
+            )
 
 
 __all__ = ["ChangeLogWatcher"]
