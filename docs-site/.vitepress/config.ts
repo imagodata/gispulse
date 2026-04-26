@@ -57,6 +57,14 @@ const frNav = [
     ],
   },
   {
+    text: 'Intégrations',
+    items: [
+      { text: 'QGIS sans plugin', link: '/integrations/qgis' },
+      { text: 'ArcGIS Pro / Online / GeoEvent', link: '/integrations/arcgis' },
+      { text: 'MapLibre / deck.gl', link: '/integrations/maplibre' },
+    ],
+  },
+  {
     text: 'Ressources',
     items: [
       { text: 'Presets metier', link: '/templates' },
@@ -111,6 +119,16 @@ const frSidebar = {
         { text: 'Plugin QGIS', link: '/plugins/qgis' },
         { text: 'Add-in ArcGIS', link: '/plugins/arcgis' },
         { text: 'Développer un plugin', link: '/plugins/developing' },
+      ],
+    },
+  ],
+  '/integrations/': [
+    {
+      text: 'Intégrations sans plugin',
+      items: [
+        { text: 'QGIS', link: '/integrations/qgis' },
+        { text: 'ArcGIS Pro / Online / GeoEvent', link: '/integrations/arcgis' },
+        { text: 'MapLibre GL JS / deck.gl', link: '/integrations/maplibre' },
       ],
     },
   ],

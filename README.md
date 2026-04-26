@@ -194,6 +194,11 @@ GISPulse exposes its data and live events through standard protocols so any GIS 
 
 > See [`docs/INTEGRATION_MATRIX.md`](docs/INTEGRATION_MATRIX.md) for the full client × mode × version compatibility matrix.
 
+**Step-by-step integration tutorials** (no plugin install required) :
+- [QGIS via OGC / MVT / PyQGIS](https://imagodata.github.io/gispulse/integrations/qgis)
+- [ArcGIS Pro / Online / GeoEvent (in & out)](https://imagodata.github.io/gispulse/integrations/arcgis)
+- [MapLibre GL JS / deck.gl with live WS](https://imagodata.github.io/gispulse/integrations/maplibre)
+
 ### Concurrency note — SpatiaLite
 
 When GISPulse runs in **portable mode** (DuckDB / GPKG / SpatiaLite), the underlying SQLite engine enforces **a single writer at a time**. Concurrent rule executions and triggers serialize on the database file lock — this is by design for filesystem-based GPKG, not a GISPulse limit. For multi-writer workloads (parallel jobs, live triggers under load), switch to the **persistent mode (PostGIS)** which is the supported production path.
