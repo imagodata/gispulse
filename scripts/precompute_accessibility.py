@@ -84,11 +84,15 @@ def main() -> int:
     equipements = gpd.read_file(src_health)
     sante = equipements[equipements["categorie"] == "Santé"].copy()
 
+    # Use the FULL routes network — the demo API runs the isochrone against
+    # `ref_layer: routes` with no where filter, so the Dijkstra graph
+    # includes every troncon. Restricting to importance 1-4 here (~3.3k of
+    # 15k) shrinks each isochrone disc 3x and visually reads as "ribbons
+    # along the trunk roads" instead of proper walking-time polygons.
     routes = gpd.read_file(src_bdtopo, layer="routes")
-    routes_filt = routes[routes["importance"].isin(["1", "2", "3", "4"])].copy()
 
     batiments = gpd.read_file(src_bdtopo, layer="batiments")
-    print(f"load: {time.time() - t0:.1f}s — sante={len(sante)} routes={len(routes_filt)} bati={len(batiments)}")
+    print(f"load: {time.time() - t0:.1f}s — sante={len(sante)} routes={len(routes)} bati={len(batiments)}")
 
     # Step 1: filter_sante (already done above, just save the subset)
     keep_sante = ["geometry", "toponyme", "nature", "categorie", "amenity", "healthcare"]
@@ -103,7 +107,7 @@ def main() -> int:
         crs_meters="EPSG:2154",
         edge_buffer_m=40,
         dissolve=True,
-        ref_gdf=routes_filt,
+        ref_gdf=routes,
     )
     print(f"isochrone: {time.time() - t:.1f}s, n={len(iso)}")
     _save_gz(iso, OUT_DIR / "isochrone_rings_step.geojson.gz", simplify_deg=ISOCHRONE_SIMPLIFY)
