@@ -350,6 +350,53 @@ Les triggers réagissent aux événements sur les données et exécutent des act
 Les triggers peuvent déclencher d'autres triggers. La profondeur maximale de cascade est limitée à 3 niveaux pour éviter les boucles infinies.
 :::
 
+### Webhook actions (Zapier, ArcGIS GeoEvent, Make, n8n, …)
+
+Une action `WEBHOOK` envoie le payload du trigger en POST JSON à une URL externe. Câbler le client une seule fois à l'instanciation du dispatcher :
+
+```python
+from gispulse.adapters.webhooks import HttpWebhookClient
+from gispulse.adapters.esb.action_dispatcher import ActionDispatcher
+
+dispatcher = ActionDispatcher(
+    webhook_client=HttpWebhookClient().post,
+    # ... autres callables (sql_executor, event_hub, …)
+)
+```
+
+Configuration de l'action côté trigger :
+
+```json
+{
+  "action_type": "WEBHOOK",
+  "config": { "url": "https://hooks.zapier.com/…/abcd" }
+}
+```
+
+**Format du payload** (contrat public, stable v1.2+) :
+
+```json
+{
+  "event_type": "trigger_fired",
+  "trigger_id": "3fa85f64-…",
+  "trigger_name": "alerte_zone_inondable",
+  "table": "parcels",
+  "operation": "INSERT",
+  "row_id": "…",
+  "matched": true,
+  "transition": "ENTER",
+  "timestamp": "2026-04-26T14:32:11.123+00:00",
+  "custom": { /* sortie de payload_template, le cas échéant */ }
+}
+```
+
+**Sécurité** :
+
+- Schémas autorisés : `http`, `https` (rien d'autre).
+- Blocklist SSRF : RFC1918 + loopback + link-local (`169.254/16`, dont les *cloud metadata*) + multicast + reserved. Mettre `allow_private_ips=True` à l'init pour atteindre une cible interne (CI, dev fixture).
+- Signature optionnelle HMAC-SHA256 dans l'en-tête `X-GISPulse-Signature` quand la variable d'environnement `GISPULSE_WEBHOOK_SIGNING_SECRET` est définie. Le receveur doit recalculer `sha256=hex(hmac(secret, body))`.
+- Retry borné : 2 tentatives sur 5xx + connect/read timeout (back-off 1 s, 3 s). 4xx jamais retenté.
+
 ---
 
 ## Désactiver des règles temporairement

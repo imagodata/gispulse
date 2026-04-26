@@ -265,6 +265,47 @@ class TestWebhook:
         d.dispatch(action, _make_context())
         assert sent == []
 
+    def test_no_client_is_noop_even_with_url(self):
+        # Regression: previously _webhook still rendered payload + checked
+        # client; ensure the early-return guards both before any work.
+        d = ActionDispatcher(webhook_client=None)
+        action = ActionDef(
+            action_type=ActionType.WEBHOOK,
+            config={"url": "https://example.com/hook"},
+        )
+        # Should not raise
+        d.dispatch(action, _make_context(transition=Transition.ENTER))
+
+    def test_payload_contract_enriched(self):
+        """Public payload shape (event_type/trigger_id/transition/timestamp/custom)."""
+        sent: list[tuple[str, dict]] = []
+        d = ActionDispatcher(webhook_client=lambda url, payload: sent.append((url, payload)))
+        action = ActionDef(
+            action_type=ActionType.WEBHOOK,
+            config={"url": "https://example.com/hook", "payload_template": {"foo": "bar"}},
+        )
+        ctx = _make_context(
+            table="parcels",
+            operation="UPDATE",
+            transition=Transition.ENTER,
+        )
+        d.dispatch(action, ctx)
+
+        assert len(sent) == 1
+        url, payload = sent[0]
+        assert url == "https://example.com/hook"
+        assert payload["event_type"] == "trigger_fired"
+        assert payload["trigger_id"] == str(ctx.trigger.id)
+        assert payload["trigger_name"] == "t"
+        assert payload["table"] == "parcels"
+        assert payload["operation"] == "UPDATE"
+        assert payload["matched"] is True
+        assert payload["transition"] == "ENTER"
+        # ISO-8601 with timezone
+        assert payload["timestamp"].endswith("+00:00") or payload["timestamp"].endswith("Z")
+        # custom block carries the original render_payload() output
+        assert "custom" in payload
+
 
 # ---------------------------------------------------------------------------
 # ENQUEUE / LOG_EVENT

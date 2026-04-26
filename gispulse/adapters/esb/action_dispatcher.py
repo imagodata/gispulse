@@ -162,11 +162,28 @@ class ActionDispatcher(BaseDispatcher):
 
     def _webhook(self, action: ActionDef, ctx: TriggerContext) -> None:
         url = action.config.get("url", "")
-        if not url:
+        if not url or not self._webhook_client:
             return
-        payload = self._render_payload(action, ctx)
-        if self._webhook_client:
-            self._webhook_client(url, payload)
+        custom = self._render_payload(action, ctx)
+        transition = (
+            ctx.eval_result.transition.value
+            if ctx.eval_result and ctx.eval_result.transition
+            else None
+        )
+        trigger_name = getattr(ctx.trigger, "name", None) if ctx.trigger else None
+        payload = {
+            "event_type": "trigger_fired",
+            "trigger_id": str(ctx.trigger.id) if ctx.trigger else None,
+            "trigger_name": trigger_name,
+            "table": ctx.table,
+            "operation": ctx.operation,
+            "row_id": ctx.row_id,
+            "matched": True,
+            "transition": transition,
+            "timestamp": ctx.timestamp.isoformat() if ctx.timestamp else None,
+            "custom": custom,
+        }
+        self._webhook_client(url, payload)
 
     def _enqueue(self, action: ActionDef, ctx: TriggerContext) -> None:
         if not self._sql_executor:
