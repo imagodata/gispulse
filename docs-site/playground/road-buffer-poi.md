@@ -69,7 +69,7 @@ batiments ─────────────────► classify_by_rin
         "ref_layer": "routes",
         "cost_budgets": [500, 750, 1000, 1500],
         "crs_meters": "EPSG:2154",
-        "edge_buffer_m": 40,
+        "edge_buffer_m": 200,
         "dissolve": true
       },
       "input": "filter_sante"

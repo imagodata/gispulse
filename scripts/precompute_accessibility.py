@@ -102,16 +102,18 @@ def main() -> int:
     # Step 2: isochrone with cost_budgets (multi-budget single Dijkstra pass)
     t = time.time()
     # Parameters MUST match docs-site/public/playground/scenario-3-rules.json
-    # — the precompute is supposed to mirror the live API behaviour exactly,
-    # so the static replay matches what the user would get from
-    # /pipelines/execute-steps. If the visual rendering needs adjusting,
-    # update the rules JSON first (and bump the docs description), not this
-    # script.
+    # — the precompute mirrors the live API behaviour exactly, so the
+    # static replay matches what the user would get from
+    # /pipelines/execute-steps. edge_buffer_m=200 (vs the network-strict
+    # 40 m) fills the gaps between parallel streets so the dissolved
+    # isochrone reads as an "intuitive walking-time area" rather than
+    # ribbons hugging road centerlines — keep this value in sync with the
+    # rules JSON above if you change either.
     iso = IsochroneCapability().execute(
         sante,
         cost_budgets=[500, 750, 1000, 1500],
         crs_meters="EPSG:2154",
-        edge_buffer_m=40,
+        edge_buffer_m=200,
         dissolve=True,
         ref_gdf=routes,
     )
