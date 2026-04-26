@@ -29,7 +29,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile
 
 from gispulse.adapters.http.dependencies import get_data_dir, get_dataset_repo, get_storage
 from gispulse.adapters.http.rate_limit import limiter
@@ -285,6 +285,63 @@ def get_dataset(
             detail=f"Dataset '{dataset_id}' not found.",
         )
     return _dataset_to_response(ds)  # type: ignore[arg-type]
+
+
+@router.delete("/{dataset_id}", status_code=204)
+def delete_dataset(
+    dataset_id: UUID,
+    request: Request,
+    repo: Repository = Depends(get_dataset_repo),
+) -> Response:
+    """Delete a dataset and the files backing it.
+
+    Closes the public-API gap exposed by the 2026-04-16 VPS audit
+    (#437): the portal endpoint ``/api/portal/datasets/{id}`` already
+    supported DELETE, but the canonical public ``/datasets/{id}`` only
+    declared GET — clients hitting it received a misleading 405.
+
+    Cascade policy (v1.2): no cascade. Rules / scenarios / triggers that
+    reference the deleted dataset's UUID become orphaned references —
+    they are not auto-deleted because that would couple the API to the
+    rules subsystem and surprise the caller. Callers needing
+    transactional cleanup should DELETE the rules first and the dataset
+    last. A future cascade-mode flag may be added if the orphan-ref
+    pattern bites users in practice.
+
+    Raises:
+        404: If the dataset does not exist.
+    """
+    ds = repo.get(dataset_id)
+    if ds is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Dataset '{dataset_id}' not found.",
+        )
+
+    # Drop the in-memory layer cache for this dataset (mirrors portal).
+    layer_cache = getattr(request.app.state, "layer_cache", None)
+    if isinstance(layer_cache, dict):
+        layer_cache.pop(str(dataset_id), None)
+
+    # Best-effort filesystem cleanup. Wrap in try/except so a stale
+    # FS reference can't block the repo deletion — the repo is the
+    # source of truth, an orphan file is recoverable, an orphan repo
+    # row is not (the user has no UI handle to retry the delete).
+    if ds.source_path and not str(ds.source_path).startswith("s3://"):
+        try:
+            dataset_dir = Path(ds.source_path).parent
+            if dataset_dir.exists():
+                shutil.rmtree(dataset_dir, ignore_errors=True)
+        except Exception as exc:
+            logger.warning(
+                "dataset_delete_fs_cleanup_failed dataset_id=%s err=%s",
+                dataset_id,
+                exc,
+            )
+
+    repo.delete(dataset_id)
+    logger.info("dataset_deleted id=%s name=%s", dataset_id, ds.name)
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------

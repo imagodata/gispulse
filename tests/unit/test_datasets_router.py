@@ -73,6 +73,49 @@ class TestGetDataset:
         assert r.status_code == 404
 
 
+class TestDeleteDataset:
+    """Closes #437 — public DELETE endpoint parity with /api/portal/."""
+
+    def test_delete_existing_returns_204(
+        self, client_with_dataset: TestClient,
+    ) -> None:
+        items = client_with_dataset.get("/datasets").json()["items"]
+        ds_id = items[0]["id"]
+        r = client_with_dataset.delete(f"/datasets/{ds_id}")
+        assert r.status_code == 204
+        # Body is empty per HTTP/1.1 §6.3.5 No Content
+        assert r.content == b""
+        # Repo no longer lists it
+        items_after = client_with_dataset.get("/datasets").json()["items"]
+        assert items_after == []
+
+    def test_delete_nonexistent_returns_404(self, client: TestClient) -> None:
+        r = client.delete(f"/datasets/{uuid4()}")
+        assert r.status_code == 404
+
+    def test_delete_invalid_uuid_returns_422(self, client: TestClient) -> None:
+        # FastAPI rejects malformed UUIDs at the path-param coercion stage.
+        r = client.delete("/datasets/not-a-uuid")
+        assert r.status_code == 422
+
+    def test_delete_does_not_blow_up_on_missing_source_path(
+        self, client: TestClient,
+    ) -> None:
+        # source_path that doesn't exist on disk → cleanup is best-effort,
+        # repo deletion still succeeds.
+        app = client.app
+        ds = Dataset(
+            name="phantom",
+            source_path="/nonexistent/path/phantom.gpkg",
+            crs="EPSG:4326",
+            format="gpkg",
+        )
+        app.state.dataset_repo.save(ds)
+        r = client.delete(f"/datasets/{ds.id}")
+        assert r.status_code == 204
+        assert app.state.dataset_repo.get(ds.id) is None
+
+
 class TestUploadValidation:
     def test_upload_no_file_returns_422(self, client: TestClient) -> None:
         r = client.post("/datasets/upload")
