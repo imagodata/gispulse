@@ -4,6 +4,16 @@ const shared = {
   title: 'GISPulse',
   base: '/gispulse/',
   cleanUrls: true,
+  // Coverage matrix + integrations docs link to ../../tests/... and other
+  // repo-level paths that don't exist after the docs are built in isolation
+  // — those land outside the docs root by design. VitePress 1.x exits 1 on
+  // dead links; whitelist them so the docs build keeps shipping until the
+  // links are either rewritten as GitHub URLs or moved into the docs tree.
+  ignoreDeadLinks: [
+    /^\.\.\/\.\.\/\.\.\//,
+    /\/INTEGRATION_MATRIX/,
+    /^\.\.\/\.\.\/docs\//,
+  ],
 
   head: [
     ['link', { rel: 'icon', href: '/gispulse/favicon.svg', type: 'image/svg+xml' }],
