@@ -13,7 +13,6 @@ Flow under test:
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from pathlib import Path
 
@@ -210,15 +209,6 @@ class TestEnableTrackingEndpoint:
 
 
 class TestEndToEndDMLEvent:
-    @pytest.mark.xfail(
-        reason=(
-            "Raw sqlite3.connect() on the uploaded GPKG triggers a CHECK "
-            "constraint calling SpatiaLite's ST_IsEmpty, which the test "
-            "connection has not loaded. Follow-up: write the INSERT via "
-            "pyogrio, or load mod_spatialite in the test setup."
-        ),
-        strict=False,
-    )
     def test_dml_event_flows_after_enable(self, app_client) -> None:
         client, tmp = app_client
         gpkg_path = tmp / "src.gpkg"
@@ -235,27 +225,29 @@ class TestEndToEndDMLEvent:
         resp = client.post(f"/datasets/{ds['id']}/enable_tracking")
         assert resp.status_code == 200, resp.text
 
-        # Connect WS first so we don't miss the broadcast, then INSERT
-        # via a fresh SQLite handle to the uploaded file.
+        # Connect WS first so we don't miss the broadcast, then APPEND a
+        # feature via pyogrio. Going through GDAL respects the GPKG
+        # CHECK constraint that calls SpatiaLite's ST_IsEmpty (a raw
+        # sqlite3.connect() can't load mod_spatialite and would raise).
+        # The watcher's AFTER INSERT triggers fire either way and append
+        # to _gispulse_change_log → /ws/events broadcasts dml.changed.
+        import geopandas as gpd
+        import pyogrio
+        from shapely.geometry import Point
+
         with client.websocket_connect("/ws/events") as ws:
-            ext = sqlite3.connect(str(source_path))
-            try:
-                # GPKG installs a CHECK constraint on the geom column that
-                # calls ST_IsEmpty / ST_GeometryType (SpatiaLite SQL
-                # functions). A raw sqlite3.connect() does NOT load
-                # mod_spatialite, so any INSERT would fail with "no such
-                # function: ST_IsEmpty". Disable check constraints on this
-                # connection only — the watcher's AFTER INSERT triggers
-                # don't care about geom validation, they just append to
-                # _gispulse_change_log.
-                ext.execute("PRAGMA ignore_check_constraints = ON;")
-                ext.execute(
-                    'INSERT INTO "parcels"(name, geom) VALUES (?, NULL)',
-                    ("alpha",),
-                )
-                ext.commit()
-            finally:
-                ext.close()
+            new_row = gpd.GeoDataFrame(
+                {"name": ["alpha"]},
+                geometry=[Point(1, 1)],
+                crs="EPSG:4326",
+            )
+            pyogrio.write_dataframe(
+                new_row,
+                str(source_path),
+                layer="parcels",
+                driver="GPKG",
+                append=True,
+            )
 
             payloads = _drain_dml(ws, 1, timeout=4.0)
         assert len(payloads) >= 1
