@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `persistence/changelog_watcher.py` + `WatcherRegistry` — Lot 2 v2 GPKG live-sync foundation: file-watch + `BEGIN IMMEDIATE` polling per dataset, exposed via `POST /datasets/{id}/enable_tracking` for `/ws/events` consumers (10 k inserts at ~317 events/s, restart replay, multi-WS fanout).
 - `persistence/duckdb_watcher.py` — Lot 3 DuckDB change-log watcher adapter feeding the same `/ws/events` hub, with JSON-serialised `changed_at` and graceful skip when the underlying engine is unavailable.
 - `core/capability.py` — `Capability.execute_safe(**params)` validation entrypoint that raises `UnknownParameterError` instead of letting the legacy `**_` placeholder swallow typo'd kwargs (closes EPIC #438 systemic kwarg-swallow audit, ref `beta_test_capabilities_2026_04_24`).
+- `capabilities/schema.py` — `DescribeCapability` (`describe`) — non-destructive schema/null/unique/geometry introspection. Layer returned unchanged; report stored in `gdf.attrs["__schema_describe__"]` for portal / CLI / audit consumers. Closes the last AC of EPIC #439 (capability gaps: schema, attrs, multipart, overlay, attribute_join — all other primitives shipped in v1.1.0).
 
 ### Fixed
 - Capabilities — P1 beta close-out: `morans_i` returns `NaN` p-value on a constant field instead of a misleading `0.01`; `completeness_check` accepts a GeoDataFrame with only the geometry column.

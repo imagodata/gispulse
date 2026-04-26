@@ -266,6 +266,7 @@ Opérations non spatiales sur le schéma d'attributs : ajout, suppression, renom
 | `lookup_table` | Mappe une colonne via dict avec valeur par défaut. | `source_col`, `target_col`, `mapping`, `default` |
 | `coalesce_fields` | Première valeur non-null parmi une liste de colonnes. | `sources`, `target_col` |
 | `case_when` | Calcul conditionnel SQL CASE WHEN. | `target_col`, `cases`, `else_` |
+| `describe` | Rapport d'introspection (dtype, nulls, unique, geom_type, bounds) — stocké dans `gdf.attrs["__schema_describe__"]`, layer renvoyé inchangé. | `sample_size`, `include_geometry` |
 
 ```json
 {

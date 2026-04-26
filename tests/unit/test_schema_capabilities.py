@@ -11,6 +11,7 @@ from capabilities.schema import (
     AddFieldCapability,
     AttributeJoinCapability,
     CastFieldCapability,
+    DescribeCapability,
     DropFieldCapability,
     RenameFieldCapability,
     SelectColumnsCapability,
@@ -247,3 +248,66 @@ class TestAttributeJoin:
         assert "label" in out.columns
         # primary geometry preserved (parcels' polygons), not ref points
         assert out.geometry.iloc[0].geom_type == "Polygon"
+
+
+class TestDescribeCapability:
+    def test_passthrough_with_attrs_report(self, parcels: gpd.GeoDataFrame) -> None:
+        out = DescribeCapability().execute(parcels)
+        # Layer is unchanged (same shape, same data, same crs)
+        assert out.shape == parcels.shape
+        assert list(out.columns) == list(parcels.columns)
+        assert out.crs == parcels.crs
+
+        report = out.attrs["__schema_describe__"]
+        assert report["n_rows"] == 3
+        assert report["geometry_column"] == "geometry"
+
+        cols = {c["name"]: c for c in report["columns"]}
+        assert cols["id"]["dtype"].startswith("int")
+        assert cols["id"]["n_nulls"] == 0
+        assert cols["id"]["n_unique"] == 3
+        assert "geometry" not in cols  # geometry handled separately
+
+        geom = report["geometry"]
+        assert geom["type_counts"] == {"Polygon": 3}
+        assert geom["n_empty"] == 0
+        assert geom["crs"] == "EPSG:4326"
+        assert len(geom["bounds"]) == 4
+
+    def test_sample_size_includes_jsonable_values(
+        self, parcels: gpd.GeoDataFrame,
+    ) -> None:
+        out = DescribeCapability().execute(parcels, sample_size=2)
+        cols = {c["name"]: c for c in out.attrs["__schema_describe__"]["columns"]}
+        assert cols["name"]["sample"] == ["a", "b"]
+        # numpy ints coerced to python int
+        assert all(isinstance(v, int) for v in cols["pop"]["sample"])
+
+    def test_kwargs_validation_rejects_negative_sample(
+        self, parcels: gpd.GeoDataFrame,
+    ) -> None:
+        with pytest.raises(ValueError, match="sample_size"):
+            DescribeCapability().execute(parcels, sample_size=-1)
+        with pytest.raises(ValueError, match="sample_size"):
+            DescribeCapability().execute(parcels, sample_size="abc")
+
+    def test_handles_nulls_and_empty_geometry(self) -> None:
+        from shapely.wkt import loads
+
+        empty_poly = loads("POLYGON EMPTY")
+        gdf = gpd.GeoDataFrame(
+            {
+                "id": [1, 2, None],
+                "geometry": [
+                    Polygon([(0, 0), (1, 0), (1, 1), (0, 1)]),
+                    empty_poly,
+                    None,
+                ],
+            },
+            crs="EPSG:4326",
+        )
+        report = DescribeCapability().execute(gdf).attrs["__schema_describe__"]
+        id_entry = next(c for c in report["columns"] if c["name"] == "id")
+        assert id_entry["n_nulls"] == 1
+        assert report["geometry"]["n_empty"] == 2  # empty + None
+        assert report["geometry"]["type_counts"] == {"Polygon": 1}

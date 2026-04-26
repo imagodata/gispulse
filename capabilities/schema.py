@@ -8,6 +8,7 @@ non-spatial reference tables. The geometry column is preserved unchanged.
 from __future__ import annotations
 
 import re as _re
+import warnings as _warnings
 
 import geopandas as gpd
 import numpy as np
@@ -983,3 +984,135 @@ class CaseWhenCapability(Capability):
             },
             "required": ["target_col", "cases"],
         }
+
+
+# ---------------------------------------------------------------------------
+# describe — non-destructive schema introspection (gdf passthrough)
+# ---------------------------------------------------------------------------
+
+
+@register
+class DescribeCapability(Capability):
+    """Reports per-column dtype / null / unique stats and geometry summary.
+
+    The layer is returned unchanged; the report is stored in
+    ``gdf.attrs["__schema_describe__"]`` for downstream consumers (CLI,
+    portal, audit). This is the introspection counterpart to
+    ``add_field`` / ``cast_field``.
+
+    Example::
+
+        {"sample_size": 5, "include_geometry": true}
+    """
+
+    name = "describe"
+    description = "Stores a schema/null/unique report under gdf.attrs['__schema_describe__']."
+
+    def execute(
+        self,
+        gdf: gpd.GeoDataFrame,
+        sample_size: int = 0,
+        include_geometry: bool = True,
+        **_,
+    ) -> gpd.GeoDataFrame:
+        try:
+            sample_size = int(sample_size)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"sample_size must be an integer, got {sample_size!r}") from exc
+        if sample_size < 0:
+            raise ValueError("sample_size must be >= 0.")
+
+        geom_col = gdf.geometry.name if hasattr(gdf, "geometry") else None
+        report: dict = {
+            "n_rows": int(len(gdf)),
+            "n_cols": int(len(gdf.columns)),
+            "geometry_column": geom_col,
+            "columns": [],
+        }
+
+        for col in gdf.columns:
+            if col == geom_col:
+                continue
+            series = gdf[col]
+            entry: dict = {
+                "name": col,
+                "dtype": str(series.dtype),
+                "n_nulls": int(series.isna().sum()),
+                "n_unique": int(series.nunique(dropna=True)),
+            }
+            if sample_size > 0:
+                non_null = series.dropna()
+                head = non_null.head(sample_size).tolist() if not non_null.empty else []
+                entry["sample"] = [_jsonable(v) for v in head]
+            report["columns"].append(entry)
+
+        if include_geometry and geom_col is not None and geom_col in gdf.columns:
+            geom = gdf.geometry
+            with _warnings.catch_warnings():
+                # GeoPandas emits a forward-compat warning whenever notna()
+                # is called on a series containing empty geometries; the
+                # mask we build here doesn't depend on the legacy behaviour.
+                _warnings.filterwarnings(
+                    "ignore",
+                    message="GeoSeries.notna",
+                    category=UserWarning,
+                )
+                present = geom.notna()
+            non_empty_mask = present.copy()
+            if present.any():
+                non_empty_mask.loc[present] = ~geom.loc[present].is_empty
+            non_empty = geom[non_empty_mask]
+            type_counts = (
+                non_empty.geom_type.value_counts().to_dict() if not non_empty.empty else {}
+            )
+            geom_summary: dict = {
+                "type_counts": {str(k): int(v) for k, v in type_counts.items()},
+                "n_empty": int((geom.is_empty | geom.isna()).sum()),
+                "crs": str(gdf.crs) if gdf.crs is not None else None,
+            }
+            if not non_empty.empty:
+                minx, miny, maxx, maxy = non_empty.total_bounds
+                geom_summary["bounds"] = [
+                    float(minx),
+                    float(miny),
+                    float(maxx),
+                    float(maxy),
+                ]
+            report["geometry"] = geom_summary
+
+        out = gdf.copy()
+        out.attrs["__schema_describe__"] = report
+        return out
+
+    def get_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "sample_size": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0,
+                    "description": "If > 0, include the first N non-null values per column.",
+                },
+                "include_geometry": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Include geom_type counts, empty count, CRS and total bounds.",
+                },
+            },
+        }
+
+
+def _jsonable(value):
+    """Coerce numpy / pandas scalars to JSON-friendly Python primitives."""
+    if value is None:
+        return None
+    if isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, (pd.Timestamp,)):
+        return value.isoformat()
+    return str(value)

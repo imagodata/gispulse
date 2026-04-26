@@ -266,6 +266,7 @@ Non-spatial schema operations — add, drop, rename, join, lookup table, null fa
 | `lookup_table` | Maps a column through a dict with default fallback. | `source_col`, `target_col`, `mapping`, `default` |
 | `coalesce_fields` | First non-null value across a list of columns. | `sources`, `target_col` |
 | `case_when` | SQL-style conditional column. | `target_col`, `cases`, `else_` |
+| `describe` | Schema introspection report (dtype, nulls, unique, geom_type, bounds) — stored under `gdf.attrs["__schema_describe__"]`, layer returned unchanged. | `sample_size`, `include_geometry` |
 
 ```json
 {
