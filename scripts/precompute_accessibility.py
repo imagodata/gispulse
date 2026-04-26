@@ -101,11 +101,18 @@ def main() -> int:
 
     # Step 2: isochrone with cost_budgets (multi-budget single Dijkstra pass)
     t = time.time()
+    # edge_buffer_m=200 — wider than the API's 40 m default. With 40 m the
+    # dissolved polygon hugs the road centerline and reads as "ribbons along
+    # streets"; users perceive the rings as broken / wrong because they don't
+    # match the intuitive "5-minute walking circle" shape. 200 m fills the
+    # gaps between parallel streets and produces continuous polygons that
+    # actually look like accessibility footprints (a pedestrian routinely
+    # walks 100-200 m off-axis to reach the nearest road).
     iso = IsochroneCapability().execute(
         sante,
         cost_budgets=[500, 750, 1000, 1500],
         crs_meters="EPSG:2154",
-        edge_buffer_m=40,
+        edge_buffer_m=200,
         dissolve=True,
         ref_gdf=routes,
     )
