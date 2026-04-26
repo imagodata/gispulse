@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
-import { useData } from 'vitepress'
+import { useData, withBase } from 'vitepress'
 import { useGispulseApi } from '../../composables/useGispulseApi'
 import { usePlaygroundStore } from '../../composables/usePlaygroundStore'
 import { stepColor, capabilityInfo } from './stepColors'
@@ -55,6 +55,11 @@ const props = defineProps<{
   datasetId: string
   layerName: string
   stepInputs?: Record<string, string>
+  /** When set, each rule name with a matching key is loaded from the URL
+   *  (relative to the docs `public/playground/` root) instead of being
+   *  computed via the live API. Used by S3 accessibility to bypass the
+   *  ~86 s isochrone run on the demo Cloud Run. */
+  staticPipelineResults?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
@@ -91,13 +96,53 @@ const matchedRules = computed(() =>
   store.state.rules.filter(r => props.ruleNames.includes(r.name))
 )
 
+/** Capability lookup for ruleNames when the live API rules aren't loaded
+ *  (offline / static-replay scenarios). Keys mirror rules in
+ *  `docs-site/public/playground/scenario-*-rules.json`; only listed here
+ *  because the static-replay path can't ask the server. */
+const STATIC_RULE_CAPABILITIES: Record<string, string> = {
+  filter_sante: 'filter',
+  isochrone_rings: 'isochrone',
+  classify_by_ring: 'classify_by_ring',
+}
+
+function emptyStep(name: string, capability: string): StepState {
+  return {
+    name,
+    capability,
+    ruleId: name,
+    config: {},
+    status: 'pending',
+    featureCount: null,
+    featuresIn: null,
+    featuresDelta: null,
+    columnsAdded: [],
+    columnsRemoved: [],
+    bbox: null,
+    duration: null,
+    error: null,
+    geojson: null,
+  }
+}
+
 /** Rebuild the step list whenever the scenario (ruleNames) or the loaded
  *  rules change. Unlike the previous guard-on-length version, this always
  *  reflects the current scenario — required when the user navigates between
  *  scenario pages without unmounting the panel. */
 watch(
-  [matchedRules, () => props.ruleNames, () => store.state.rules.length],
+  [matchedRules, () => props.ruleNames, () => store.state.rules.length, () => props.staticPipelineResults],
   ([rules]) => {
+    // Static-replay scenarios (S3) don't depend on the live API rule
+    // catalogue — synthesize the step list directly from ruleNames so the
+    // panel renders even when the demo backend is unreachable.
+    if (props.staticPipelineResults) {
+      steps.value = props.ruleNames.map((name) =>
+        emptyStep(name, STATIC_RULE_CAPABILITIES[name] ?? 'filter'),
+      )
+      missingRules.value = []
+      return
+    }
+
     if (!rules.length) {
       steps.value = []
       // Only flag missing rules once the backend rule list has loaded —
@@ -257,8 +302,100 @@ function decorateStepGeojson(
   return { geojson, colorField: undefined, opacity: undefined }
 }
 
+/** Fetch + gunzip a precomputed step output shipped under
+ *  `docs-site/public/playground/`. Mirrors useStaticPlayground.fetchGeoJSON
+ *  (kept inline to avoid widening that composable's surface for one caller). */
+async function fetchStaticStepGeoJSON(relPath: string): Promise<any> {
+  const url = withBase(`/playground/${relPath}`)
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`static step ${relPath}: ${res.status}`)
+  if (relPath.endsWith('.gz') && 'DecompressionStream' in globalThis) {
+    const ds = new (globalThis as any).DecompressionStream('gzip')
+    const text = await new Response(res.body!.pipeThrough(ds)).text()
+    return JSON.parse(text)
+  }
+  return res.json()
+}
+
+/** Replay the pipeline from precomputed step files instead of hitting the
+ *  live API. Same UX as runPipeline (status updates, decorate, emit) so the
+ *  PipelinePanel UI stays interactive — only the source of step results
+ *  differs. Returns true when every mapped step loaded successfully. */
+async function runPipelineFromStatic(): Promise<boolean> {
+  if (running.value || !steps.value.length) return false
+  const sources = props.staticPipelineResults
+  if (!sources) return false
+
+  running.value = true
+  globalError.value = ''
+  store.snapshotBefore()
+  store.state.jobStatus = 'running'
+  for (const s of steps.value) { s.status = 'running' }
+
+  const startTime = Date.now()
+  try {
+    let prevCount = initialFeatureCount.value ?? null
+    for (let i = 0; i < steps.value.length; i++) {
+      const step = steps.value[i]
+      const url = sources[step.name]
+      if (!url) {
+        // Unmapped step — mark skipped so the UI shows it greyed out rather
+        // than spinning forever. Caller could fall back to live API here, but
+        // S3 maps every step so this is currently dead code in practice.
+        step.status = 'skipped'
+        continue
+      }
+      const tStep = Date.now()
+      const geojson = await fetchStaticStepGeoJSON(url)
+      const count = geojson?.features?.length ?? 0
+      step.featureCount = count
+      step.featuresIn = prevCount
+      step.featuresDelta = prevCount === null ? null : count - prevCount
+      step.columnsAdded = []
+      step.columnsRemoved = []
+      step.bbox = null
+      step.duration = (Date.now() - tStep) / 1000
+      step.status = 'completed'
+      step.geojson = geojson
+
+      const { geojson: paintedGeojson, colorField, opacity } = decorateStepGeojson(step, geojson)
+      step.geojson = paintedGeojson
+      emit('step-result', i, paintedGeojson, {
+        name: step.name,
+        capability: step.capability,
+        colorField,
+        opacity,
+      })
+      prevCount = count
+    }
+    const totalMs = Date.now() - startTime
+    const lastStep = steps.value[steps.value.length - 1]
+    store.state.jobStatus = 'completed'
+    store.state.jobMessage = `${lastStep?.featureCount ?? 0} features (${(totalMs / 1000).toFixed(1)}s, statique)`
+    return true
+  } catch (e: any) {
+    for (const s of steps.value) {
+      if (s.status === 'running') s.status = 'failed'
+    }
+    globalError.value = e.message
+    store.state.jobStatus = 'failed'
+    return false
+  } finally {
+    running.value = false
+  }
+}
+
 /** Execute the full pipeline in a single backend call. Caches geojson per step. */
 async function runPipeline(): Promise<boolean> {
+  // Static-replay path: scenarios that ship precomputed step outputs (S3
+  // accessibility) skip the API entirely. See ScenarioConfig.staticPipelineResults
+  // for the reasoning. When set, the panel stays usable even if the demo API
+  // is down — and the heavy classify_by_ring overlay (~3 MB gzipped) lands
+  // in a couple of seconds rather than a 60 s round-trip that may 500.
+  if (props.staticPipelineResults) {
+    return runPipelineFromStatic()
+  }
+
   if (running.value || !matchedRules.value.length || !props.datasetId) return false
 
   running.value = true

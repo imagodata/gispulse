@@ -82,6 +82,26 @@ export interface ScenarioConfig {
    * redundant once the heatmap is painted).
    */
   soloFinalStep?: boolean
+  /**
+   * Maps pipeline step IDs to static GeoJSON URLs (relative to the docs
+   * `public/playground/` root). When set, PipelinePanel skips the live
+   * `executePipelineSteps` API call and replays each step from its
+   * precomputed file instead.
+   *
+   * Why: S3 accessibility runs a Dijkstra isochrone on the full Clermont
+   * road network (~86 s on the demo Cloud Run) plus classify_by_ring on
+   * 77 k batiments. Two concurrent users reliably 500'd the demo pod (OOM /
+   * response > 32 MB cap), and the user-visible UX was a non-deterministic
+   * "API 500" with no recovery path. Precomputing each step at build time
+   * (see scripts/precompute_accessibility.py) sidesteps the API entirely
+   * for the heavy scenarios — page renders the full 77 k classified
+   * footprints in under 2 seconds with no backend hit.
+   *
+   * Step IDs must match `pipelineRules` entries — unmapped steps fall back
+   * to the live API call (allows partial precompute for scenarios that
+   * only need it on the heavy steps).
+   */
+  staticPipelineResults?: Record<string, string>
 }
 
 export const scenarios: Record<string, ScenarioConfig> = {
@@ -168,6 +188,15 @@ export const scenarios: Record<string, ScenarioConfig> = {
     mode: 'CLI + Map',
     drawMode: 'point',
     drawAction: 'Placez un point → calcul accessibilite en temps reel',
+    // Precomputed via scripts/precompute_accessibility.py — bypass the live
+    // API entirely. The Cloud Run demo took ~86 s for the isochrone alone
+    // and 500'd intermittently under concurrent load. Static replays in
+    // < 2 s and ships the full 77 k classified batiments.
+    staticPipelineResults: {
+      filter_sante: 'data/accessibility/filter_sante_step.geojson.gz',
+      isochrone_rings: 'data/accessibility/isochrone_rings_step.geojson.gz',
+      classify_by_ring: 'data/accessibility/classify_by_ring_step.geojson.gz',
+    },
   },
 
   // S4 — Clermont Auvergne Metropole : Reseau Routier + recul urbanisme (BD TOPO)

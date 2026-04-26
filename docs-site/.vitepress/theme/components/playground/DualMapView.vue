@@ -883,6 +883,7 @@ function onLeafletView(v: { center: [number, number]; zoom: number }) {
         :dataset-id="datasetId"
         :layer-name="config.layers[0]"
         :step-inputs="config.stepInputs"
+        :static-pipeline-results="config.staticPipelineResults"
         @step-result="handleStepResult"
         @step-view="handleStepView"
         @pipeline-reset="handlePipelineReset"

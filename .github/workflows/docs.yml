@@ -38,11 +38,15 @@ jobs:
           cache: pip
 
       - name: Install Python deps for static data build
-        run: pip install geopandas shapely fiona pyogrio
+        run: pip install geopandas shapely fiona pyogrio networkx pydantic-settings structlog
 
       - name: Build static playground datasets (< 60 kB per scenario)
         run: python scripts/build_playground_data.py
         continue-on-error: true   # source GPKGs may not be checked in; skip silently
+
+      - name: Precompute S3 accessibility pipeline outputs
+        run: python scripts/precompute_accessibility.py
+        continue-on-error: true   # same: skipped when source GPKGs are absent
 
       - name: Build templates index
         run: python scripts/build_templates_index.py
