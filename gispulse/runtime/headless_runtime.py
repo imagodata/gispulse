@@ -287,13 +287,19 @@ def build_runtime(
     # Match app.py wiring: sql_executor falls back to engine.execute,
     # webhook_client to HttpWebhookClient.post (SSRF-safe by default).
     #
+    # S6: ``GeoPackageEngine.execute`` is now a real method (sandbox'd
+    # DML path with SQL guardrails — see persistence.sql_guardrails).
+    # ``set_field`` and ``run_sql`` actions, previously silent no-ops,
+    # now actually mutate the GPKG.
+    #
     # S5: wrap whatever executor we end up with in a
     # :class:`RetryingSqlExecutor` so transient ``SQLITE_BUSY`` errors
     # (concurrent QGIS save, peer GISPulse tick) get up to 5 backoff
     # retries instead of failing the action on first lock contention.
-    # Permanent errors (no such table, syntax) bypass the retry and
-    # surface immediately. The wrapper exposes ``snapshot_retries`` so
-    # the CLI ``--watch`` daemon can include the count in its tick log.
+    # Permanent errors (no such table, syntax, ``SecurityError``)
+    # bypass the retry and surface immediately. The wrapper exposes
+    # ``snapshot_retries`` so the CLI ``--watch`` daemon can include
+    # the count in its tick log.
     if sql_executor is None:
         sql_executor = getattr(engine, "execute", None)
     retrying_sql: RetryingSqlExecutor | None = None
