@@ -39,9 +39,17 @@ from gispulse.runtime.predicate_dsl import (
     evaluate_predicate,
     parse_predicate,
 )
+from gispulse.runtime.sqlite_retry import (
+    DEFAULT_BACKOFF_SCHEDULE,
+    DEFAULT_JITTER_PCT,
+    RetryingSqlExecutor,
+    is_busy_error,
+)
 
 __all__ = [
     "ConfigError",
+    "DEFAULT_BACKOFF_SCHEDULE",
+    "DEFAULT_JITTER_PCT",
     "GISPulseConfig",
     "HeadlessRuntime",
     "NullEventHub",
@@ -50,9 +58,11 @@ __all__ = [
     "PredicateEvalError",
     "PredicateNode",
     "PredicateSyntaxError",
+    "RetryingSqlExecutor",
     "build_runtime",
     "build_update_payload",
     "evaluate_predicate",
+    "is_busy_error",
     "load_config",
     "parse_predicate",
     "to_triggers",

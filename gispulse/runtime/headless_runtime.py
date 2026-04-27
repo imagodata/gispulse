@@ -50,6 +50,7 @@ from core.logging import get_logger
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from core.models import Trigger
     from gispulse.adapters.esb.action_dispatcher import ActionDispatcher
+    from gispulse.runtime.sqlite_retry import RetryingSqlExecutor
     from persistence.change_log_watcher import ChangeLogWatcher
     from persistence.gpkg_engine import GeoPackageEngine
 
@@ -106,6 +107,12 @@ class HeadlessRuntime:
     watcher: "ChangeLogWatcher"
     triggers: list["Trigger"] = field(default_factory=list)
     gpkg_path: Path = field(default_factory=Path)
+    # When the caller did not inject a custom ``sql_executor``, this
+    # holds the :class:`RetryingSqlExecutor` wrapper installed around
+    # ``engine.execute`` (S5). The CLI ``--watch`` mode reads
+    # ``.snapshot_retries()`` per tick to populate the JSON log.
+    # ``None`` when no executor is configured at all.
+    retrying_sql: "RetryingSqlExecutor | None" = None
 
     def run_once(self) -> int:
         """Run one polling tick. Returns the number of change-log rows
@@ -253,6 +260,7 @@ def build_runtime(
     # when the user actually runs ``triggers``.
     from gispulse.adapters.esb.action_dispatcher import ActionDispatcher
     from gispulse.adapters.webhooks import HttpWebhookClient
+    from gispulse.runtime.sqlite_retry import RetryingSqlExecutor
     from persistence.change_log_watcher import ChangeLogWatcher
     from persistence.gpkg_engine import GeoPackageEngine
 
@@ -278,8 +286,20 @@ def build_runtime(
     # ---- ActionDispatcher --------------------------------------------
     # Match app.py wiring: sql_executor falls back to engine.execute,
     # webhook_client to HttpWebhookClient.post (SSRF-safe by default).
+    #
+    # S5: wrap whatever executor we end up with in a
+    # :class:`RetryingSqlExecutor` so transient ``SQLITE_BUSY`` errors
+    # (concurrent QGIS save, peer GISPulse tick) get up to 5 backoff
+    # retries instead of failing the action on first lock contention.
+    # Permanent errors (no such table, syntax) bypass the retry and
+    # surface immediately. The wrapper exposes ``snapshot_retries`` so
+    # the CLI ``--watch`` daemon can include the count in its tick log.
     if sql_executor is None:
         sql_executor = getattr(engine, "execute", None)
+    retrying_sql: RetryingSqlExecutor | None = None
+    if sql_executor is not None:
+        retrying_sql = RetryingSqlExecutor(sql_executor)
+        sql_executor = retrying_sql
 
     # Build the allowlist once (used both for logging and as the
     # default-client wrapper). When the caller injects an explicit
@@ -350,6 +370,7 @@ def build_runtime(
         watcher=watcher,
         triggers=trigger_list,
         gpkg_path=gpkg,
+        retrying_sql=retrying_sql,
     )
 
 
