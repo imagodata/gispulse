@@ -52,11 +52,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Literal
 from uuid import uuid4
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 if TYPE_CHECKING:  # pragma: no cover
-    from core.models import ActionDef, Trigger
+    from core.graph import ActionDef
+    from core.models import Trigger
 
 
 CONFIG_VERSION = 1
@@ -127,7 +128,14 @@ class TriggerConfigModel(BaseModel):
     table: str = Field(min_length=1, max_length=120)
     pk_col: str = Field(default="fid", min_length=1, max_length=64)
     when: list[Literal["INSERT", "UPDATE", "DELETE"]] = Field(
-        default_factory=lambda: list(_SUPPORTED_DML_OPS),
+        # mypy can't widen ``list[str]`` into the Literal[...] union mode
+        # the BaseModel field expects; the runtime values are perfectly
+        # fine because pydantic re-validates them at construction time.
+        default_factory=lambda: [  # type: ignore[arg-type]
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+        ],
     )
     predicate: str | None = None
     actions: list[ActionConfigModel] = Field(default_factory=list)
@@ -182,10 +190,19 @@ def _safe_anchors() -> list[Path]:
     """Return the directories under which user-controlled paths are
     accepted. Anything resolved outside of these roots is rejected.
 
-    We accept ``cwd`` and ``$HOME``. Operators wanting a hardened deploy
-    can ``cd`` into the project root before running the CLI, and the
-    ``--gpkg`` override goes through the same check.
+    We accept:
+      * ``cwd``                — the canonical operator location.
+      * ``$HOME``              — typical config locations under ``~``.
+      * ``tempfile.gettempdir()`` — CI runners and ephemeral pipelines.
+
+    Operators wanting a hardened deploy can ``cd`` into the project
+    root before running the CLI, and the ``--gpkg`` override goes
+    through the same check. The ``GISPULSE_CONFIG_ALLOW_ROOTS`` env
+    var can extend the list at runtime (colon-separated).
     """
+    import os as _os
+    import tempfile
+
     anchors: list[Path] = []
     try:
         anchors.append(Path.cwd().resolve())
@@ -195,7 +212,29 @@ def _safe_anchors() -> list[Path]:
         anchors.append(Path.home().resolve())
     except (OSError, RuntimeError):
         pass
-    return anchors
+    try:
+        anchors.append(Path(tempfile.gettempdir()).resolve())
+    except OSError:  # pragma: no cover - defensive
+        pass
+
+    extra = _os.environ.get("GISPULSE_CONFIG_ALLOW_ROOTS", "")
+    for raw in extra.split(":"):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            anchors.append(Path(raw).expanduser().resolve())
+        except OSError:  # pragma: no cover - defensive
+            continue
+
+    # Deduplicate while preserving order.
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for a in anchors:
+        if a not in seen:
+            seen.add(a)
+            unique.append(a)
+    return unique
 
 
 def _check_within_anchors(path: Path, anchors: Iterable[Path]) -> None:

@@ -143,7 +143,12 @@ class HeadlessRuntime:
     def __enter__(self) -> "HeadlessRuntime":
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:  # noqa: D401, ANN001
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: Any,
+    ) -> None:
         self.close()
 
 
@@ -276,6 +281,16 @@ def build_runtime(
     if sql_executor is None:
         sql_executor = getattr(engine, "execute", None)
 
+    # Build the allowlist once (used both for logging and as the
+    # default-client wrapper). When the caller injects an explicit
+    # ``webhook_client`` we still keep the allowlist around for
+    # observability without enforcing it on the injected callable.
+    allowlist: set[str] | None = (
+        {host.strip().lower() for host in webhook_allowlist if host.strip()}
+        if webhook_allowlist
+        else None
+    )
+
     if webhook_client is None:
         # Optional allowlist: when set, wrap the SSRF-safe client with
         # an extra host check so operators can pin outbound traffic to
@@ -284,18 +299,14 @@ def build_runtime(
         from urllib.parse import urlparse
 
         base_client = HttpWebhookClient()
-        allowlist = (
-            {host.strip().lower() for host in webhook_allowlist if host.strip()}
-            if webhook_allowlist
-            else None
-        )
 
         def _post_with_allowlist(url: str, payload: dict[str, Any]) -> None:
             if allowlist:
                 host = (urlparse(url).hostname or "").lower()
                 if host not in allowlist:
                     raise PermissionError(
-                        f"Webhook host {host!r} not in allowlist {sorted(allowlist)!r}"
+                        f"Webhook host {host!r} not in allowlist "
+                        f"{sorted(allowlist)!r}"
                     )
             base_client.post(url, payload)
 
@@ -329,7 +340,7 @@ def build_runtime(
         "headless_runtime_built",
         gpkg=str(gpkg),
         triggers=len(trigger_list),
-        webhook_allowlist=sorted(allowlist) if webhook_allowlist else None,
+        webhook_allowlist=sorted(allowlist) if allowlist else None,
     )
 
     return HeadlessRuntime(
