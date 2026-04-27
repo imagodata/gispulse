@@ -79,7 +79,10 @@ jobs:
         run: pip install -e ".[all]" --ignore-requires-python || pip install -e ".[dev]"
 
       - name: Run pip-audit
-        run: pip-audit --desc on --fix-auto=off
+        # NB: --fix-auto was removed upstream in pip-audit >= 2.8 (replaced by
+        # the boolean --fix flag, which defaults to off). We rely on the
+        # default no-fix behaviour here.
+        run: pip-audit --desc on
 
   build-portal:
     runs-on: ubuntu-latest
