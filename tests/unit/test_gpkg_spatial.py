@@ -14,7 +14,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import Point, Polygon, box
+from shapely.geometry import Point, box
 
 from persistence.gpkg_spatial import (
     _PREDICATE_MAP,

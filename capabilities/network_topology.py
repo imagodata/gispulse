@@ -25,7 +25,6 @@ from __future__ import annotations
 from typing import Any
 
 import geopandas as gpd
-import pandas as pd
 
 from capabilities.base import Capability
 from capabilities.registry import register
@@ -278,7 +277,7 @@ class NodeLinesCapability(Capability):
             gdf:        Input GeoDataFrame of LineStrings.
             crs_meters: Work in this metric CRS (optional).
         """
-        from shapely.ops import unary_union, polygonize
+        from shapely.ops import unary_union
 
         if gdf.empty:
             return gdf.copy()

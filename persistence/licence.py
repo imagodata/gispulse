@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
 
 from persistence.sqlite_repository import DEFAULT_DB_PATH
 

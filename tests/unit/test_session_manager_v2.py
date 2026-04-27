@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import pytest
-import tempfile
-from pathlib import Path
 
 import geopandas as gpd
 from shapely.geometry import Point
@@ -143,16 +140,6 @@ class TestCapabilityTypedDicts:
 
     def test_imports(self):
         from core.capability_params import (
-            BufferParams,
-            FilterParams,
-            SpatialJoinParams,
-            DissolveParams,
-            CentroidParams,
-            ClipParams,
-            AreaLengthParams,
-            CalculateParams,
-            IntersectsParams,
-            ReprojectParams,
             PARAMS_TYPE_MAP,
         )
         assert len(PARAMS_TYPE_MAP) == 10

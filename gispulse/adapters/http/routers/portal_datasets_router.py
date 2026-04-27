@@ -5,7 +5,6 @@ Portal datasets router — listing, metadata, delete, rename, export.
 from __future__ import annotations
 
 import json
-import shutil
 import uuid
 from pathlib import Path
 from typing import Any
@@ -541,7 +540,6 @@ async def get_field_stats(
     if field not in gdf.columns:
         raise HTTPException(404, f"Field {field} not found in layer {layer_name}")
 
-    import numpy as np
     series = gdf[field].dropna()
 
     try:

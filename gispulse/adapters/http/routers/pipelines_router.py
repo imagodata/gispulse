@@ -15,7 +15,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from gispulse.adapters.http.dependencies import get_dataset_repo, get_spatial_engine
+from gispulse.adapters.http.dependencies import get_dataset_repo
 from core.logging import get_logger
 from persistence.repository import Repository
 from persistence.tier import TierError, check_tier

@@ -39,7 +39,7 @@ from core.models import (
     TriggerType,
 )
 from persistence.repository import Repository
-from persistence.tier import TierError, check_tier, enforce_feature, get_current_tier
+from persistence.tier import TierError, check_tier, enforce_feature
 from rules.trigger_evaluator import TriggerEvaluator
 
 

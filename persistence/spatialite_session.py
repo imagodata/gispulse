@@ -40,7 +40,6 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable
 
 import geopandas as gpd
 import pandas as pd

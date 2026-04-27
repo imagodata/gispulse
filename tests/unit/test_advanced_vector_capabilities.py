@@ -36,7 +36,7 @@ from capabilities.vector import (
     VoronoiPolygonsCapability,
 )
 from core.predicates import AttrPredicate
-from rules.predicates import ShapelyPredicateEvaluator, _eval_attr
+from rules.predicates import _eval_attr
 from rules.validation import _validate_predicate
 
 

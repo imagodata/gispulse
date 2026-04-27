@@ -8,8 +8,8 @@ environment variables directly.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
-from pydantic import BaseSettings, Field, validator
+from typing import Dict, Optional
+from pydantic import BaseSettings, Field
 
 
 class StripeSettings(BaseSettings):

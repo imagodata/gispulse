@@ -452,7 +452,6 @@ def test_webhook_allowlist_blocks_off_list_host(gpkg_with_parcels: Path) -> None
     on it, the dispatcher's per-action try/except logs but doesn't crash
     — and our test ensures the wrapped HttpWebhookClient is never reached
     (no network call)."""
-    from urllib.parse import urlparse
 
     # Build a runtime with the default webhook_client wrapping
     # HttpWebhookClient, but with an allowlist that excludes the

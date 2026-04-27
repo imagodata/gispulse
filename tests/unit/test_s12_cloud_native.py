@@ -10,14 +10,12 @@ Covers:
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import Point, box
+from shapely.geometry import Point
 
 # ---------------------------------------------------------------------------
 # Fixtures

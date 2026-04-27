@@ -8,9 +8,8 @@ Ce workflow:
 
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
-from gispulse.capabilities import get_capability
 from gispulse.core.models import Dataset, Job, Rule
 from gispulse.orchestration.runner import JobRunner
 from gispulse.persistence.repository import InMemoryRepository

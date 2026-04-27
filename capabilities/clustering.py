@@ -19,7 +19,6 @@ output GeoDataFrame. ``-1`` marks noise points (DBSCAN/HDBSCAN).
 
 from __future__ import annotations
 
-from typing import Any
 
 import geopandas as gpd
 import numpy as np

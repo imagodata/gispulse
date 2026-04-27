@@ -6,7 +6,6 @@ Pin the full surface so regressions are caught.
 """
 from __future__ import annotations
 
-import pytest
 
 from core.pipeline_schema import (
     SCHEMA_V1,

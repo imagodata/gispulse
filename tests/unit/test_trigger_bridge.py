@@ -1,12 +1,11 @@
 """Tests for orchestration.trigger_bridge — FiredTrigger → JobQueue bridge."""
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
 
-from core.models import FiredTrigger, Job
+from core.models import FiredTrigger
 from orchestration.trigger_bridge import TriggerJobBridge
 
 

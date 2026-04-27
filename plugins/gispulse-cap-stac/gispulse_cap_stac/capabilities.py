@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import geopandas as gpd
-from shapely.geometry import box, shape
+from shapely.geometry import shape
 
 from capabilities.base import Capability
 from capabilities.registry import register

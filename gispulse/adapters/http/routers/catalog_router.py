@@ -248,7 +248,6 @@ async def _import_wfs_flux(
     layer_cache: dict,
 ) -> dict:
     """Fetch WFS/OGC Features and save as GPKG."""
-    import geopandas as gpd
 
     from gispulse.adapters.ogc.wfs_client import fetch_ogc_api_features, fetch_wfs
     from core.models import Dataset, OGCSourceConfig
@@ -348,7 +347,6 @@ async def _import_opendata_download(
     """Download an opendata file and register as dataset."""
     import httpx
 
-    from core.models import Dataset
     from persistence.io import dataset_from_file
     from gispulse.adapters.http.layer_utils import build_layer_meta, get_layer_styles, load_layers
 

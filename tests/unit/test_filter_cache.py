@@ -10,7 +10,6 @@ import threading
 import time
 
 import geopandas as gpd
-import pytest
 from shapely.geometry import Point
 
 from core.filter.cache import CacheStats, FilterCache, NullCache

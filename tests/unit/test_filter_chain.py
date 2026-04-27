@@ -6,7 +6,6 @@ wrong filters.
 """
 from __future__ import annotations
 
-import pytest
 
 from core.filter.chain import FilterChain
 from core.filter.types import CombinationStrategy, Filter, FilterType

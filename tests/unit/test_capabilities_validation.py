@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import LineString, MultiPolygon, Point, Polygon
-from shapely.wkt import loads as wkt_loads
+from shapely.geometry import Point, Polygon
 
 from capabilities.validation import (
     AttributeValidationCapability,
@@ -282,7 +281,6 @@ class TestAttributeValidation:
         assert len(type_violations) >= 1
 
     def test_nullable_violation_detected(self):
-        import numpy as np
 
         gdf = gpd.GeoDataFrame(
             {"val": [1, None, 3], "geometry": [Point(0, 0), Point(1, 0), Point(2, 0)]},
@@ -405,7 +403,6 @@ class TestCompletenessCheck:
         assert all(result["null_ratio"] == 0.0)
 
     def test_null_ratio_computed_correctly(self):
-        import numpy as np
         gdf = gpd.GeoDataFrame(
             {
                 "val": [1.0, None, None, 4.0],
@@ -420,7 +417,6 @@ class TestCompletenessCheck:
         assert val_row["null_ratio"] == pytest.approx(0.5)
 
     def test_is_complete_flag_with_threshold(self):
-        import numpy as np
         gdf = gpd.GeoDataFrame(
             {
                 "val": [1.0, None, None, 4.0],

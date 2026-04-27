@@ -10,7 +10,7 @@ Closes the largest gap from #443 (capabilities/vector/filter.py was at 23%).
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

@@ -36,7 +36,6 @@ from persistence.schema import (
     BOOL_COLUMNS as _BOOL_COLUMNS,
     DATETIME_COLUMNS as _DATETIME_COLUMNS,
     JSON_COLUMNS as _JSON_COLUMNS,
-    SCHEMA_VERSION,
     UUID_COLUMNS as _UUID_COLUMNS,
     build_table_schemas,
 )

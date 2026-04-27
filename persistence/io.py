@@ -197,7 +197,6 @@ def read_vector_chunked(
     Yields:
         GeoDataFrame chunks.
     """
-    from typing import Iterator
 
     path_obj = Path(path)
     ext = path_obj.suffix.lower()

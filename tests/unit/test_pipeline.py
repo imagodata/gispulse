@@ -6,12 +6,11 @@ import json
 import pytest
 
 import geopandas as gpd
-from shapely.geometry import Point, Polygon, box
+from shapely.geometry import Point
 
 from core.pipeline import (
     PipelineSpec,
     StepSpec,
-    TriggerSpec,
     load_pipeline,
     pipeline_to_dict,
     _parse_predicate,

@@ -5,17 +5,13 @@ and schedule repository (persistence/schedule_repository.py).
 
 from __future__ import annotations
 
-import asyncio
 import os
-import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 
-from core.models import Job, JobStatus
 from orchestration.job_queue import InMemoryJobQueue
 from orchestration.scheduler import (
     PipelineScheduler,

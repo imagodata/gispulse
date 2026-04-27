@@ -9,13 +9,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
 from uuid import uuid4
 
 import pytest
 
 from gispulse.adapters.esb.event_router import DMLPayload, EventRouter
-from gispulse.adapters.esb.predicate_evaluator import PredicateEvaluator
 from core.graph import ActionDef, ActionType, EvalResult, Transition
 from core.models import Trigger
 

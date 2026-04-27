@@ -53,7 +53,7 @@ from orchestration.runner import JobRunner
 from persistence.engine_factory import create_spatial_engine
 from persistence.repository import InMemoryRepository
 from persistence.session_provisioner import SessionProvisioner
-from persistence.sqlite_repository import DEFAULT_DB_PATH, SQLiteRepository
+from persistence.sqlite_repository import SQLiteRepository
 from rules.engine import RuleEngine
 
 from gispulse import __version__ as _VERSION

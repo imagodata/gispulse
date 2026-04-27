@@ -17,7 +17,6 @@ from shapely.geometry import box
 from core.models import ChangeOperation, Trigger, TriggerEvent, TriggerType
 from persistence.duckdb_change_detector import DuckDBChangeDetector
 from persistence.spatialite_session import SpatiaLiteSession
-from rules.trigger_evaluator import TriggerEvaluator
 
 
 # ---------------------------------------------------------------------------

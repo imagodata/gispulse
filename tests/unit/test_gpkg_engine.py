@@ -6,11 +6,10 @@ here corrupt user projects, so pin the contract tightly.
 """
 from __future__ import annotations
 
-from pathlib import Path
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import Point, Polygon, box
+from shapely.geometry import Point, box
 
 from persistence.gpkg_engine import GeoPackageEngine
 

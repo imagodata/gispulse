@@ -10,10 +10,8 @@ Tests cover:
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 

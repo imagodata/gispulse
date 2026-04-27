@@ -19,7 +19,7 @@ Usage::
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, List, Union, Dict
+from typing import TYPE_CHECKING, Optional
 
 import typer
 
@@ -1077,7 +1077,6 @@ def update(
         # Replace current binary
         current_bin = Path(shutil.which("gispulse") or sys.executable)
         try:
-            import os
             import stat
 
             tmp_path.chmod(current_bin.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -1135,7 +1134,6 @@ def _startup_update_check() -> None:
     Respects GISPULSE_NO_UPDATE_CHECK=1 env var.
     Caches results for 24h in ~/.gispulse/update-check.json.
     """
-    import os
 
     from core.config import settings as _cfg3
     if _cfg3.telemetry.no_update_check:
@@ -1267,11 +1265,11 @@ def marketplace_search(
     import urllib.request
     import urllib.error
 
-    url = f"https://pypi.org/simple/"
+    url = "https://pypi.org/simple/"
     typer.echo(f"Searching PyPI for '{_PLUGIN_PREFIX}*' matching '{query}'...")
 
     # Use PyPI JSON API to search by project name pattern
-    search_url = f"https://pypi.org/simple/"
+    search_url = "https://pypi.org/simple/"
     try:
         req = urllib.request.Request(search_url, headers={"Accept": "application/vnd.pypi.simple.v1+json"})
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -1306,7 +1304,7 @@ def marketplace_search(
     typer.echo(f"\n{len(matches)} result(s):\n")
     for name in matches:
         typer.echo(f"  - {name}")
-    typer.echo(f"\nInstall with:  gispulse marketplace install <name>")
+    typer.echo("\nInstall with:  gispulse marketplace install <name>")
 
 
 @marketplace_app.command("install")
@@ -1452,7 +1450,7 @@ def template_list() -> None:
         caps = ", ".join(entry["capabilities"]) or "—"
         typer.echo(f"  {entry['name']:<35} {entry['steps']:>5}  {caps}")
 
-    typer.echo(f"\nUse: gispulse template use <name> [-o <dest>]")
+    typer.echo("\nUse: gispulse template use <name> [-o <dest>]")
 
 
 @template_app.command("use")

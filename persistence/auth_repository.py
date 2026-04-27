@@ -12,7 +12,7 @@ import json
 import secrets
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from persistence.auth_models import ApiKey, Organisation, User

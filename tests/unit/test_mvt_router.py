@@ -204,7 +204,6 @@ class TestTilesEndpointValidation:
         """
         import os
         from gispulse.adapters.http.app import create_app
-        from core.models import Dataset
         from persistence.engine import SpatialEngine
 
         mock_engine = MagicMock(spec=SpatialEngine)

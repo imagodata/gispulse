@@ -6,7 +6,6 @@ orientation) without changing the schema or row count.
 
 from __future__ import annotations
 
-import math
 
 import geopandas as gpd
 import pandas as pd

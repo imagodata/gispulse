@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import LineString, MultiLineString
+from shapely.geometry import LineString
 
 from capabilities.network_topology import (
     ExtendDanglesCapability,

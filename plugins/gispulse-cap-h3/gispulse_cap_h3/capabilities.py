@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import geopandas as gpd
-import numpy as np
 from shapely.geometry import Polygon
 
 from capabilities.base import Capability

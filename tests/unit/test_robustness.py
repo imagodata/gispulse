@@ -18,7 +18,6 @@ import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -264,7 +263,7 @@ class TestCorruptJsonConfig:
         try:
             restored = _deserialize_job(json.dumps(data))
             assert restored.name == "test"
-        except (KeyError, TypeError) as e:
+        except (KeyError, TypeError):
             # Acceptable if it raises a clear error
             pass
 
@@ -354,8 +353,8 @@ class TestExpiredApiKey:
 
     def test_expired_key_in_auth_repo(self):
         """AuthRepository stores and retrieves expired keys — auth layer must check."""
-        from persistence.auth_models import ApiKey, User
-        from persistence.auth_repository import AuthRepository, hash_api_key
+        from persistence.auth_models import User
+        from persistence.auth_repository import AuthRepository
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "auth.db"
@@ -392,8 +391,8 @@ class TestRevokedApiKeyCached:
 
     def test_deleted_key_not_found(self):
         """After deleting an API key, it must no longer be retrievable."""
-        from persistence.auth_models import ApiKey, User
-        from persistence.auth_repository import AuthRepository, hash_api_key
+        from persistence.auth_models import User
+        from persistence.auth_repository import AuthRepository
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "auth.db"
@@ -419,8 +418,8 @@ class TestRevokedApiKeyCached:
 
     def test_deleted_user_keys_also_gone(self):
         """Deleting a user should also remove their API keys."""
-        from persistence.auth_models import ApiKey, User
-        from persistence.auth_repository import AuthRepository, hash_api_key
+        from persistence.auth_models import User
+        from persistence.auth_repository import AuthRepository
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "auth.db"

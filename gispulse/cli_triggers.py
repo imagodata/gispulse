@@ -19,7 +19,6 @@ are supported. See ``cli_triggers_watch.py`` for the daemon implementation.
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import sys
 import warnings
@@ -29,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 import typer
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from gispulse.runtime.config_loader import GISPulseConfig
+    pass
 
 
 triggers_app = typer.Typer(
@@ -269,7 +268,7 @@ def cmd_run(
 
         if exit_code != 0:
             _human(
-                f"[red]Daemon aborted after consecutive tick failures.[/red]",
+                "[red]Daemon aborted after consecutive tick failures.[/red]",
                 err=True,
             )
             raise typer.Exit(exit_code)

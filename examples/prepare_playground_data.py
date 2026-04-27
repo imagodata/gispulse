@@ -200,7 +200,7 @@ def download_layer(type_name: str, bbox: str, max_features: int) -> gpd.GeoDataF
     """Download a BD TOPO layer via WFS with pagination if needed."""
     total = wfs_get_feature_count(type_name, bbox)
     if total == 0:
-        print(f"    0 features found, skipping")
+        print("    0 features found, skipping")
         return None
 
     to_download = min(total, max_features)
@@ -511,7 +511,7 @@ def prepare_city(city_key: str) -> None:
 
         gdf = download_layer(type_name, layer_bbox, max_feat)
         if gdf is None or gdf.empty:
-            print(f"    SKIP: no data")
+            print("    SKIP: no data")
             continue
 
         cleaner = CLEANERS.get(layer_name)
@@ -541,7 +541,7 @@ def prepare_city(city_key: str) -> None:
             layers_written += 1
             print(f"    -> dvf_ventes: {len(dvf_gdf)} mutations written")
         else:
-            print(f"    SKIP: no DVF data")
+            print("    SKIP: no DVF data")
 
     if layers_written > 0:
         size_mb = out_path.stat().st_size / 1e6

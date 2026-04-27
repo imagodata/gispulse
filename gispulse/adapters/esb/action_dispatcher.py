@@ -8,13 +8,12 @@ run_job, run_graph, webhook, enqueue, log_event).
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import Any, Callable
 from uuid import UUID
 
 from gispulse.core.dispatcher import BaseDispatcher, TriggerContext
 from core.logging import get_logger
-from core.models import ActionDef, ActionType, EvalResult, Trigger
+from core.models import ActionDef, ActionType
 from core.sql_safety import validate_identifier as _validate_identifier
 
 log = get_logger(__name__)

@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 import threading
 import time
-from typing import Any, Callable
+from typing import Any
 
 from core.logging import get_logger
 from core.models import ChangeOperation, ChangeRecord, FiredTrigger, Trigger

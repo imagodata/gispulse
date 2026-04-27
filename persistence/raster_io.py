@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
-from uuid import uuid4
 
 if TYPE_CHECKING:
     import numpy as np
