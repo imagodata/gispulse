@@ -1535,6 +1535,25 @@ from gispulse.cli_triggers import triggers_app  # noqa: E402
 app.add_typer(triggers_app, name="triggers")
 
 
+# ---------------------------------------------------------------------------
+# track sub-group (v1.3.0 #4 — SQL change-tracking on a GPKG)
+# ---------------------------------------------------------------------------
+
+from gispulse.cli_track import track_app  # noqa: E402
+
+app.add_typer(track_app, name="track")
+
+
+# ---------------------------------------------------------------------------
+# watch — top-level daemon (v1.3.0 #5)
+# ---------------------------------------------------------------------------
+
+from gispulse.cli_watch import cmd_watch  # noqa: E402
+
+app.command(name="watch")(cmd_watch)
+
+
+
 def main() -> None:
     app()
 
