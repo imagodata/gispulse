@@ -83,12 +83,21 @@ def cmd_watch(
         "--dataset-id",
         help="Stable identifier stamped on every event payload (multi-tenant disambiguation).",
     ),
+    once: bool = typer.Option(
+        False,
+        "--once",
+        help="Drain once and exit instead of looping. Suitable for cron / Lambda / CI hooks.",
+    ),
+    exit_zero_if_empty: bool = typer.Option(
+        False,
+        "--exit-zero-if-empty",
+        help="(--once only) Silent exit 0 when the changelog is empty.",
+    ),
 ) -> None:
     """Watch a GeoPackage and dispatch rule actions on every DML change.
 
-    Runs in the foreground until SIGINT (Ctrl+C) or SIGTERM. On shutdown
-    the watcher is stopped gracefully — rows already pulled in the
-    current tick finish dispatch, then the process exits 0.
+    Default: foreground daemon until SIGINT/SIGTERM. With ``--once``, drains
+    one tick and exits 0 — suitable for cron jobs, AWS Lambda, or CI hooks.
 
     Trigger drift (a layer has its triggers dropped by ``ogr2ogr -overwrite``
     or ``VACUUM``) is reported but not auto-fixed in this version. Run
@@ -133,6 +142,14 @@ def cmd_watch(
         host.strip().lower() for host in webhook if host.strip()
     ]
 
+    if exit_zero_if_empty and not once:
+        _human(
+            "--exit-zero-if-empty has no effect without --once; ignoring.",
+            err=True,
+            style="yellow",
+        )
+
+    mode = "once" if once else "daemon"
     _log_event(
         "watch_starting",
         gpkg=str(gpkg_path),
@@ -142,14 +159,21 @@ def cmd_watch(
         batch_limit=effective_batch,
         webhook_allowlist=effective_allowlist or None,
         dataset_id=dataset_id,
+        mode=mode,
     )
-    _human(
-        f"[green]gispulse watch[/green] [cyan]{gpkg_path.name}[/cyan] — "
-        f"{len(triggers_obj)} trigger(s), poll={int(poll_interval_s*1000)}ms, "
-        f"PID={_os_getpid()}. [dim]Ctrl+C to stop.[/dim]"
-    )
+    if once:
+        _human(
+            f"[green]gispulse watch --once[/green] [cyan]{gpkg_path.name}[/cyan] — "
+            f"{len(triggers_obj)} trigger(s), drain≤{effective_batch} row(s)."
+        )
+    else:
+        _human(
+            f"[green]gispulse watch[/green] [cyan]{gpkg_path.name}[/cyan] — "
+            f"{len(triggers_obj)} trigger(s), poll={int(poll_interval_s*1000)}ms, "
+            f"PID={_os_getpid()}. [dim]Ctrl+C to stop.[/dim]"
+        )
 
-    # ---- Build runtime + start watcher -------------------------------
+    # ---- Build runtime ----------------------------------------------
     try:
         runtime = build_runtime(
             gpkg_path=gpkg_path,
@@ -164,6 +188,16 @@ def cmd_watch(
         _human(f"[red]Runtime build failed:[/red] {exc}", err=True)
         raise typer.Exit(1) from exc
 
+    # ---- One-shot drain mode ----------------------------------------
+    if once:
+        exit_code = _run_once(
+            runtime=runtime,
+            gpkg_path=gpkg_path,
+            exit_zero_if_empty=exit_zero_if_empty,
+        )
+        raise typer.Exit(exit_code)
+
+    # ---- Daemon mode (foreground until SIGINT/SIGTERM) ---------------
     stop_event = threading.Event()
 
     def _on_signal(signum: int, _frame: object) -> None:
@@ -225,6 +259,61 @@ def _os_getpid() -> int:
     """Return the current process id (extracted to keep the command body tidy)."""
     import os
     return os.getpid()
+
+
+def _run_once(
+    *,
+    runtime: object,
+    gpkg_path: Path,
+    exit_zero_if_empty: bool,
+) -> int:
+    """Single-tick drain — calls ``runtime.run_once()`` once and exits.
+
+    Lifecycle:
+        - No daemon thread, no signal handler, no heartbeat.
+        - ``runtime.run_once()`` swallows per-row dispatch errors so a
+          single bad webhook does not abort the batch (per
+          ChangeLogWatcher contract).
+        - Webhook 5xx leaves rows ``processed=0`` for the next invocation
+          (idempotent retry on next cron tick).
+        - Returns 0 on success, 1 on a build/tick exception, 0 (silent) on
+          an empty changelog when ``exit_zero_if_empty`` is set.
+    """
+    try:
+        pending_before, _ = _snapshot_changelog(runtime)
+        if pending_before == 0 and exit_zero_if_empty:
+            _log_event(
+                "run_once_empty_silent_exit",
+                gpkg=str(gpkg_path),
+            )
+            return 0
+
+        processed = runtime.run_once()  # type: ignore[attr-defined]
+        _log_event(
+            "run_once_done",
+            gpkg=str(gpkg_path),
+            processed=processed,
+            pending_before=pending_before,
+        )
+        if processed == 0:
+            _human(
+                f"[dim]Nothing to drain on {gpkg_path.name}.[/dim]"
+            )
+        else:
+            _human(
+                f"[green]✓[/green] Processed [bold]{processed}[/bold] "
+                f"change-log row(s) on [cyan]{gpkg_path.name}[/cyan]."
+            )
+        return 0
+    except Exception as exc:
+        _log_event("run_once_failed", error=str(exc))
+        _human(f"[red]run --once failed:[/red] {exc}", err=True)
+        return 1
+    finally:
+        try:
+            runtime.close()  # type: ignore[attr-defined]
+        except Exception as exc:  # pragma: no cover — defensive
+            _log_event("run_once_close_error", error=str(exc))
 
 
 def _snapshot_changelog(runtime: object) -> tuple[int, int]:
