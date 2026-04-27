@@ -598,3 +598,46 @@ class TestActionDispatchBridge:
         finally:
             watcher.stop()
         assert dispatched == []  # no dispatch because trigger_id unknown
+
+    # ------------------------------------------------------------------
+    # S5: cancellable wait — stop() must return promptly even when the
+    # watcher is asleep on a long ``poll_interval``.
+    # ------------------------------------------------------------------
+
+    def test_stop_returns_promptly_with_long_poll_interval(self) -> None:
+        """Pre-S5 ``time.sleep(poll_interval)`` would force ``stop()`` to
+        wait up to ``poll_interval`` before the thread exited. With the
+        new :class:`Event`-based wait, ``stop()`` should join in well
+        under a second even with ``poll_interval=10s``."""
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+        watcher = ChangeLogWatcher(
+            engine, hub, dataset_id="ds-test", poll_interval=10.0
+        )
+        watcher.start()
+        # Give the thread a chance to enter the wait.
+        assert _wait_until(lambda: watcher.is_running())
+
+        t0 = time.monotonic()
+        watcher.stop()
+        elapsed = time.monotonic() - t0
+
+        assert not watcher.is_running()
+        assert elapsed < 1.5, (
+            f"stop() took {elapsed:.2f}s — Event.wait should interrupt "
+            f"a 10s poll within the 2s join timeout"
+        )
+
+    def test_stop_event_property_is_exposed(self) -> None:
+        """External loops (CLI ``--watch``) consume the same Event when
+        they drive ``_tick`` directly instead of starting the daemon."""
+        engine = _FakeEngine()
+        hub = _RecordingHub()
+        watcher = ChangeLogWatcher(engine, hub, dataset_id="ds-test")
+        ev = watcher.stop_event
+        assert isinstance(ev, threading.Event)
+        assert not ev.is_set()
+        watcher.stop()
+        # After stop(), the event is set so subsequent waiters return
+        # immediately. (The thread was never started here.)
+        assert ev.is_set()

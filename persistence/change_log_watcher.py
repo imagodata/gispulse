@@ -42,7 +42,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 from typing import Any, Callable, Protocol
 
 from core.models import ChangeOperation, ChangeRecord, Trigger
@@ -195,6 +194,11 @@ class ChangeLogWatcher:
 
         self._running = False
         self._thread: threading.Thread | None = None
+        # S5: replace bare ``time.sleep(self._poll_interval)`` with an
+        # :class:`Event` so :meth:`stop` (and the CLI ``--watch`` daemon's
+        # SIGINT handler) can interrupt the wait immediately rather than
+        # waiting up to ``poll_interval`` seconds before the loop notices.
+        self._stop_event = threading.Event()
         # Backoff window when get_pending_changes raises.
         self._error_backoff = 1.0
 
@@ -207,6 +211,8 @@ class ChangeLogWatcher:
         if self._running:
             return
         self._running = True
+        # Re-arm in case the watcher is being restarted after a stop().
+        self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._run,
             name=f"gispulse-change-log-watcher-{getattr(self._engine, 'backend_name', '?')}",
@@ -220,8 +226,16 @@ class ChangeLogWatcher:
         )
 
     def stop(self) -> None:
-        """Stop the polling thread and join (2 s timeout)."""
+        """Stop the polling thread and join (2 s timeout).
+
+        S5: signals the internal :class:`Event` so a thread sleeping
+        inside ``Event.wait(poll_interval)`` returns immediately. With
+        the prior ``time.sleep()`` an operator pressing Ctrl-C against
+        a watcher configured for ``poll_interval=5s`` would wait up to
+        a full poll window before the loop noticed.
+        """
         self._running = False
+        self._stop_event.set()
         thread = self._thread
         if thread is not None:
             thread.join(timeout=2.0)
@@ -234,6 +248,13 @@ class ChangeLogWatcher:
         """Return True when the polling thread is active."""
         return self._running and self._thread is not None and self._thread.is_alive()
 
+    @property
+    def stop_event(self) -> threading.Event:
+        """Expose the cancel event so external loops (CLI ``--watch``)
+        can wait on the same primitive when they drive ``_tick`` directly
+        instead of starting the daemon thread."""
+        return self._stop_event
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
@@ -241,28 +262,47 @@ class ChangeLogWatcher:
     def _run(self) -> None:
         """Polling loop — runs in the daemon thread.
 
-        ``sleep -> tick`` so that on restart with un-acked rows, the WS
+        ``wait -> tick`` so that on restart with un-acked rows, the WS
         subscriber has a chance to (re)connect before the watcher consumes
         and acks the backlog (otherwise replay events are broadcast to no
         subscribers and lost).
+
+        S5: the wait uses :class:`threading.Event` instead of ``time.sleep``
+        so :meth:`stop` returns control immediately (no poll-interval-sized
+        latency on Ctrl-C).
         """
         while self._running:
-            time.sleep(self._poll_interval)
+            # ``wait`` returns True when the event is set (stop) or False
+            # when it timed out (next tick). Either way we re-check
+            # ``_running`` afterwards to honour external state changes.
+            if self._stop_event.wait(timeout=self._poll_interval):
+                break
             if not self._running:
                 break
             try:
                 self._tick()
             except Exception as exc:  # pragma: no cover — defensive
                 logger.exception("change_log_watcher_tick_failed: %s", exc)
-                time.sleep(self._error_backoff)
+                # Use the same cancellable wait so error backoff also
+                # respects stop().
+                if self._stop_event.wait(timeout=self._error_backoff):
+                    break
 
     def _tick(self) -> int:
-        """One polling cycle. Returns the number of rows processed."""
+        """One polling cycle. Returns the number of rows processed.
+
+        S5: when the engine raises while listing pending changes (typical
+        cause: a transient SQLite lock during a concurrent QGIS save) we
+        sleep on :attr:`_stop_event` rather than ``time.sleep`` so the
+        external stop signal is honoured without an extra poll.
+        """
         try:
             rows = self._engine.get_pending_changes(self._batch_limit)
         except Exception as exc:
             logger.warning("change_log_get_pending_failed: %s", exc)
-            time.sleep(self._error_backoff)
+            # Cancellable backoff: ``wait`` returns immediately when the
+            # event is set (stop), otherwise after ``_error_backoff`` s.
+            self._stop_event.wait(timeout=self._error_backoff)
             return 0
 
         if not rows:
