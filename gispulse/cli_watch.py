@@ -93,6 +93,15 @@ def cmd_watch(
         "--exit-zero-if-empty",
         help="(--once only) Silent exit 0 when the changelog is empty.",
     ),
+    bulk_threshold: int = typer.Option(
+        0,
+        "--bulk-threshold",
+        help="Collapse ticks with N+ rows into a single bulk.changed event. "
+        "Avoids webhook flooding on ogr2ogr appends or QGIS bulk paste. "
+        "0 (default) keeps per-row events.",
+        min=0,
+        max=1_000_000,
+    ),
 ) -> None:
     """Watch a GeoPackage and dispatch rule actions on every DML change.
 
@@ -157,6 +166,7 @@ def cmd_watch(
         triggers=len(triggers_obj),
         poll_interval_ms=int(poll_interval_s * 1000),
         batch_limit=effective_batch,
+        bulk_threshold=bulk_threshold,
         webhook_allowlist=effective_allowlist or None,
         dataset_id=dataset_id,
         mode=mode,
@@ -182,6 +192,7 @@ def cmd_watch(
             poll_interval=poll_interval_s,
             batch_limit=effective_batch,
             dataset_id=dataset_id,
+            bulk_threshold=bulk_threshold,
         )
     except Exception as exc:
         _log_event("runtime_build_failed", error=str(exc))

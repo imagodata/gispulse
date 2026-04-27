@@ -165,11 +165,14 @@ class ChangeLogWatcher:
         trigger_evaluator: _TriggerEvaluatorProtocol | None = None,
         triggers_provider: Callable[[], list[Trigger]] | None = None,
         action_dispatcher: _ActionDispatcherProtocol | None = None,
+        bulk_threshold: int = 0,
     ) -> None:
         if poll_interval <= 0:
             raise ValueError("poll_interval must be > 0")
         if batch_limit <= 0:
             raise ValueError("batch_limit must be > 0")
+        if bulk_threshold < 0:
+            raise ValueError("bulk_threshold must be >= 0 (0 disables bulk mode)")
         # Lot 2 v2 (Beta E2E): ``dataset_id`` is mandatory. Multi-tenant
         # event consumers cannot tell two tables named ``parcels`` apart
         # across two GPKGs without it. Empty string is rejected because
@@ -184,6 +187,12 @@ class ChangeLogWatcher:
         self._dataset_id = dataset_id
         self._poll_interval = float(poll_interval)
         self._batch_limit = int(batch_limit)
+        # v1.3.0 #8: when len(pending_rows) >= bulk_threshold, the tick
+        # collapses the batch into a single ``bulk.changed`` event instead
+        # of broadcasting one ``dml.changed`` per row. Trigger evaluation
+        # is also skipped — receivers get a summary, not a per-row stream.
+        # 0 (default) keeps the legacy per-row behaviour for safety.
+        self._bulk_threshold = int(bulk_threshold)
         self._evaluator = trigger_evaluator
         self._triggers_provider = triggers_provider
         self._action_dispatcher = action_dispatcher
@@ -307,6 +316,15 @@ class ChangeLogWatcher:
 
         if not rows:
             return 0
+
+        # v1.3.0 #8: bulk-mode short-circuit. When a single tick pulls
+        # ``bulk_threshold`` or more rows (typical of an ogr2ogr append,
+        # a QGIS bulk paste, or a Python loop INSERT), collapse them into
+        # one summary event instead of broadcasting + evaluating per row.
+        # Receivers see a single ``bulk.changed`` with op_counts and a
+        # change_id range; trigger evaluation is skipped for that batch.
+        if self._bulk_threshold > 0 and len(rows) >= self._bulk_threshold:
+            return self._bulk_tick(rows)
 
         # Resolve active triggers once per batch so changes made via the
         # API show up on the next tick without restarting the watcher.
@@ -501,6 +519,57 @@ class ChangeLogWatcher:
         return len(rows)
 
     # ------------------------------------------------------------------
+    # Bulk-mode tick (v1.3.0 #8)
+    # ------------------------------------------------------------------
+
+    def _bulk_tick(self, rows: list[dict]) -> int:
+        """Collapse a large batch into a single ``bulk.changed`` event.
+
+        Behaviour:
+            - Broadcast ONE summary event with op_counts, layers, and
+              the ``change_id_range`` so receivers can de-duplicate.
+            - Skip per-row trigger evaluation entirely. Receivers that
+              care about bulk imports should subscribe to ``bulk.changed``
+              and run their own batch-level reconciliation; rules that
+              filter on per-row attributes are not designed for bulk.
+            - Ack rows up to ``max(change_id)`` so the backlog drains in
+              one go (no re-scan on the next tick).
+
+        Errors:
+            - Broadcast failure → log + still ack (otherwise a dead
+              subscriber pins the watcher to the same backlog forever).
+            - Ack failure → log + return processed count anyway. Next
+              tick will see the same rows; the bulk summary is
+              idempotent against ``change_id_range[0]``.
+        """
+        payload = _summarise_batch(rows, self._dataset_id)
+        try:
+            self._hub.broadcast("bulk.changed", payload)
+        except Exception as exc:
+            logger.error(
+                "bulk_changed_broadcast_failed change_id_range=%s err=%s",
+                payload["change_id_range"],
+                exc,
+            )
+
+        max_id = int(payload["change_id_range"][1] or 0)
+        if max_id > 0:
+            try:
+                self._engine.mark_changes_processed(max_id)
+            except Exception as exc:
+                logger.warning(
+                    "bulk_mark_processed_failed max_id=%d err=%s", max_id, exc
+                )
+
+        logger.info(
+            "change_log_bulk_tick rows=%d layers=%d max_id=%d",
+            payload["row_count"],
+            len(payload["layers"]),
+            max_id,
+        )
+        return len(rows)
+
+    # ------------------------------------------------------------------
     # Row materialisation for DSL predicate evaluation (S4)
     # ------------------------------------------------------------------
 
@@ -618,6 +687,64 @@ class ChangeLogWatcher:
                 trigger_id,
                 exc,
             )
+
+
+# ---------------------------------------------------------------------------
+# Bulk-mode tick (v1.3.0 #8) — pure summary helper
+# ---------------------------------------------------------------------------
+
+
+def _summarise_batch(
+    rows: list[dict], dataset_id: str
+) -> dict[str, Any]:
+    """Build the ``bulk.changed`` event payload from a row batch.
+
+    Pure function (extracted for unit testing without spinning up a
+    watcher / engine). Counts ops globally and per layer, computes the
+    change_id range and timestamp range, and lists the touched layers.
+    """
+    op_counts: dict[str, int] = {}
+    by_layer: dict[str, dict[str, int]] = {}
+    min_id = None
+    max_id = None
+    min_ts: str | None = None
+    max_ts: str | None = None
+
+    for row in rows:
+        try:
+            cid = int(row["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if min_id is None or cid < min_id:
+            min_id = cid
+        if max_id is None or cid > max_id:
+            max_id = cid
+
+        table = str(row.get("table_name") or "")
+        op = str(row.get("operation") or "").upper()
+        op_counts[op] = op_counts.get(op, 0) + 1
+        by_layer.setdefault(table, {})
+        by_layer[table][op] = by_layer[table].get(op, 0) + 1
+
+        ts = row.get("changed_at")
+        if ts is not None:
+            ts_str = str(ts)
+            # ISO timestamps sort lexicographically.
+            if min_ts is None or ts_str < min_ts:
+                min_ts = ts_str
+            if max_ts is None or ts_str > max_ts:
+                max_ts = ts_str
+
+    return {
+        "dataset_id": dataset_id,
+        "bulk": True,
+        "row_count": len(rows),
+        "layers": sorted(by_layer.keys()),
+        "op_counts": op_counts,
+        "by_layer": by_layer,
+        "change_id_range": [min_id or 0, max_id or 0],
+        "ts_range": [min_ts, max_ts],
+    }
 
 
 __all__ = ["ChangeLogWatcher"]

@@ -215,6 +215,7 @@ def build_runtime(
     dataset_id: str = "__cli__",
     sql_executor: Callable[..., Any] | None = None,
     webhook_client: Callable[[str, dict[str, Any]], None] | None = None,
+    bulk_threshold: int = 0,
 ) -> HeadlessRuntime:
     """Wire a headless trigger runtime over a single GPKG file.
 
@@ -247,6 +248,13 @@ def build_runtime(
         webhook_client:    Optional ``(url, payload) -> None`` callable
                            injected into the dispatcher. Defaults to
                            :class:`HttpWebhookClient`.
+        bulk_threshold:    When > 0, ticks that pull this many rows or
+                           more collapse into a single ``bulk.changed``
+                           event instead of broadcasting + evaluating
+                           per row. Use to absorb 10k-row imports from
+                           ``ogr2ogr``, QGIS bulk paste, etc., without
+                           webhook-flooding. 0 (default) keeps the
+                           legacy per-row behaviour.
 
     Returns:
         A :class:`HeadlessRuntime` ready for ``run_once()`` or daemon
@@ -287,13 +295,19 @@ def build_runtime(
     # Match app.py wiring: sql_executor falls back to engine.execute,
     # webhook_client to HttpWebhookClient.post (SSRF-safe by default).
     #
+    # S6: ``GeoPackageEngine.execute`` is now a real method (sandbox'd
+    # DML path with SQL guardrails — see persistence.sql_guardrails).
+    # ``set_field`` and ``run_sql`` actions, previously silent no-ops,
+    # now actually mutate the GPKG.
+    #
     # S5: wrap whatever executor we end up with in a
     # :class:`RetryingSqlExecutor` so transient ``SQLITE_BUSY`` errors
     # (concurrent QGIS save, peer GISPulse tick) get up to 5 backoff
     # retries instead of failing the action on first lock contention.
-    # Permanent errors (no such table, syntax) bypass the retry and
-    # surface immediately. The wrapper exposes ``snapshot_retries`` so
-    # the CLI ``--watch`` daemon can include the count in its tick log.
+    # Permanent errors (no such table, syntax, ``SecurityError``)
+    # bypass the retry and surface immediately. The wrapper exposes
+    # ``snapshot_retries`` so the CLI ``--watch`` daemon can include
+    # the count in its tick log.
     if sql_executor is None:
         sql_executor = getattr(engine, "execute", None)
     retrying_sql: RetryingSqlExecutor | None = None
@@ -352,6 +366,7 @@ def build_runtime(
         dataset_id=dataset_id,
         poll_interval=poll_interval,
         batch_limit=batch_limit,
+        bulk_threshold=bulk_threshold,
         triggers_provider=_triggers_provider,
         action_dispatcher=dispatcher,
     )
