@@ -333,10 +333,31 @@ def create_app(
                             ActionDispatcher,
                         )
                         from gispulse.adapters.webhooks import HttpWebhookClient
+                        from gispulse.runtime.sqlite_retry import (
+                            RetryingSqlExecutor,
+                        )
+
+                        # S6: parity with the CLI/headless runtime —
+                        # ``engine.execute`` is the sandbox'd DML path
+                        # (see persistence.sql_guardrails). We always
+                        # wrap it in :class:`RetryingSqlExecutor` so a
+                        # transient SQLITE_BUSY (concurrent QGIS save,
+                        # peer ChangeLog tick) gets retried instead of
+                        # failing the action on first lock contention.
+                        # ``SecurityError`` is **not** an
+                        # ``OperationalError`` and so bypasses the
+                        # retry — the wrapper fails fast on a guardrail
+                        # violation.
+                        raw_executor = getattr(spatial_engine, "execute", None)
+                        sql_executor = (
+                            RetryingSqlExecutor(raw_executor)
+                            if raw_executor is not None
+                            else None
+                        )
 
                         action_dispatcher = ActionDispatcher(
                             event_hub=app.state.event_hub,
-                            sql_executor=getattr(spatial_engine, "execute", None),
+                            sql_executor=sql_executor,
                             webhook_client=HttpWebhookClient().post,
                         )
                     except Exception as exc:

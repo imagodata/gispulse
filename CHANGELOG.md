@@ -7,8 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-04-27
+
 ### Added
-- `RELEASING.md` — operator handbook for cutting PyPI releases (pre-flight, dry-run via `workflow_dispatch`, tag flow, rollback, pre-releases).
+- `gispulse triggers` — new CLI subcommand group (`run` / `validate` / `list`) for the standalone trigger runtime (Mode 1). YAML config → GPKG DML triggers, no FastAPI process required. Closes the Mode 1 scope of #2; Mode 2 portail remains on the roadmap.
+- `gispulse/runtime/headless_runtime.py` — `HeadlessRuntime` wires `ChangeLogWatcher` + `TriggerEvaluator` + `ActionDispatcher` against a `NullEventHub` stand-in so the ESB pipeline (notify / set_field / run_sql / webhook / log_event) runs outside the FastAPI lifespan. `run_once()` drives a single tick for `--once`; `start()` / `stop()` expose the polling thread for `--watch`.
+- `gispulse/runtime/config_loader.py` — strict pydantic v2 schema (`extra="forbid"`, `yaml.safe_load` only, path-traversal guard against `$HOME`/`cwd`/`tempdir` anchors with optional `GISPULSE_CONFIG_ALLOW_ROOTS` env override). `validate_against_gpkg()` cross-checks every `table:` against the live GPKG layer list before the first tick.
+- `gispulse/runtime/predicate_dsl.py` — hand-written LL(1) recursive-descent parser for the `predicate:` field. **No `eval`, no `simpleeval`, no third-party dep.** Operators: `==` `!=` `>` `>=` `<` `<=` `AND` `OR` `NOT` `IN` `NOT IN` `IS NULL` `IS NOT NULL`. Identifier whitelist (dunders refused), `MAX_DEPTH=32`, NUL-byte rejection. Bare attrs resolve to `new.*` on UPDATE; `old.*` / `new.*` are explicit.
+- `gispulse/runtime/sqlite_retry.py` — `RetryingSqlExecutor` wraps `GeoPackageEngine.execute()` with exponential backoff on `sqlite3.OperationalError` carrying `SQLITE_BUSY` / `database is locked`. Caps at 5 retries / 30 s total. `SecurityError` from the guardrails is **never** retried.
+- `gispulse/cli_triggers.py` — `triggers run --once`, `triggers validate`, `triggers list`. Human-friendly output to stdout (Rich), structured JSON events on stderr for log shippers. Exit codes: 0 on success, 1 on config / GPKG / runtime error, 2 on partial trigger failures.
+- `gispulse/cli_triggers_watch.py` — daemon loop for `triggers run --watch`. `SIGINT` / `SIGTERM` route through a single `threading.Event`, the loop breaks on the next tick boundary. Reload-on-config-change polls the YAML mtime and rebuilds the runtime from scratch on diff. 10 consecutive failed ticks → exit 1; per-tick exponential backoff (1 s → 30 s cap).
+- `persistence/sql_guardrails.py` — `enforce()` is the single sandbox between YAML `run_sql` / `set_field` actions and SQLite. Allowlist `INSERT` / `UPDATE` / `DELETE` / `SELECT` only. Hard-blocks `ATTACH` / `DETACH` / `PRAGMA` / `VACUUM` / `BEGIN` / `COMMIT` / `ROLLBACK` / `LOAD_EXTENSION` / `writable_schema` / `sqlite_master`. Protected table prefixes: `gpkg_*`, `rtree_*`, `sqlite_*`, `_gispulse_*`. Multi-statement payloads (`INSERT …; DROP …`) refused. Comments and string literals are masked before keyword detection.
+- `persistence/gpkg_engine.py` — `GeoPackageEngine.execute(sql, params)` exposed as the public DML write API, gated by `sql_guardrails.enforce()`. Returns `rowcount`. Internal migrations bypass via the `allow_ddl` flag; YAML actions never set it.
+
+### Notes
+- Mode 2 (portail UI for trigger CRUD) remains on the roadmap — not shipped here.
 - `release.yml` — `workflow_dispatch` trigger with `dry_run` input (default `true`) so the build / smoke-test / changelog-extract pipeline can be validated without publishing. Tag pushes still auto-publish.
 - `release.yml` — fail the build when the CHANGELOG section for the released version is empty, surfacing the missing release notes early.
 - `persistence/changelog_watcher.py` + `WatcherRegistry` — Lot 2 v2 GPKG live-sync foundation: file-watch + `BEGIN IMMEDIATE` polling per dataset, exposed via `POST /datasets/{id}/enable_tracking` for `/ws/events` consumers (10 k inserts at ~317 events/s, restart replay, multi-WS fanout).

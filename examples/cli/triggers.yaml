@@ -1,0 +1,104 @@
+# GISPulse — `gispulse triggers` example config (Mode 1, headless GPKG)
+#
+# FR : Exemple fonctionnel pour la commande `gispulse triggers run|validate|list`.
+#      Adapter le chemin `gpkg:` puis :
+#
+#          gispulse triggers validate --config examples/cli/triggers.yaml
+#          gispulse triggers run --config examples/cli/triggers.yaml --once
+#
+#      L'exemple suppose un GPKG `parcels.gpkg` avec :
+#        - une couche `parcels`     (colonnes : fid, valeur, commune, status, enriched_at, zoning)
+#        - une couche `audit_log`   (colonnes : fid, op, ts)
+#
+# EN : Runnable reference for `gispulse triggers run|validate|list`.
+#      Adjust the `gpkg:` path then run the commands above.
+#      The config assumes a GPKG `parcels.gpkg` with:
+#        - layer `parcels`   (columns: fid, valeur, commune, status, enriched_at, zoning)
+#        - layer `audit_log` (columns: fid, op, ts)
+#
+# Voir / See : docs/TRIGGERS_GUIDE.md  → "Standalone CLI mode".
+
+version: 1
+
+# FR : Chemin GPKG. Ecrasable via `--gpkg /autre/chemin.gpkg` sur la CLI.
+# EN : GPKG path. Override on the CLI with `--gpkg /other/path.gpkg`.
+gpkg: ./parcels.gpkg
+
+triggers:
+
+  # ------------------------------------------------------------------
+  # 1. Webhook simple — notify external system on every new INSERT
+  # ------------------------------------------------------------------
+  # FR : Trigger fire-and-forget : a chaque INSERT dans `parcels`, on
+  #      poste le payload du change-log au webhook ci-dessous. Le client
+  #      webhook applique son propre retry (cf. issue #451).
+  # EN : Fire-and-forget trigger: every INSERT into `parcels` posts the
+  #      change-log payload to the webhook URL. The webhook client owns
+  #      its own retry policy (see issue #451).
+  - name: notify_new_parcels
+    table: parcels
+    pk_col: fid
+    when: [INSERT]
+    actions:
+      - type: webhook
+        url: https://example.com/hooks/parcels-new
+
+  # ------------------------------------------------------------------
+  # 2. set_field gated by a predicate
+  # ------------------------------------------------------------------
+  # FR : Quand une parcelle de Lyon depasse 100 000 EUR (INSERT ou
+  #      UPDATE), on tamponne le champ `enriched_at`. Les attributs nus
+  #      (`valeur`, `commune`) referencent `new.*` par defaut. La
+  #      grammaire complete du DSL est documentee dans
+  #      docs/TRIGGERS_GUIDE.md → "Predicate DSL".
+  # EN : When a Lyon parcel goes above EUR 100k (INSERT or UPDATE), we
+  #      stamp `enriched_at`. Bare attrs (`valeur`, `commune`) resolve
+  #      to `new.*` by default. Full DSL grammar lives in the guide
+  #      under "Predicate DSL".
+  - name: enrich_high_value_lyon
+    table: parcels
+    pk_col: fid
+    when: [INSERT, UPDATE]
+    predicate: "valeur > 100000 AND commune == 'Lyon'"
+    actions:
+      - type: set_field
+        field: enriched_at
+        value: 2026-04-27
+
+  # ------------------------------------------------------------------
+  # 3. Audit log via run_sql
+  # ------------------------------------------------------------------
+  # FR : A chaque DELETE, on insere une ligne dans `audit_log`. Le SQL
+  #      passe par les guardrails (`persistence/sql_guardrails.py`) :
+  #      seuls INSERT/UPDATE/DELETE/SELECT sont acceptes, les tables
+  #      `gpkg_*` / `_gispulse_*` sont protegees, multi-statements
+  #      refuses. `OLD.fid` est le pk de la ligne supprimee.
+  # EN : On every DELETE, insert one row into `audit_log`. The SQL goes
+  #      through the guardrails: only INSERT/UPDATE/DELETE/SELECT are
+  #      allowed, `gpkg_*` / `_gispulse_*` tables are protected,
+  #      multi-statements refused. `OLD.fid` references the deleted pk.
+  - name: audit_parcel_deletes
+    table: parcels
+    pk_col: fid
+    when: [DELETE]
+    actions:
+      - type: run_sql
+        expression: "INSERT INTO audit_log (fid, op, ts) VALUES (OLD.fid, 'DELETE', CURRENT_TIMESTAMP)"
+
+# FR : Allowlist webhook — bloque les domaines non listes (defense en
+#      profondeur, redondant avec le SSRF guard de HttpWebhookClient).
+# EN : Webhook allowlist — blocks domains not listed here (defense in
+#      depth, on top of HttpWebhookClient SSRF guard).
+security:
+  webhook_allowlist:
+    - example.com
+
+# FR : Cadence du polling. 1000 ms = bon compromis CLI / cron. Plage
+#      acceptee : 10..60000 ms. `max_batch` limite le nombre de lignes
+#      traitees par tick (protection runaway).
+# EN : Polling cadence. 1000 ms is a sane CLI / cron default. Allowed
+#      range: 10..60000 ms. `max_batch` caps rows processed per tick
+#      (runaway guard).
+runtime:
+  poll_interval_ms: 1000
+  max_batch: 200
