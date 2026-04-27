@@ -153,6 +153,33 @@ class TriggerConfigModel(BaseModel):
                 seen.append(op)
         return seen
 
+    @field_validator("predicate")
+    @classmethod
+    def _validate_predicate_dsl(cls, v: str | None) -> str | None:
+        """Compile the predicate string at config-load time.
+
+        We only call ``parse_predicate`` for its side effect — the
+        compiled AST is recomputed in :func:`to_triggers` so the
+        pydantic model stays a pure data carrier (frozen-friendly,
+        JSON-serialisable for ``triggers validate --json``). Surfacing
+        DSL errors here means ``triggers validate`` can flag them as
+        config errors instead of letting them blow up the first tick.
+        """
+        if v is None:
+            return None
+        # Local import keeps the module import-light; the DSL only
+        # matters when there's a predicate to compile.
+        from gispulse.runtime.predicate_dsl import (
+            PredicateError,
+            parse_predicate,
+        )
+
+        try:
+            parse_predicate(v)
+        except PredicateError as exc:
+            raise ValueError(f"predicate parse failed: {exc}") from exc
+        return v
+
 
 class SecurityConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -353,16 +380,20 @@ def to_triggers(config: GISPulseConfig) -> list["Trigger"]:
         - ``type: log_event`` ─▶ ``ActionType.LOG_EVENT``
         - ``type: notify`` ─▶ ``ActionType.NOTIFY``
 
-    Predicate strings are stored verbatim under
-    ``Trigger.conditions["predicate"]`` for now — full parsing into
-    :class:`AttrPredicate` is deferred to S4 (predicate DSL story). The
-    current evaluator falls back to ``matched=True`` when no
-    :class:`Trigger.predicates` are set, so trigger actions still fire
-    on every change while we wait for the DSL.
+    Predicate handling (S4)
+    -----------------------
+    When ``predicate:`` is set on the YAML entry, the DSL string is
+    parsed into a :class:`PredicateNode` AST and stored under
+    ``Trigger.conditions["predicate_ast"]``. The verbatim source stays
+    in ``conditions["predicate"]`` for round-trip / observability. The
+    headless runtime evaluates the AST against the row payload before
+    dispatching any action; trigger entries without a predicate keep
+    the pre-S4 always-fire behaviour.
     """
     from core.graph import ActionDef, ActionType
     from core.enums import TriggerEvent, TriggerType, TriggerCategory
     from core.models import Trigger
+    from gispulse.runtime.predicate_dsl import parse_predicate
 
     type_map = {
         "webhook": ActionType.WEBHOOK,
@@ -404,6 +435,12 @@ def to_triggers(config: GISPulseConfig) -> list["Trigger"]:
         }
         if entry.predicate:
             conditions["predicate"] = entry.predicate
+            # Compile the DSL and stash the AST. The pydantic validator
+            # already parsed it once for early error surfacing; we
+            # re-parse here so the runtime path holds an AST object
+            # rather than a string. This is a few µs and keeps the
+            # config model JSON-serialisable.
+            conditions["predicate_ast"] = parse_predicate(entry.predicate)
 
         trigger = Trigger(
             name=entry.name,

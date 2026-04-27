@@ -352,11 +352,37 @@ class ChangeLogWatcher:
                 except ValueError:
                     operation = ChangeOperation.INSERT
 
+                # When any active trigger carries a DSL predicate
+                # (S4: ``conditions["predicate_ast"]``), fetch the
+                # row attributes from the underlying table so the
+                # evaluator can match against real values. This is
+                # opt-in per trigger — triggers without predicates
+                # never pay the SELECT cost.
+                #
+                # We guard with table+pk presence: DELETE rows have
+                # no row to load (``new_values`` stays empty, the
+                # predicate then evaluates over what amounts to
+                # NULLs everywhere, which is the documented semantics
+                # for DSL on DELETE).
+                new_values: dict[str, Any] = {}
+                if (
+                    op != "DELETE"
+                    and fid is not None
+                    and table
+                    and any(
+                        (getattr(t, "conditions", None) or {}).get("predicate_ast")
+                        is not None
+                        for t in active_triggers
+                    )
+                ):
+                    new_values = self._load_row_values(table, fid) or {}
+
                 record = ChangeRecord(
                     session_id="",
                     table_name=table,
                     feature_id=fid,
                     operation=operation,
+                    new_values=new_values,
                 )
 
                 try:
@@ -433,6 +459,67 @@ class ChangeLogWatcher:
                 logger.warning("change_log_mark_processed_failed: %s", exc)
 
         return len(rows)
+
+    # ------------------------------------------------------------------
+    # Row materialisation for DSL predicate evaluation (S4)
+    # ------------------------------------------------------------------
+
+    def _load_row_values(self, table: str, fid: str) -> dict[str, Any] | None:
+        """Read the current row from the underlying table.
+
+        Used only when at least one active trigger carries a DSL
+        ``predicate_ast`` (no overhead otherwise). The row is fetched
+        through the engine's GPKG connection and returned as a flat
+        ``dict``. Geometry columns are kept as raw blobs / WKT (the
+        evaluator currently only matches on attributes — geometry
+        predicates remain on the structured ``GeomPredicate`` path).
+
+        Returns ``None`` when the table or row no longer exists; the
+        evaluator then sees an empty payload and the predicate
+        resolves to a non-match (fail-safe). Identifier validation
+        prevents SQL injection via the trigger config.
+        """
+        from core.sql_safety import validate_identifier as _validate_ident
+
+        try:
+            safe_table = _validate_ident(table)
+        except Exception as exc:  # ValueError from validator
+            logger.warning(
+                "change_log_load_row_invalid_table table=%r err=%s", table, exc
+            )
+            return None
+
+        # Default GPKG primary key is "fid". We fall back to a generic
+        # ``id``/``rowid`` lookup so non-GPKG layers still resolve.
+        pk_candidates = ("fid", "id", "rowid")
+        get_conn = getattr(self._engine, "_get_conn", None)
+        if get_conn is None:
+            return None
+        try:
+            conn = get_conn()
+        except Exception:
+            return None
+
+        try:
+            for pk in pk_candidates:
+                try:
+                    cur = conn.execute(
+                        f'SELECT * FROM "{safe_table}" WHERE "{pk}" = ? LIMIT 1',
+                        (fid,),
+                    )
+                except Exception:
+                    continue
+                row = cur.fetchone()
+                if row is not None:
+                    return {k: row[k] for k in row.keys()}
+        except Exception as exc:
+            logger.warning(
+                "change_log_load_row_failed table=%s fid=%s err=%s",
+                table,
+                fid,
+                exc,
+            )
+        return None
 
     # ------------------------------------------------------------------
     # Action dispatch bridge (#458)

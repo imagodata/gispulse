@@ -178,6 +178,43 @@ class TriggerEvaluator:
         if not handler(self, record, trigger, typed_cond):
             return False
 
+        # DSL predicate AST (Mode 1 / CLI triggers — S4).
+        # Compiled by ``runtime.config_loader.to_triggers`` and stashed
+        # on ``conditions["predicate_ast"]``. We evaluate it against a
+        # payload that exposes both ``old.*`` and ``new.*`` so DSL
+        # authors can reference either snapshot on UPDATE.
+        ast_node = (trigger.conditions or {}).get("predicate_ast")
+        if ast_node is not None:
+            try:
+                from gispulse.runtime.predicate_dsl import (
+                    PredicateError,
+                    build_update_payload,
+                    evaluate_predicate,
+                )
+
+                ast_payload = build_update_payload(
+                    new_values=record.new_values or {},
+                    old_values=record.old_values or {},
+                    extra=(
+                        {"geom": record.new_geom_wkt}
+                        if record.new_geom_wkt
+                        else None
+                    ),
+                )
+                if not evaluate_predicate(ast_node, ast_payload):
+                    return False
+            except PredicateError as exc:
+                # Fail-safe: a runtime predicate error must not crash
+                # the watcher tick. Log + skip the row.
+                import logging as _logging
+
+                _logging.getLogger(__name__).warning(
+                    "trigger_predicate_eval_failed trigger=%r error=%s",
+                    getattr(trigger, "name", trigger.id),
+                    exc,
+                )
+                return False
+
         # Structured predicates (if any)
         if trigger.predicates:
             payload = {**record.new_values}

@@ -29,14 +29,32 @@ from gispulse.runtime.headless_runtime import (
     NullEventHub,
     build_runtime,
 )
+from gispulse.runtime.predicate_dsl import (
+    PredicateDepthError,
+    PredicateError,
+    PredicateEvalError,
+    PredicateNode,
+    PredicateSyntaxError,
+    build_update_payload,
+    evaluate_predicate,
+    parse_predicate,
+)
 
 __all__ = [
     "ConfigError",
     "GISPulseConfig",
     "HeadlessRuntime",
     "NullEventHub",
+    "PredicateDepthError",
+    "PredicateError",
+    "PredicateEvalError",
+    "PredicateNode",
+    "PredicateSyntaxError",
     "build_runtime",
+    "build_update_payload",
+    "evaluate_predicate",
     "load_config",
+    "parse_predicate",
     "to_triggers",
     "validate_against_gpkg",
 ]
