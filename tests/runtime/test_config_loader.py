@@ -315,6 +315,94 @@ def test_yaml_root_must_be_mapping(tmp_path: Path) -> None:
         load_config(bad)
 
 
+def test_predicate_dsl_compiled_into_ast(
+    tracked_gpkg: Path, tmp_path: Path
+) -> None:
+    """A YAML predicate gets parsed eagerly and the compiled AST is
+    stashed on the domain trigger's ``conditions``.
+    """
+    from gispulse.runtime.predicate_dsl import PredicateNode
+
+    cfg_path = tmp_path / "with_predicate.yaml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            f"""
+            version: 1
+            gpkg: {tracked_gpkg}
+            triggers:
+              - name: high_value
+                table: parcels
+                predicate: "name == 'parcelle_1'"
+                actions:
+                  - type: log_event
+            """,
+        ).strip(),
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_path)
+    triggers = to_triggers(cfg)
+    assert len(triggers) == 1
+    cond = triggers[0].conditions
+    # Verbatim source is preserved for observability.
+    assert cond["predicate"] == "name == 'parcelle_1'"
+    # Compiled AST is ready for the runtime.
+    ast = cond.get("predicate_ast")
+    assert isinstance(ast, PredicateNode)
+
+
+def test_predicate_with_invalid_dsl_rejected(
+    tracked_gpkg: Path, tmp_path: Path
+) -> None:
+    """A broken DSL string surfaces as a config error with a clear
+    pointer to the offending trigger."""
+    cfg_path = tmp_path / "bad_predicate.yaml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            f"""
+            version: 1
+            gpkg: {tracked_gpkg}
+            triggers:
+              - name: broken
+                table: parcels
+                predicate: "1; DROP TABLE users"
+                actions:
+                  - type: log_event
+            """,
+        ).strip(),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(cfg_path)
+    msg = str(excinfo.value)
+    assert "predicate parse failed" in msg
+
+
+def test_predicate_optional_keeps_legacy_behaviour(
+    tracked_gpkg: Path, tmp_path: Path
+) -> None:
+    """A YAML config without a ``predicate:`` key must continue to
+    work — no AST set on conditions, runtime falls back to always-match."""
+    cfg_path = tmp_path / "no_predicate.yaml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            f"""
+            version: 1
+            gpkg: {tracked_gpkg}
+            triggers:
+              - name: legacy_no_predicate
+                table: parcels
+                actions:
+                  - type: log_event
+            """,
+        ).strip(),
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_path)
+    triggers = to_triggers(cfg)
+    assert "predicate" not in triggers[0].conditions
+    assert "predicate_ast" not in triggers[0].conditions
+
+
 def test_when_dedupes_and_rejects_empty(tracked_gpkg: Path, tmp_path: Path) -> None:
     # Empty when -> error
     bad = tmp_path / "empty_when.yaml"

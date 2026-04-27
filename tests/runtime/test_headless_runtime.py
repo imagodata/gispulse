@@ -258,6 +258,195 @@ def test_null_event_hub_swallows_broadcasts() -> None:
     hub.broadcast("nodata")  # type: ignore[call-arg]
 
 
+def _insert_with_value(
+    gpkg: Path, *, name: str, status: str, valeur: int | None = None
+) -> None:
+    """Helper to insert a parcel with a numeric ``valeur`` column.
+
+    The base fixture ``parcels`` table only has ``name``/``status``;
+    predicate tests need a numeric column so we add it on demand. The
+    ALTER is idempotent.
+    """
+    conn = sqlite3.connect(str(gpkg))
+    try:
+        try:
+            conn.execute('ALTER TABLE "parcels" ADD COLUMN valeur INTEGER')
+        except sqlite3.OperationalError:
+            pass  # column already exists
+        conn.execute(
+            'INSERT INTO "parcels"(name, status, valeur) VALUES (?, ?, ?)',
+            (name, status, valeur),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_predicate_filters_rows_below_threshold(
+    gpkg_with_parcels: Path,
+) -> None:
+    """A trigger with ``predicate: 'valeur > 100'`` must skip rows
+    where ``valeur <= 100``.
+
+    We insert two rows (valeur=50 and valeur=200) and verify that the
+    webhook fires exactly once with the high-value payload.
+    """
+    from gispulse.runtime import parse_predicate
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def fake_webhook(url: str, payload: dict[str, Any]) -> None:
+        calls.append((url, payload))
+
+    trigger = _make_trigger(
+        action=ActionDef(
+            action_type=ActionType.WEBHOOK,
+            config={"url": "https://hook.example.com/x"},
+        ),
+        name="threshold_filter",
+    )
+    # Inject the AST manually — this is the same shape ``to_triggers``
+    # builds from a YAML config.
+    trigger.conditions["predicate_ast"] = parse_predicate("valeur > 100")
+
+    _insert_with_value(gpkg_with_parcels, name="lo", status="x", valeur=50)
+    _insert_with_value(gpkg_with_parcels, name="hi", status="x", valeur=200)
+
+    runtime = build_runtime(
+        gpkg_path=gpkg_with_parcels,
+        triggers=[trigger],
+        sql_executor=lambda *a, **kw: None,
+        webhook_client=fake_webhook,
+        dataset_id="test",
+    )
+    try:
+        runtime.run_once()
+    finally:
+        runtime.close()
+
+    # Exactly one fire: only the row with valeur=200 matches.
+    assert len(calls) == 1, f"expected 1 webhook call, got {len(calls)}: {calls!r}"
+    _, payload = calls[0]
+    # The webhook payload exposes the change-record metadata; the row
+    # values themselves are not leaked over the wire (security choice
+    # documented in change_log_watcher.py:318-320). The fact that the
+    # webhook fired exactly once is the test contract — a non-matching
+    # predicate would have produced zero calls.
+    assert payload["table"] == "parcels"
+    assert payload["operation"] == "INSERT"
+    assert payload["matched"] is True
+
+
+def test_predicate_compound_and_or(gpkg_with_parcels: Path) -> None:
+    """A compound DSL predicate ``A AND (B OR C)`` filters rows correctly."""
+    from gispulse.runtime import parse_predicate
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    trigger = _make_trigger(
+        action=ActionDef(
+            action_type=ActionType.WEBHOOK,
+            config={"url": "https://hook.example.com/y"},
+        ),
+        name="compound_filter",
+    )
+    trigger.conditions["predicate_ast"] = parse_predicate(
+        "valeur > 100 AND (status == 'pending' OR status == 'review')"
+    )
+
+    # 4 rows × cartesian: only (valeur>100 AND status in {pending,review}) should match
+    _insert_with_value(gpkg_with_parcels, name="r1", status="pending", valeur=50)
+    _insert_with_value(gpkg_with_parcels, name="r2", status="pending", valeur=200)
+    _insert_with_value(gpkg_with_parcels, name="r3", status="ok", valeur=200)
+    _insert_with_value(gpkg_with_parcels, name="r4", status="review", valeur=300)
+
+    runtime = build_runtime(
+        gpkg_path=gpkg_with_parcels,
+        triggers=[trigger],
+        sql_executor=lambda *a, **kw: None,
+        webhook_client=lambda url, payload: calls.append((url, payload)),
+        dataset_id="test",
+    )
+    try:
+        runtime.run_once()
+    finally:
+        runtime.close()
+
+    # r2 + r4 match — 2 fires expected.
+    assert len(calls) == 2, f"expected 2 webhook calls, got {len(calls)}: {calls!r}"
+
+
+def test_predicate_missing_attr_skips_silently(
+    gpkg_with_parcels: Path,
+) -> None:
+    """A predicate that references a non-existent attribute resolves to
+    a non-match (fail-safe). The watcher tick must not raise."""
+    from gispulse.runtime import parse_predicate
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    trigger = _make_trigger(
+        action=ActionDef(
+            action_type=ActionType.WEBHOOK,
+            config={"url": "https://hook.example.com/z"},
+        ),
+        name="ghost_attr",
+    )
+    trigger.conditions["predicate_ast"] = parse_predicate(
+        "no_such_field == 42"
+    )
+
+    _insert_row(gpkg_with_parcels, name="any")
+
+    runtime = build_runtime(
+        gpkg_path=gpkg_with_parcels,
+        triggers=[trigger],
+        sql_executor=lambda *a, **kw: None,
+        webhook_client=lambda url, payload: calls.append((url, payload)),
+        dataset_id="test",
+    )
+    try:
+        processed = runtime.run_once()
+    finally:
+        runtime.close()
+
+    assert processed >= 1
+    assert calls == [], "predicate over missing attr should suppress the action"
+
+
+def test_no_predicate_keeps_legacy_always_match(
+    gpkg_with_parcels: Path,
+) -> None:
+    """When no DSL predicate is set, the trigger must keep firing for
+    every change-log row (pre-S4 behaviour)."""
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    trigger = _make_trigger(
+        action=ActionDef(
+            action_type=ActionType.WEBHOOK,
+            config={"url": "https://hook.example.com/legacy"},
+        ),
+        name="no_predicate",
+    )
+    # No predicate_ast on conditions — equivalent to pre-S4 wiring.
+
+    _insert_row(gpkg_with_parcels, name="always_fires")
+
+    runtime = build_runtime(
+        gpkg_path=gpkg_with_parcels,
+        triggers=[trigger],
+        sql_executor=lambda *a, **kw: None,
+        webhook_client=lambda url, payload: calls.append((url, payload)),
+        dataset_id="test",
+    )
+    try:
+        runtime.run_once()
+    finally:
+        runtime.close()
+
+    assert len(calls) == 1
+
+
 def test_webhook_allowlist_blocks_off_list_host(gpkg_with_parcels: Path) -> None:
     """When ``webhook_allowlist`` is provided and the trigger URL is not
     on it, the dispatcher's per-action try/except logs but doesn't crash
