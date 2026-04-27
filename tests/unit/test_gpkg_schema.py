@@ -76,12 +76,14 @@ class TestBuildChangeTriggers:
             assert any(f"AFTER {op}" in t for t in triggers)
 
     def test_triggers_reference_correct_pk_col(self):
+        # v2 (#7): identifiers are double-quoted (NEW."id" / OLD."id") so
+        # reserved-keyword and special-char column names are safe.
         triggers = _build_change_triggers("mytable", pk_col="id")
-        assert all(".id" in t for t in triggers)
+        assert all('."id"' in t for t in triggers)
 
     def test_default_pk_col_is_fid(self):
         triggers = _build_change_triggers("x")
-        assert all(".fid" in t for t in triggers)
+        assert all('."fid"' in t for t in triggers)
 
 
 # ---------------------------------------------------------------------------

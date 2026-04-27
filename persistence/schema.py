@@ -159,6 +159,10 @@ _GPKG_ONLY_TABLES: dict[str, list[tuple[str, str]]] = {
         ("new_values", "TEXT"),
         ("changed_at", "TEXT DEFAULT (datetime('now'))"),
         ("processed", "INTEGER DEFAULT 0"),
+        # v2 (#7): geometry-change flag — TRUE when NEW.geom != OLD.geom
+        # for UPDATE, NEW.geom IS NOT NULL for INSERT, OLD.geom IS NOT NULL
+        # for DELETE. NULL for non-spatial layers.
+        ("geom_changed", "INTEGER DEFAULT 0"),
     ],
     "kv": [
         ("key", "TEXT PRIMARY KEY"),
@@ -257,4 +261,6 @@ def build_model_table_mapping(prefix: str = "_gispulse_") -> dict[str, str]:
 
 
 # Current schema version — increment when adding/removing/altering columns
-SCHEMA_VERSION = 1
+# v1 → v2 (2026-04-27, #7): added _gispulse_change_log.geom_changed,
+#                           triggers now populate new_values / old_values JSON
+SCHEMA_VERSION = 2
