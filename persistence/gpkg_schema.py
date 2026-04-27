@@ -82,44 +82,140 @@ MODEL_TABLE_MAPPING = build_model_table_mapping(prefix="_gispulse_")
 # Change tracking trigger templates
 # ---------------------------------------------------------------------------
 
-_CHANGE_TRIGGER_TEMPLATE = """
-CREATE TRIGGER IF NOT EXISTS "_gispulse_trg_{table}_{op}"
-AFTER {OP} ON "{table}"
-BEGIN
-  INSERT INTO _gispulse_change_log(table_name, operation, row_pk, {extra_cols})
-  VALUES ('{table}', '{OP}', {pk_expr}, {extra_vals});
-END
-"""
-
-
-def _build_change_triggers(table_name: str, pk_col: str = "fid") -> list[str]:
+def _build_change_triggers(
+    table_name: str,
+    pk_col: str = "fid",
+    *,
+    columns: list[str] | None = None,
+    geom_col: str | None = None,
+) -> list[str]:
     """Generate INSERT/UPDATE/DELETE trigger SQL for a spatial layer.
 
-    Both ``table_name`` and ``pk_col`` MUST be valid SQL identifiers — they
-    are interpolated directly into the DDL (no parameter binding possible
-    in DDL). See :func:`_validate_identifier` for the rules.
+    All identifier arguments (``table_name``, ``pk_col``, every entry in
+    ``columns``, ``geom_col``) MUST be valid SQL identifiers — they are
+    interpolated directly into the DDL (no parameter binding possible in
+    DDL). See :func:`_validate_identifier` for the rules.
+
+    Args:
+        table_name: Spatial layer name.
+        pk_col:     Primary-key column (default ``fid`` per GPKG spec).
+        columns:    Non-pk, non-geometry columns to capture in the
+                    ``new_values`` / ``old_values`` JSON payload. When
+                    ``None`` or empty, the JSON column is set to
+                    ``json_object()`` (empty object).
+        geom_col:   Geometry column name. When set, the ``geom_changed``
+                    flag is populated as
+                    ``NEW.<geom> IS NOT NULL`` for INSERT,
+                    ``NEW.<geom> IS NOT OLD.<geom>`` for UPDATE,
+                    ``OLD.<geom> IS NOT NULL`` for DELETE.
+                    When ``None``, ``geom_changed`` is always ``0``.
 
     Raises:
-        ValueError: If either identifier is unsafe.
+        ValueError: If any identifier is unsafe.
     """
     _validate_identifier(table_name)
     _validate_identifier(pk_col)
-    triggers = []
-    for op, ref, extra_c, extra_v in [
-        ("insert", "NEW", "new_values", "NULL"),
-        ("update", "NEW", "new_values, old_values", "NULL, NULL"),
-        ("delete", "OLD", "old_values", "NULL"),
-    ]:
-        sql = (
-            f'CREATE TRIGGER IF NOT EXISTS "_gispulse_trg_{table_name}_{op}"\n'
-            f"AFTER {op.upper()} ON \"{table_name}\"\n"
-            f"BEGIN\n"
-            f"  INSERT INTO _gispulse_change_log(table_name, operation, row_pk)\n"
-            f"  VALUES ('{table_name}', '{op.upper()}', {ref}.{pk_col});\n"
-            f"END"
-        )
-        triggers.append(sql)
-    return triggers
+    cols = list(columns or [])
+    for c in cols:
+        _validate_identifier(c)
+    if geom_col is not None:
+        _validate_identifier(geom_col)
+
+    def _json_obj(ref: str) -> str:
+        if not cols:
+            return "json_object()"
+        pairs = [f"'{c}', {ref}.\"{c}\"" for c in cols]
+        return f"json_object({', '.join(pairs)})"
+
+    if geom_col:
+        gc_insert = f'(NEW."{geom_col}" IS NOT NULL)'
+        gc_update = f'(NEW."{geom_col}" IS NOT OLD."{geom_col}")'
+        gc_delete = f'(OLD."{geom_col}" IS NOT NULL)'
+    else:
+        gc_insert = gc_update = gc_delete = "0"
+
+    insert_sql = (
+        f'CREATE TRIGGER IF NOT EXISTS "_gispulse_trg_{table_name}_insert"\n'
+        f'AFTER INSERT ON "{table_name}"\n'
+        f"BEGIN\n"
+        f"  INSERT INTO _gispulse_change_log"
+        f"(table_name, operation, row_pk, new_values, geom_changed)\n"
+        f"  VALUES ('{table_name}', 'INSERT', "
+        f'NEW."{pk_col}", {_json_obj("NEW")}, {gc_insert});\n'
+        f"END"
+    )
+
+    update_sql = (
+        f'CREATE TRIGGER IF NOT EXISTS "_gispulse_trg_{table_name}_update"\n'
+        f'AFTER UPDATE ON "{table_name}"\n'
+        f"BEGIN\n"
+        f"  INSERT INTO _gispulse_change_log"
+        f"(table_name, operation, row_pk, new_values, old_values, geom_changed)\n"
+        f"  VALUES ('{table_name}', 'UPDATE', "
+        f'NEW."{pk_col}", {_json_obj("NEW")}, {_json_obj("OLD")}, {gc_update});\n'
+        f"END"
+    )
+
+    delete_sql = (
+        f'CREATE TRIGGER IF NOT EXISTS "_gispulse_trg_{table_name}_delete"\n'
+        f'AFTER DELETE ON "{table_name}"\n'
+        f"BEGIN\n"
+        f"  INSERT INTO _gispulse_change_log"
+        f"(table_name, operation, row_pk, old_values, geom_changed)\n"
+        f"  VALUES ('{table_name}', 'DELETE', "
+        f'OLD."{pk_col}", {_json_obj("OLD")}, {gc_delete});\n'
+        f"END"
+    )
+
+    return [insert_sql, update_sql, delete_sql]
+
+
+def _inspect_layer(
+    conn: sqlite3.Connection, layer_name: str, pk_col: str
+) -> tuple[list[str], str | None]:
+    """Return (non-pk non-geom columns, geom_col_name) for a spatial layer.
+
+    Reads ``PRAGMA table_info`` + ``gpkg_geometry_columns``. When the
+    geometry registration is missing (non-spatial table or partially
+    bootstrapped GPKG), falls back to detecting columns whose declared
+    type matches a known geometry keyword (``POINT``, ``POLYGON``,
+    ``LINESTRING``, ``GEOMETRY``, ``MULTI*``).
+
+    Internal helper for :func:`install_change_tracking` — kept here
+    rather than in the engine to avoid a circular import.
+    """
+    geom_col: str | None = None
+    try:
+        row = conn.execute(
+            "SELECT column_name FROM gpkg_geometry_columns WHERE table_name = ?",
+            (layer_name,),
+        ).fetchone()
+        if row is not None:
+            geom_col = row[0]
+    except sqlite3.OperationalError:
+        pass  # gpkg_geometry_columns missing → fall back below
+
+    geometry_type_keywords = (
+        "POINT", "POLYGON", "LINESTRING",
+        "MULTIPOINT", "MULTIPOLYGON", "MULTILINESTRING",
+        "GEOMETRY", "GEOMCOLLECTION", "GEOMETRYCOLLECTION",
+    )
+
+    non_pk_cols: list[str] = []
+    for cid, name, ctype, *_ in conn.execute(
+        f'PRAGMA table_info("{layer_name}")'
+    ).fetchall():
+        if name == pk_col:
+            continue
+        if geom_col is None and ctype:
+            if ctype.upper() in geometry_type_keywords:
+                geom_col = name
+                continue
+        if name == geom_col:
+            continue
+        non_pk_cols.append(name)
+
+    return non_pk_cols, geom_col
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +328,38 @@ def _ensure_gpkg_core_tables(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> bool:
+    """Add ``geom_changed`` column to ``_gispulse_change_log`` (v1 → v2, #7).
+
+    Idempotent: if the column already exists (table created fresh under v2
+    schema, or migration already applied), this is a no-op.
+
+    Returns True when an ALTER TABLE was executed, False otherwise.
+    """
+    try:
+        cols = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(_gispulse_change_log)"
+            ).fetchall()
+        }
+    except sqlite3.OperationalError:
+        # Table doesn't exist yet — nothing to migrate; the bootstrap DDL
+        # will create it with the v2 schema.
+        return False
+
+    # PRAGMA table_info returns an empty list for a missing table (it does
+    # not raise). Same outcome as the OperationalError branch: skip.
+    if not cols or "geom_changed" in cols:
+        return False
+
+    conn.execute(
+        "ALTER TABLE _gispulse_change_log ADD COLUMN geom_changed INTEGER DEFAULT 0"
+    )
+    logger.info("schema_migration_v1_to_v2: added _gispulse_change_log.geom_changed")
+    return True
+
+
 def bootstrap_gpkg_project(conn: sqlite3.Connection) -> None:
     """Create all _gispulse_* tables and register them in gpkg_extensions.
 
@@ -239,7 +367,8 @@ def bootstrap_gpkg_project(conn: sqlite3.Connection) -> None:
     exist so the file is a valid GeoPackage even before any spatial layer
     is written.
 
-    Safe to call multiple times (all DDL is IF NOT EXISTS).
+    Safe to call multiple times (all DDL is IF NOT EXISTS) and applies any
+    pending schema migration so existing v1 GPKGs are upgraded in-place.
     """
     # Ensure valid GPKG structure first
     _ensure_gpkg_core_tables(conn)
@@ -247,15 +376,22 @@ def bootstrap_gpkg_project(conn: sqlite3.Connection) -> None:
     # Ensure gpkg_extensions exists
     _ensure_gpkg_extensions_table(conn)
 
+    # Apply v1 → v2 migration BEFORE the IF NOT EXISTS DDL, so the column
+    # is added to existing tables (the DDL would skip the table entirely
+    # because it already exists).
+    _migrate_v1_to_v2(conn)
+
     # Create internal tables
     for table_name, ddl in _TABLE_DDL.items():
         conn.execute(ddl)
         _register_extension(conn, table_name)
 
-    # Schema versioning — store current version in KV store
+    # Schema versioning — refresh to current version (idempotent).
     conn.execute(
-        "INSERT OR IGNORE INTO _gispulse_kv (key, value, updated_at) "
-        "VALUES ('schema_version', ?, datetime('now'))",
+        "INSERT INTO _gispulse_kv (key, value, updated_at) "
+        "VALUES ('schema_version', ?, datetime('now')) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+        "updated_at=datetime('now')",
         (str(SCHEMA_VERSION),),
     )
 
@@ -271,27 +407,63 @@ def install_change_tracking(
     conn: sqlite3.Connection,
     layer_name: str,
     pk_col: str = "fid",
+    *,
+    columns: list[str] | None = None,
+    geom_col: str | None = None,
 ) -> None:
     """Install INSERT/UPDATE/DELETE triggers on a spatial layer.
 
+    The triggers populate ``_gispulse_change_log`` with:
+        * ``new_values`` JSON for INSERT and UPDATE
+        * ``old_values`` JSON for UPDATE and DELETE
+        * ``geom_changed`` flag (1 when the geometry column actually
+          changed, 0 otherwise — useful for rules that only care about
+          attribute edits, not move/reshape)
+
+    Column inspection is automatic: if *columns* / *geom_col* are
+    omitted, the function reads ``PRAGMA table_info`` +
+    ``gpkg_geometry_columns`` to discover them. Pass them explicitly only
+    when you need to limit the JSON payload (very wide tables, sensitive
+    fields, etc.).
+
     Args:
         conn:       Open SQLite connection to the GPKG file.
-        layer_name: Name of the spatial table to track. Must match
+        layer_name: Spatial table to track. Must match
                     ``[A-Za-z_][A-Za-z0-9_]*`` — see :func:`_validate_identifier`.
         pk_col:     Primary key column (default ``fid`` per GPKG spec).
+        columns:    Optional explicit list of columns to capture in the
+                    JSON payload. When ``None``, all non-pk non-geom
+                    columns of the layer are inspected and included.
+        geom_col:   Optional explicit geometry column. When ``None``, the
+                    geometry column is auto-detected from
+                    ``gpkg_geometry_columns`` (preferred) or
+                    ``PRAGMA table_info`` declared types.
 
     Raises:
-        ValueError: If *layer_name* or *pk_col* contains unsafe characters.
+        ValueError: If any identifier is unsafe.
     """
-    # Defensive: re-validate at the public entry point so callers that
-    # bypass _build_change_triggers (none today, but future refactors)
-    # still get the SQLi guard.
     _validate_identifier(layer_name)
     _validate_identifier(pk_col)
-    for sql in _build_change_triggers(layer_name, pk_col):
+
+    if columns is None or geom_col is None:
+        auto_cols, auto_geom = _inspect_layer(conn, layer_name, pk_col)
+        if columns is None:
+            columns = auto_cols
+        if geom_col is None:
+            geom_col = auto_geom
+
+    for sql in _build_change_triggers(
+        layer_name, pk_col, columns=columns, geom_col=geom_col
+    ):
         conn.execute(sql)
     conn.commit()
-    logger.info("change_tracking_installed: %s (pk=%s)", layer_name, pk_col)
+    logger.info(
+        "change_tracking_installed: %s (pk=%s, cols=%d, geom=%s)",
+        layer_name,
+        pk_col,
+        len(columns or []),
+        geom_col,
+    )
 
 
 def uninstall_change_tracking(conn: sqlite3.Connection, layer_name: str) -> None:
