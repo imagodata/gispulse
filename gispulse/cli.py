@@ -1526,6 +1526,15 @@ def workflow_execute(
     typer.echo(f"Workflow '{name}' terminé. Résultat: {len(result.layers)} couches.")
 
 
+# ---------------------------------------------------------------------------
+# triggers sub-group (Mode 1 headless runtime — see cli_triggers.py)
+# ---------------------------------------------------------------------------
+
+from gispulse.cli_triggers import triggers_app  # noqa: E402
+
+app.add_typer(triggers_app, name="triggers")
+
+
 def main() -> None:
     app()
 
