@@ -268,13 +268,13 @@ def test_custom_short_schedule_respected() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_build_runtime_skips_wrapper_when_engine_has_no_executor(
+def test_build_runtime_wraps_engine_execute_by_default(
     tmp_path: Any,
 ) -> None:
-    """The default :class:`GeoPackageEngine` does not expose ``execute``;
-    when no ``sql_executor=`` is injected and no fallback is found,
-    ``retrying_sql`` stays ``None`` (no-op wiring, matches today's
-    HTTP-side wiring at ``app.py:339``)."""
+    """S6: :meth:`GeoPackageEngine.execute` now exists (sandbox'd DML
+    path with guardrails). When no ``sql_executor=`` is injected,
+    ``build_runtime`` picks up ``engine.execute`` and wraps it in
+    :class:`RetryingSqlExecutor`."""
     from persistence.gpkg_engine import GeoPackageEngine
 
     from gispulse.runtime import build_runtime
@@ -296,8 +296,13 @@ def test_build_runtime_skips_wrapper_when_engine_has_no_executor(
         dataset_id="test",
     )
     try:
-        # Engine.execute does not exist on GeoPackageEngine today.
-        assert runtime.retrying_sql is None
+        # S6: engine.execute is the default; the retry wrapper is now
+        # always installed when no custom executor was injected.
+        assert runtime.retrying_sql is not None
+        # Sanity-check it actually delegates to engine.execute through
+        # the guardrail path: an INSERT into a user table works…
+        rc = runtime.retrying_sql('INSERT INTO "x"(id) VALUES (1)', [])
+        assert rc == 1
     finally:
         runtime.close()
 
@@ -341,3 +346,55 @@ def test_build_runtime_also_wraps_user_supplied_executor(
         assert captured == [("SELECT 1", [])]
     finally:
         runtime.close()
+
+
+# ---------------------------------------------------------------------------
+# S6: SecurityError must NOT be retried
+# ---------------------------------------------------------------------------
+
+
+def test_security_error_is_not_retried() -> None:
+    """A guardrail violation surfaces immediately — not after 5
+    pointless retry sleeps. The retry wrapper only catches
+    :class:`sqlite3.OperationalError` (and only when the message
+    matches ``database is locked`` / ``database is busy``); a
+    :class:`SecurityError` bypasses the catch entirely.
+    """
+    from persistence.sql_guardrails import SecurityError
+
+    inner = _ProgrammableInner([SecurityError("forbidden table")])
+    sleeps: list[float] = []
+    wrapper = RetryingSqlExecutor(inner, sleeper=sleeps.append)
+
+    with pytest.raises(SecurityError):
+        wrapper("DELETE FROM gpkg_contents", [])
+
+    assert len(inner.calls) == 1, "SecurityError must not be retried"
+    assert sleeps == [], "no backoff sleeps allowed for SecurityError"
+    assert wrapper.snapshot_retries() == 0
+
+
+def test_security_error_through_engine_via_wrapper(tmp_path: Any) -> None:
+    """End-to-end on the real engine: the wrapper surfaces
+    SecurityError without retrying."""
+    from persistence.gpkg_engine import GeoPackageEngine
+    from persistence.sql_guardrails import SecurityError
+
+    gpkg = tmp_path / "secfast.gpkg"
+    eng = GeoPackageEngine(path=gpkg)
+    eng.open()
+    try:
+        eng.execute(
+            'CREATE TABLE "items" (id INTEGER PRIMARY KEY)', allow_ddl=True
+        )
+
+        sleeps: list[float] = []
+        wrapper = RetryingSqlExecutor(eng.execute, sleeper=sleeps.append)
+
+        with pytest.raises(SecurityError):
+            wrapper("DROP TABLE items", [])
+        # No retries occurred.
+        assert sleeps == []
+        assert wrapper.snapshot_retries() == 0
+    finally:
+        eng.close()

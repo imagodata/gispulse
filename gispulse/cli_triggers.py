@@ -1,8 +1,8 @@
 """``gispulse triggers ...`` CLI subapp.
 
-Three sub-commands (Mode 1 MVP scope):
+Three sub-commands (Mode 1 scope):
 
-    gispulse triggers run --config FILE [--gpkg PATH] [--once]
+    gispulse triggers run --config FILE [--gpkg PATH] [--once | --watch]
     gispulse triggers validate --config FILE [--gpkg PATH]
     gispulse triggers list --gpkg PATH
 
@@ -11,9 +11,9 @@ Logging convention
 - Human-friendly Rich output → stdout (UI surface).
 - Structured JSON events     → stderr (machine-readable for log shippers).
 
-The ``--watch`` daemon mode is intentionally **not** included in this PR;
-it lands in S5 along with signal handling, restart-on-change, and
-backoff. ``--once`` is the only execution mode shipped here.
+Both ``--once`` (single tick then exit) and ``--watch`` (daemon loop with
+SIGINT/SIGTERM handling, reload-on-config-change and tick-error backoff)
+are supported. See ``cli_triggers_watch.py`` for the daemon implementation.
 """
 
 from __future__ import annotations

@@ -19,6 +19,154 @@ GPKG / DuckDB ─poll(100ms)─▶ trigger.fired (WS)        actions:
 
 The HTTP runtime wires `ChangeLogWatcher` + `ActionDispatcher` + `HttpWebhookClient` automatically in the FastAPI lifespan. Embedded users (worker, script) inject them manually — see the rules guide.
 
+## Standalone CLI mode
+
+Since v1.2.1, GISPulse ships a headless trigger runtime under `gispulse triggers`. It executes the same `ChangeLogWatcher` → `TriggerEvaluator` → `ActionDispatcher` pipeline against a local GeoPackage, with no FastAPI process required. Useful for cron jobs, on-prem ETL, QGIS sidecar workflows.
+
+### Quick start
+
+```bash
+# v1.2.1 PyPI release upcoming — until then:
+git clone https://github.com/imagodata/gispulse.git
+cd gispulse && pip install -e .
+
+# Once published:
+pip install "gispulse>=1.2.1"
+```
+
+### YAML config
+
+```yaml
+version: 1
+gpkg: ./parcels.gpkg          # overridable via --gpkg
+
+triggers:
+  - name: notify_high_value
+    table: parcels
+    pk_col: fid
+    when: [INSERT, UPDATE]
+    predicate: "valeur > 100000 AND commune == 'Lyon'"
+    actions:
+      - type: webhook
+        url: https://example.com/hooks/parcels
+
+  - name: stamp_enriched_at
+    table: parcels
+    when: [INSERT]
+    actions:
+      - type: set_field
+        field: enriched_at
+        value: 2026-04-27
+
+  - name: audit_deletes
+    table: parcels
+    when: [DELETE]
+    actions:
+      - type: run_sql
+        expression: "INSERT INTO audit_log (fid, op, ts) VALUES (OLD.fid, 'DELETE', CURRENT_TIMESTAMP)"
+
+security:
+  webhook_allowlist:
+    - example.com
+
+runtime:
+  poll_interval_ms: 1000
+  max_batch: 200
+```
+
+### Commands
+
+```bash
+# Validate config + GPKG layer cross-check (no execution)
+gispulse triggers validate --config triggers.yaml
+
+# One-shot tick (process pending change-log entries, exit)
+gispulse triggers run --config triggers.yaml --once
+
+# Override the GPKG path from the config
+gispulse triggers run --config triggers.yaml --gpkg /var/data/today.gpkg --once
+
+# Daemon mode (SIGINT/SIGTERM clean shutdown, reload on config mtime change)
+gispulse triggers run --config triggers.yaml --watch
+
+# Inspect tracked tables on a GPKG
+gispulse triggers list --gpkg parcels.gpkg
+```
+
+Human-friendly output goes to **stdout** (Rich-formatted). Structured per-tick JSON metrics (`fired`, `skipped_predicate`, `errors`, `duration_ms`, `sqlite_busy_retries`) go to **stderr** for log shippers. Exit codes: `0` success, `1` config / GPKG / fatal runtime error (incl. 10 consecutive failed ticks under `--watch`), `2` partial trigger failures.
+
+### Row dict semantics
+
+Predicates and `set_field` value templates resolve attributes against the row payload supplied by the watcher:
+
+| Reference | Meaning |
+|---|---|
+| `new.col` | Value of `col` after the DML write (the row that triggered) |
+| `old.col` | Value of `col` before the write (UPDATE / DELETE only) |
+| `col` (bare) | Equivalent to `new.col` — the SQL-feel default |
+
+For `INSERT` rows, `old.*` is `None` and any non-`IS NULL` comparison against it is false. For `DELETE` rows, `new.*` is `None`.
+
+### Predicate DSL
+
+```
+predicate    := or_expr
+or_expr      := and_expr ("OR" and_expr)*
+and_expr     := not_expr ("AND" not_expr)*
+not_expr     := "NOT" not_expr | comparison
+comparison   := attr op literal
+              | attr "IS" "NOT"? "NULL"
+              | attr ("NOT" "IN" | "IN") list_literal
+              | "(" or_expr ")"
+attr         := identifier ("." identifier)*
+op           := "==" | "!=" | ">" | ">=" | "<" | "<="
+literal      := number | string | boolean | "null"
+list_literal := "[" literal ("," literal)* "]"
+```
+
+Examples:
+
+```yaml
+predicate: "valeur > 100 AND commune == 'Lyon'"
+predicate: "status IN ['pending', 'review'] AND NOT archived"
+predicate: "old.zoning != new.zoning"               # value changed
+predicate: "geometry_area IS NOT NULL AND area_m2 >= 500.0"
+```
+
+The parser is hand-written recursive descent — **no `eval`, no `simpleeval`, no third-party dep**. Operator alphabet is closed, identifiers match `[A-Za-z_][A-Za-z0-9_]*`, dunders are refused, max nesting depth is 32, NUL bytes and non-printable control characters are rejected before parsing. Errors carry `line` / `col` so `triggers validate` prints actionable diagnostics.
+
+### SQL safety (run_sql / set_field)
+
+Every SQL string flows through `persistence/sql_guardrails.py:enforce()` before SQLite sees it.
+
+**Allowed leading keywords** (default, YAML actions): `INSERT`, `UPDATE`, `DELETE`, `SELECT`.
+**Hard-blocked unconditionally**: `ATTACH`, `DETACH`, `PRAGMA`, `VACUUM`, `REINDEX`, `ANALYZE`, `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`, `LOAD_EXTENSION`.
+**Pattern-blocked anywhere in the statement**: `writable_schema`, `sqlite_master`, `sqlite_temp_master`, `attach database`, `detach database`, `load_extension`.
+**Protected table prefixes** (no writes): `gpkg_*`, `rtree_*`, `sqlite_*`, `_gispulse_*`. Adding a layer goes through the regular write API, not a YAML `run_sql`.
+**Multi-statement payloads refused**: any meaningful semicolon between statements (`INSERT …; DROP TABLE x`) is rejected — string literals are masked before scanning, so `'a;b'` does not count.
+**Max paren depth**: 5 (CTEs / sub-queries beyond that are refused as DoS).
+
+DDL (`CREATE` / `DROP` / `ALTER`) is gated by an internal `allow_ddl` flag used only for first-boot migrations; YAML actions never set it. A failing guardrail raises `SecurityError`, which the retry layer **never** retries — bad payloads fail fast.
+
+### Concurrency with QGIS
+
+GISPulse opens the GPKG with WAL journaling so a QGIS session and the trigger daemon can coexist on the same file most of the time. Two caveats:
+
+- **`SQLITE_BUSY` retry**: The runtime wraps DML through `RetryingSqlExecutor`, which retries `SQLITE_BUSY` / `database is locked` errors with exponential backoff (5 attempts max, 30 s total cap). Sustained contention still surfaces as a tick failure.
+- **Network filesystems**: SQLite explicitly does **not** support GPKG files on NFS / SMB / cloud-mounted shares. Lock semantics are unreliable and silent corruption is possible. Run `gispulse triggers` against a local-disk GPKG; replicate to the share after the tick.
+- **Single writer**: Inherits the OSS limit at the top of this guide — concurrent writers serialize on the file lock, regardless of WAL.
+
+### Known limitations
+
+- **Mode 2 (portail UI for trigger CRUD)** — on the roadmap, not shipped in v1.2.1. Current path is YAML-only.
+- **Post-commit row snapshot**: `_load_row_values()` reads the row from the GPKG **after** the DML commits. Under heavy concurrent writes, two rapid UPDATEs on the same row can cause the second tick to observe the third state instead of the second; predicates of the form `old.x != new.x` may produce false negatives in that race. Acceptable for batch / cron workloads, less so for sub-second writer mixes — switch to PostGIS triggers for those.
+- **Reload-on-config-change latency**: the daemon polls the YAML mtime once per tick. Latency between save and reload = `poll_interval_ms` + the tick currently in flight. A slow webhook can therefore push the perceived reload by several seconds.
+- **No DLQ on action failure**: `run_sql` / `set_field` failures are logged and counted (`errors` in the per-tick JSON) but **not** retried or queued. Webhook actions retain their own retry policy (#451).
+
+### See also
+
+- [`examples/cli/triggers.yaml`](../examples/cli/triggers.yaml) — runnable reference config
+
 ## Webhook actions
 
 Format payload, sécurité (SSRF blocklist, HMAC), retries — see **[Integration Matrix → Webhook payload](INTEGRATION_MATRIX.md#webhook-payload)** and **[`docs-site/guide/rules.md` → Webhook actions](../docs-site/guide/rules.md#webhook-actions-zapier-arcgis-geoevent-make-n8n-)**.
