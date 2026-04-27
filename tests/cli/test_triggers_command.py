@@ -115,17 +115,30 @@ def test_run_once_succeeds_and_marks_change_processed(
     assert unprocessed == 0, "watcher should have acked every pending row"
 
 
-def test_run_without_once_exits_2_with_helpful_message(
+def test_run_without_mode_flag_exits_2_with_helpful_message(
     runner: CliRunner, fixture_yaml: Path
 ) -> None:
-    """Daemon mode is reserved — the CLI must refuse rather than hang."""
+    """No mode chosen → exit 2 with usage hint (rather than blocking
+    on a daemon the operator did not explicitly opt into)."""
     result = runner.invoke(
         triggers_app,
         ["run", "--config", str(fixture_yaml)],
     )
     assert result.exit_code == 2
     combined = result.output
-    assert "--once" in combined or "watch" in combined.lower()
+    assert "--once" in combined or "--watch" in combined
+
+
+def test_run_with_once_and_watch_is_rejected(
+    runner: CliRunner, fixture_yaml: Path
+) -> None:
+    """``--once`` and ``--watch`` are mutually exclusive."""
+    result = runner.invoke(
+        triggers_app,
+        ["run", "--config", str(fixture_yaml), "--once", "--watch"],
+    )
+    assert result.exit_code == 2
+    assert "mutually exclusive" in result.output
 
 
 # ---------------------------------------------------------------------------

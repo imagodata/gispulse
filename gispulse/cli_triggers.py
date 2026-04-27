@@ -128,20 +128,50 @@ def cmd_run(
     once: bool = typer.Option(
         False,
         "--once",
-        help="Run a single tick then exit (default off requires --once today; "
-        "daemon `--watch` mode lands in a follow-up story).",
+        help="Run a single tick then exit. Mutually exclusive with --watch.",
+    ),
+    watch: bool = typer.Option(
+        False,
+        "--watch",
+        help="Run as a daemon: poll the change-log every "
+        "``--poll-interval-ms`` until SIGINT/SIGTERM.",
+    ),
+    poll_interval_ms: int | None = typer.Option(
+        None,
+        "--poll-interval-ms",
+        help="Override the YAML ``runtime.poll_interval_ms`` for daemon "
+        "mode. CLI flag wins over YAML when both are set. Ignored under "
+        "--once.",
+        min=10,
+        max=60_000,
     ),
 ) -> None:
     """Execute the trigger pipeline against a GPKG.
 
-    Currently only ``--once`` is supported: a single watcher tick is
-    driven, every change-log row is acked, then the process exits 0.
-    Daemon mode (``--watch``) is reserved for the next story.
+    Two modes:
+
+    - ``--once``  — a single tick, exit 0. The watcher's daemon thread
+                    is *not* started; the change-log is drained
+                    synchronously then the runtime closes.
+    - ``--watch`` — block on a tick → wait → tick loop until
+                    SIGINT/SIGTERM. The YAML config is checked for
+                    mtime changes every tick so an operator can edit
+                    triggers without restarting the daemon. Broken
+                    YAML is logged and ignored (the previous valid
+                    config stays active).
+
+    The flags are mutually exclusive; passing neither (or both) exits 2.
     """
-    if not once:
+    if once and watch:
         _human(
-            "[!] Daemon mode is not available yet. Pass --once for a single "
-            "tick. ('--watch' lands in the follow-up story.)",
+            "[!] --once and --watch are mutually exclusive.",
+            err=True,
+            style="yellow",
+        )
+        raise typer.Exit(2)
+    if not once and not watch:
+        _human(
+            "[!] Pass either --once (single tick) or --watch (daemon).",
             err=True,
             style="yellow",
         )
@@ -175,12 +205,20 @@ def cmd_run(
     _maybe_warn_network_fs(gpkg_path)
 
     triggers_obj = to_triggers(cfg)
+    # Brief: "défaut 1000ms, surchargeable YAML > flag" — the flag, when
+    # set, wins over the YAML value. The YAML value is itself optional
+    # (defaults to 1000 ms in :class:`RuntimeConfigModel`).
+    effective_poll_ms = (
+        poll_interval_ms if poll_interval_ms is not None else cfg.runtime.poll_interval_ms
+    )
+
     _log_event(
         "runtime_starting",
         gpkg=str(gpkg_path),
         triggers=len(triggers_obj),
-        poll_interval_ms=cfg.runtime.poll_interval_ms,
+        poll_interval_ms=effective_poll_ms,
         max_batch=cfg.runtime.max_batch,
+        mode="watch" if watch else "once",
     )
 
     try:
@@ -188,7 +226,7 @@ def cmd_run(
             gpkg_path=gpkg_path,
             triggers=triggers_obj,
             webhook_allowlist=cfg.security.webhook_allowlist or None,
-            poll_interval=cfg.runtime.poll_interval_ms / 1000.0,
+            poll_interval=effective_poll_ms / 1000.0,
             batch_limit=cfg.runtime.max_batch,
             dataset_id="__cli__",
         )
@@ -197,6 +235,48 @@ def cmd_run(
         _human(f"[red]Runtime build failed:[/red] {exc}", err=True)
         raise typer.Exit(1)
 
+    if watch:
+        # Hand the runtime over to the daemon loop. Signal handlers
+        # set ``stop_event``; the loop closes the runtime on its own
+        # ``finally`` block.
+        from gispulse.cli_triggers_watch import (
+            install_signal_handlers,
+            run_watch_loop,
+        )
+        import threading as _threading
+
+        stop_event = _threading.Event()
+        restore_signals = install_signal_handlers(stop_event)
+
+        _human(
+            f"[bold cyan]gispulse watch[/bold cyan] [green]ON[/green]  "
+            f"gpkg=[bold]{gpkg_path.name}[/bold]  triggers="
+            f"[bold]{len(triggers_obj)}[/bold]  "
+            f"poll={effective_poll_ms}ms — Ctrl-C to stop."
+        )
+
+        try:
+            exit_code = run_watch_loop(
+                initial_runtime=runtime,
+                initial_cfg=cfg,
+                config_path=Path(config).resolve(),
+                gpkg_override=gpkg,
+                poll_interval=effective_poll_ms / 1000.0,
+                stop_event=stop_event,
+            )
+        finally:
+            restore_signals()
+
+        if exit_code != 0:
+            _human(
+                f"[red]Daemon aborted after consecutive tick failures.[/red]",
+                err=True,
+            )
+            raise typer.Exit(exit_code)
+        _human("[green]Daemon stopped cleanly.[/green]")
+        return
+
+    # ``--once`` path
     try:
         with runtime as rt:
             processed = rt.run_once()
