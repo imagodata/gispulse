@@ -1553,6 +1553,7 @@ from gispulse.cli_watch import cmd_watch  # noqa: E402
 app.command(name="watch")(cmd_watch)
 
 
+
 def main() -> None:
     app()
 
