@@ -1,0 +1,71 @@
+[Unit]
+# Templated unit — instance name (`%i`) selects the GPKG. Example:
+#   systemctl --user enable --now gispulse-watch@parcels
+# expects /etc/gispulse/parcels.env (or ~/.config/gispulse/parcels.env)
+# and /var/lib/gispulse/parcels.gpkg by default.
+Description=GISPulse change-tracking watcher for %i
+Documentation=https://github.com/imagodata/gispulse
+After=network.target
+
+[Service]
+Type=simple
+
+# Configurable env file — defaults to /etc/gispulse/<instance>.env. The `-`
+# prefix makes systemd ignore a missing file (override via systemd drop-in
+# if you want to fail fast).
+EnvironmentFile=-/etc/gispulse/%i.env
+
+# Required env vars (set in the .env file):
+#   GISPULSE_GPKG     absolute path to the GPKG to watch
+#   GISPULSE_RULES    absolute path to rules.yaml
+# Optional:
+#   GISPULSE_WEBHOOK         allowlist host (repeatable via space-separated)
+#   GISPULSE_POLL_MS         poll interval (default = YAML's runtime.poll_interval_ms)
+#   GISPULSE_BATCH_LIMIT     batch limit per tick
+#   GISPULSE_BULK_THRESHOLD  collapse batches >= N rows into bulk.changed (default 0)
+#   GISPULSE_DATASET_ID      stable id stamped on every event (default = instance name)
+
+ExecStart=/usr/local/bin/gispulse watch ${GISPULSE_GPKG} \
+    --rules ${GISPULSE_RULES} \
+    --dataset-id ${GISPULSE_DATASET_ID:-%i} \
+    --poll-ms ${GISPULSE_POLL_MS:-500} \
+    --batch-limit ${GISPULSE_BATCH_LIMIT:-200} \
+    --bulk-threshold ${GISPULSE_BULK_THRESHOLD:-0}
+
+# SIGTERM is what `systemctl stop` sends; the daemon catches it and drains
+# in-flight rows before exit (≤ 2 s typically).
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+# Restart on crash; do NOT restart on clean exit (lets `systemctl stop`
+# actually stop). RestartSec >= 5 avoids tight restart loops if the GPKG
+# is missing or the rules file is malformed at startup.
+Restart=on-failure
+RestartSec=5s
+
+# Resource hygiene — adjust for your fleet. The watcher itself is light
+# (single Python process + one daemon thread); the limits below catch
+# pathological rule actions (a SET_FIELD that loops on every write, a
+# webhook that retries forever).
+MemoryMax=512M
+TasksMax=64
+
+# Hardening — minimal filesystem + no privilege escalation.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/gispulse /var/log/gispulse
+
+# Run as a dedicated user. Create with:
+#   useradd --system --shell /usr/sbin/nologin --home-dir /var/lib/gispulse gispulse
+User=gispulse
+Group=gispulse
+
+# Logs go to journald — view with `journalctl -u gispulse-watch@<instance>`.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
