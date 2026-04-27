@@ -149,7 +149,20 @@ gispulse engine [start|stop|status]    # Manage local sidecar engine
 gispulse jobs [list|status|cancel]     # Manage async jobs via HTTP API
 gispulse update [--check] [--force]    # Check for updates / self-update
 gispulse telemetry [--status|--enable|--disable]  # Manage opt-in telemetry
+gispulse triggers run|validate|list    # Standalone trigger runtime (Mode 1, GPKG)
 ```
+
+### Standalone trigger runtime
+
+Since v1.2.1, `gispulse triggers` runs a YAML-configured trigger pipeline directly against a local GeoPackage — no FastAPI server needed. Useful for cron, on-prem ETL, QGIS sidecars.
+
+```bash
+gispulse triggers validate --config triggers.yaml
+gispulse triggers run --config triggers.yaml --once
+gispulse triggers run --config triggers.yaml --watch
+```
+
+See [`docs/TRIGGERS_GUIDE.md`](docs/TRIGGERS_GUIDE.md#standalone-cli-mode) and [`examples/cli/triggers.yaml`](examples/cli/triggers.yaml).
 
 ## Tiers
 
