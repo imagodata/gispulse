@@ -17,10 +17,26 @@ Public API:
 
 from __future__ import annotations
 
+from gispulse.runtime.config_loader import (
+    ConfigError,
+    GISPulseConfig,
+    load_config,
+    to_triggers,
+    validate_against_gpkg,
+)
 from gispulse.runtime.headless_runtime import (
     HeadlessRuntime,
     NullEventHub,
     build_runtime,
 )
 
-__all__ = ["HeadlessRuntime", "NullEventHub", "build_runtime"]
+__all__ = [
+    "ConfigError",
+    "GISPulseConfig",
+    "HeadlessRuntime",
+    "NullEventHub",
+    "build_runtime",
+    "load_config",
+    "to_triggers",
+    "validate_against_gpkg",
+]
