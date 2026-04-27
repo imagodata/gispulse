@@ -24,8 +24,9 @@ import logging
 import re
 import sqlite3
 import threading
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 import geopandas as gpd
 import pyogrio
@@ -43,8 +44,16 @@ from persistence.gpkg_spatial import (
     spatial_query as _spatial_query,
     bbox_filter_gdf,
 )
+from persistence.sql_guardrails import SecurityError, enforce as _enforce_guardrails
 
 logger = logging.getLogger(__name__)
+exec_logger = logging.getLogger("gispulse.engine.exec")
+
+# Match psycopg-style %s placeholders ONLY when not inside a string. We
+# do a coarse pre-scan for %s — when none is present we skip the
+# rewrite entirely. The translation itself walks the string char by
+# char to skip quoted regions (so '%s' inside a literal stays intact).
+_PSYCOPG_PLACEHOLDER_RE = re.compile(r"%s")
 
 # DuckDB is an optional accelerator
 try:
@@ -311,6 +320,197 @@ class GeoPackageEngine(SpatialEngine):
             rows = cur.fetchall()
             conn.commit()
             return [dict(row) for row in rows]
+
+    @staticmethod
+    def _translate_placeholders(sql: str) -> str:
+        """Translate ``%s`` placeholders to SQLite ``?`` placeholders.
+
+        The ESB :class:`ActionDispatcher` builds SQL with psycopg-style
+        ``%s`` placeholders (the API server runs against PostGIS). For
+        the GPKG path we rewrite to ``?`` so :mod:`sqlite3` accepts the
+        bound parameters.
+
+        We walk char by char to skip ``%s`` inside string literals
+        (``'... %s ...'``) and quoted identifiers (``"%s"``). A regex
+        sub would also rewrite those, which would silently corrupt
+        legitimate literals containing the substring.
+        """
+        if "%s" not in sql:
+            return sql
+
+        out: list[str] = []
+        in_single = False
+        in_double = False
+        i = 0
+        n = len(sql)
+        while i < n:
+            ch = sql[i]
+            nxt = sql[i + 1] if i + 1 < n else ""
+            if in_single:
+                # Handle SQL '' escape inside a single-quoted literal.
+                if ch == "'" and nxt == "'":
+                    out.append("''")
+                    i += 2
+                    continue
+                if ch == "'":
+                    in_single = False
+                out.append(ch)
+                i += 1
+                continue
+            if in_double:
+                if ch == '"' and nxt == '"':
+                    out.append('""')
+                    i += 2
+                    continue
+                if ch == '"':
+                    in_double = False
+                out.append(ch)
+                i += 1
+                continue
+            if ch == "'":
+                in_single = True
+                out.append(ch)
+                i += 1
+                continue
+            if ch == '"':
+                in_double = True
+                out.append(ch)
+                i += 1
+                continue
+            if ch == "%" and nxt == "s":
+                out.append("?")
+                i += 2
+                continue
+            out.append(ch)
+            i += 1
+        return "".join(out)
+
+    def execute(
+        self,
+        sql: str,
+        params: Mapping[str, Any] | Sequence[Any] | None = None,
+        *,
+        allow_ddl: bool = False,
+    ) -> int:
+        """Execute a single DML statement against the GPKG, with guardrails.
+
+        This is the engine's write path used by the trigger runtime
+        (``set_field`` / ``run_sql`` actions, both via CLI and HTTP).
+        It enforces a strict SQL whitelist before any statement reaches
+        SQLite — see :mod:`persistence.sql_guardrails` for the policy.
+
+        Behaviour:
+
+        * Allowed by default: ``INSERT``, ``UPDATE``, ``DELETE``, ``SELECT``
+        * Hard-blocked: ``ATTACH``, ``DETACH``, ``PRAGMA``, ``VACUUM``,
+          ``BEGIN``/``COMMIT`` (transaction is owned by ``execute()``).
+        * DDL (``CREATE`` / ``DROP`` / ``ALTER``) refused unless
+          ``allow_ddl=True`` (internal migration use only).
+        * Writes to ``gpkg_*``, ``rtree_*``, ``sqlite_*`` and
+          ``_gispulse_*`` tables raise :class:`SecurityError`.
+        * Multiple statements (``;`` between two real statements) are
+          rejected as a chained-SQL injection attempt.
+
+        Placeholder style: psycopg ``%s`` placeholders are translated
+        to SQLite ``?`` placeholders so the same dispatcher code works
+        across PostGIS and GPKG backends.
+
+        Transaction: each call is wrapped in ``BEGIN IMMEDIATE`` /
+        ``COMMIT``. On any exception we ``ROLLBACK``. We do **not**
+        retry — that is the job of
+        :class:`gispulse.runtime.sqlite_retry.RetryingSqlExecutor`,
+        which sits one layer up.
+
+        Logging: every call emits a DEBUG record with the parsed
+        statement type, parameter count, rowcount, and duration on the
+        ``gispulse.engine.exec`` logger. Guardrail violations log at
+        WARNING with the leading keyword (parameters are never logged
+        — they may contain PII).
+
+        Args:
+            sql:        A single SQL statement.
+            params:     Bound parameters (sequence for ``?`` / ``%s``,
+                        mapping for ``:name``). ``None`` means no
+                        binding.
+            allow_ddl:  Internal flag — set to True only by the engine
+                        itself (migrations / bootstrap). YAML actions
+                        must never be able to flip this.
+
+        Returns:
+            ``cursor.rowcount`` — the number of rows affected (``-1``
+            for a SELECT under SQLite).
+
+        Raises:
+            SecurityError:    Guardrail violation (logged at WARNING).
+            sqlite3.OperationalError: Real SQL error (no such table,
+                                      busy lock, syntax). The retry
+                                      wrapper handles ``BUSY`` itself;
+                                      everything else propagates.
+            RuntimeError: When the engine is not open.
+        """
+        if not self._opened:
+            raise RuntimeError(
+                "GeoPackageEngine is not open. Call .open() first."
+            )
+
+        try:
+            parsed = _enforce_guardrails(sql, allow_ddl=allow_ddl)
+        except SecurityError as exc:
+            # Log the leading keyword + reason; never log raw SQL params.
+            exec_logger.warning(
+                "engine_execute_blocked sql_template=%r reason=%s",
+                sql[:120],
+                exc,
+            )
+            raise
+
+        translated = self._translate_placeholders(sql)
+
+        # Normalise params to a tuple/list for sqlite3 (it accepts both
+        # sequence and mapping; we keep mappings for ``:name`` style).
+        bound: Any
+        if params is None:
+            bound = ()
+        elif isinstance(params, Mapping):
+            bound = dict(params)
+        else:
+            bound = list(params)
+
+        param_count = len(bound) if bound else 0
+        conn = self._get_conn()
+        start = time.perf_counter()
+        with self._lock:
+            try:
+                # BEGIN IMMEDIATE acquires a RESERVED lock right away so
+                # we surface contention as SQLITE_BUSY now instead of at
+                # COMMIT time (and the retry wrapper can do its job).
+                # We avoid double-BEGIN if the connection already has a
+                # transaction open (sqlite3's autocommit semantics).
+                in_transaction = conn.in_transaction
+                if not in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
+                cur = conn.execute(translated, bound)
+                rowcount = cur.rowcount
+                if not in_transaction:
+                    conn.commit()
+            except BaseException:
+                # ROLLBACK is best-effort — under SQLITE_BUSY it might
+                # also raise, and we want the original exception.
+                try:
+                    if conn.in_transaction:
+                        conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+        duration_ms = (time.perf_counter() - start) * 1000.0
+        exec_logger.debug(
+            "engine_execute statement=%s params=%d rowcount=%d duration_ms=%.2f",
+            parsed.statement_type,
+            param_count,
+            rowcount,
+            duration_ms,
+        )
+        return int(rowcount)
 
     def sql_to_gdf(self, sql: str) -> gpd.GeoDataFrame:
         """Execute SQL and return a GeoDataFrame.
