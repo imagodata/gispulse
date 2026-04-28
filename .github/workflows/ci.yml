@@ -84,33 +84,10 @@ jobs:
         # default no-fix behaviour here.
         run: pip-audit --desc on
 
-  build-portal:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 22
-
-      - name: Install portal dependencies
-        working-directory: portal
-        run: npm ci
-
-      - name: Lint portal
-        working-directory: portal
-        run: npx eslint . --max-warnings 0 || true
-        continue-on-error: true
-
-      - name: Run portal tests
-        working-directory: portal
-        run: npx vitest run --reporter=verbose || true
-        continue-on-error: true
-
-      - name: Build portal
-        working-directory: portal
-        run: npm run build
+  # NB: the `build-portal` job was removed when the portal frontend was
+  # split out to the sibling public repository imagodata/gispulse-portal
+  # (AGPL). Lint / build / test of the portal now runs in that repo's own
+  # CI. This `gispulse` repo only ships the Python engine + viewer.
 
   build-docker:
     runs-on: ubuntu-latest

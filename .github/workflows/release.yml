@@ -129,6 +129,6 @@ jobs:
             --notes-file release-notes.md \
             dist/*.whl dist/*.tar.gz dist/SHA256SUMS
 
-  # ── 3. Docker image to GHCR (deferred — current Dockerfile bundles portal/
-  #      which now lives in gispulse-portal repo. Will reinstate once the
-  #      Dockerfile is rewritten as engine-only API container.)
+  # ── 3. Docker image to GHCR (deferred — Dockerfile is engine + viewer
+  #      only since the portal/ split. Push job will be reinstated as a
+  #      follow-up once the GHCR creds + tagging policy are agreed.)
