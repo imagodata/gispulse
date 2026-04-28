@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-04-27
+
+### Added
+- **`gispulse track`** — SQL change-tracking subcommand (`install` / `uninstall` / `list` / `tail` / `doctor [--auto-fix]`). Installs `_gispulse_change_log` triggers on a GPKG so any client (QGIS, ogr2ogr, ArcGIS, FME, DBeaver) can write to the file and the daemon picks up the changes. `track doctor` checks application_id, change-log table presence, WAL mode, busy_timeout, per-layer trigger completeness, and stale unprocessed rows; `--auto-fix` reinstalls missing triggers. Closes #4 / #6.
+- **`gispulse watch`** — top-level foreground daemon. SIGINT/SIGTERM clean shutdown (2 s drain), 60 s structured stderr heartbeat, repeatable `--webhook host` allowlist override. Supports both daemon mode and `--once` drain (cron / Lambda / CI hooks) with `--exit-zero-if-empty` for silent quiet ticks. Closes #5 / #11.
+- **Trigger payload v2** — `_gispulse_change_log` SQLite triggers now bake `new_values` / `old_values` JSON columns + a `geom_changed` flag, captured atomically inside the SQLite trigger via `json_object(NEW.*)`. Removes the post-commit `_load_row_values()` SELECT, eliminates the `old.x != new.x` strict-consistency hole flagged in S4. Predicate evaluation now runs on the snapshot taken at DML time. Closes #7.
+- **Bulk-mode tick** — `--bulk-threshold N` collapses ticks with `N+` rows into a single `bulk.changed` summary event (op_counts, layers, change_id_range) instead of broadcasting per-row. Avoids webhook flooding on `ogr2ogr -append` / QGIS bulk paste / shapefile imports. `0` (default) preserves per-row events. Closes #8.
+- **Packaging** — `packaging/systemd/gispulse-watch@.service` + env example for `Type=simple` foreground daemon under systemd, `packaging/docker/Dockerfile.watch` + `docker-compose.watch.yml` for container deployment. Doc READMEs cover both. Closes #9.
+- All Mode 1 scope previously documented under `[1.2.1]` (gispulse triggers, headless_runtime, config_loader, predicate_dsl, sqlite_retry, sql_guardrails, GeoPackageEngine.execute) is rolled into 1.3.0 since 1.2.1 was never tagged.
+
+### Notes
+- Closes the Mode 1 scope of #2 entirely. Mode 2 (portal trigger CRUD) remains on the roadmap.
+- `gispulse triggers run --watch` and the new top-level `gispulse watch` coexist for one release; deprecation note + redirect documented for v1.4.
+- CI baseline cleanup (#19) — dropped removed `pip-audit --fix-auto=off` flag, regenerated capability matrix, ruff drift cleared (514 → 0 errors), workflows aligned on `gispulse-portal` sibling-repo split.
+
 ## [1.2.1] - 2026-04-27
 
 ### Added
