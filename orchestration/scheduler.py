@@ -23,7 +23,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from core.logging import get_logger
-from core.models import Job, JobStatus
+from core.models import Job
 from orchestration.job_queue import JobQueue
 
 log = get_logger(__name__)

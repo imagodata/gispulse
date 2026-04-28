@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import time
 from pathlib import Path
 from unittest import mock
 
@@ -104,7 +102,7 @@ class TestPromptConsent:
         assert is_enabled() is True
 
     def test_user_says_no(self, monkeypatch: pytest.MonkeyPatch):
-        from gispulse.telemetry import prompt_consent, is_enabled
+        from gispulse.telemetry import prompt_consent
         monkeypatch.setattr("sys.stdin", mock.MagicMock(isatty=lambda: True))
         monkeypatch.setattr("builtins.input", lambda _: "n")
         result = prompt_consent()

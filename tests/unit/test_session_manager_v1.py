@@ -6,7 +6,6 @@ the _export helper, engine_mode validation, and ref_sources loading.
 """
 from __future__ import annotations
 
-from pathlib import Path
 
 import geopandas as gpd
 import pytest

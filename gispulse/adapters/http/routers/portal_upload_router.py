@@ -8,7 +8,6 @@ the :class:`~persistence.storage.DatasetStorage` abstraction.
 from __future__ import annotations
 
 import ipaddress
-import re
 import shutil
 import tempfile
 import uuid
@@ -20,7 +19,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
-from gispulse.adapters.http.layer_utils import build_layer_meta, get_layer_styles, get_full_style_defs, load_layers
+from gispulse.adapters.http.layer_utils import get_layer_styles, get_full_style_defs, load_layers
 from gispulse.adapters.http.rate_limit import limiter
 from gispulse.adapters.http.routers._upload_utils import (
     find_duplicate_by_hash as _find_duplicate,
@@ -28,7 +27,7 @@ from gispulse.adapters.http.routers._upload_utils import (
 )
 from core.logging import get_logger
 from persistence.io import dataset_from_file, detect_format
-from persistence.storage import DatasetStorage, LocalStorage
+from persistence.storage import DatasetStorage
 
 log = get_logger(__name__)
 

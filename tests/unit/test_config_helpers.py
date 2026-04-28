@@ -6,14 +6,11 @@ tests downstream (monkeypatch on env → settings picks up changes).
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-import pytest
 
 from core.config import (
     Settings,
-    _SettingsProxy,
     _deep_merge,
     _find_profile_toml,
     _find_toml,

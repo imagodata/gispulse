@@ -32,7 +32,7 @@ def spec_to_markdown(spec: dict) -> str:
     lines.append(f"# {info.get('title', 'GISPulse')} — API Reference")
     lines.append("")
     lines.append(f"> Auto-generated from OpenAPI spec v{info.get('version', '?')}")
-    lines.append(f"> Run `python scripts/export_openapi.py` to regenerate.")
+    lines.append("> Run `python scripts/export_openapi.py` to regenerate.")
     lines.append("")
 
     # Group paths by tag

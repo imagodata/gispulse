@@ -9,7 +9,6 @@ from __future__ import annotations
 import re
 import sqlite3
 
-import pytest
 
 from persistence.schema import (
     BOOL_COLUMNS,

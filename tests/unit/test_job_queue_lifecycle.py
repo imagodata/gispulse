@@ -11,11 +11,8 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
 
 import pytest
 

@@ -110,7 +110,7 @@ class SessionManager:
         Returns:
             PipelineResult with the processed GeoDataFrame and metadata.
         """
-        from persistence.io import read_vector, write_vector
+        from persistence.io import read_vector
         from rules.engine import RuleEngine
 
         input_path = Path(input_path)

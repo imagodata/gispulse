@@ -11,8 +11,6 @@ import pytest
 from shapely.geometry import Point
 
 from persistence.io import (
-    VECTOR_DRIVERS,
-    WRITABLE_FORMATS,
     dataset_from_file,
     detect_format,
     read_vector,

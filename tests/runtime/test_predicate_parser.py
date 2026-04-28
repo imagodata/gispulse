@@ -19,7 +19,6 @@ import pytest
 from gispulse.runtime.predicate_dsl import (
     MAX_DEPTH,
     PredicateDepthError,
-    PredicateError,
     PredicateNode,
     PredicateSyntaxError,
     build_update_payload,

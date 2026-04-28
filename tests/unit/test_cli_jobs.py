@@ -11,7 +11,6 @@ import json
 from uuid import uuid4
 
 import httpx
-import pytest
 from typer.testing import CliRunner
 
 from gispulse.cli import app

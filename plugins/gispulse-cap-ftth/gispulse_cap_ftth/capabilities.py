@@ -6,8 +6,6 @@ Provides NRO/SRO/PBO placement and cable routing on road networks.
 from __future__ import annotations
 
 import geopandas as gpd
-import numpy as np
-from shapely.geometry import MultiPoint, Point
 
 from capabilities.base import Capability
 from capabilities.registry import register

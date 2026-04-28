@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import geopandas as gpd
-from shapely.geometry import shape
 
 from capabilities.base import Capability
 from capabilities.registry import register

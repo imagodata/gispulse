@@ -10,7 +10,6 @@ Coverage targets:
 
 from __future__ import annotations
 
-import sqlite3
 import textwrap
 from pathlib import Path
 

@@ -35,7 +35,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Polygon
 
 from capabilities.base import Capability
 from capabilities.registry import register

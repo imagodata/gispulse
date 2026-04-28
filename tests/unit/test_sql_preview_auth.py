@@ -7,7 +7,6 @@ PostGIS execution to any anonymous caller in portal mode.
 """
 from __future__ import annotations
 
-import os
 
 import pytest
 from fastapi.testclient import TestClient

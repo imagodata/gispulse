@@ -17,12 +17,10 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from typing import Any, Literal
+from typing import Literal
 
 import geopandas as gpd
-import numpy as np
 from shapely import box
-from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
 logger = logging.getLogger(__name__)

@@ -11,7 +11,6 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -20,7 +19,6 @@ import pytest
 from core.models import Job, JobStatus
 from orchestration.job_queue import (
     InMemoryJobQueue,
-    JobQueue,
     _deserialize_job,
     _serialize_job,
 )

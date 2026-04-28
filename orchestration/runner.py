@@ -7,7 +7,6 @@ delegating processing to the RuleEngine, and updating job status accordingly.
 
 from __future__ import annotations
 
-import signal
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timezone
 from typing import Any

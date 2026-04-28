@@ -8,11 +8,8 @@ serialisation logic.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import threading
-from dataclasses import asdict, fields as dc_fields
-from datetime import datetime
 from typing import Any, TypeVar
 from uuid import UUID
 
@@ -20,7 +17,6 @@ from core.models import (
     Artifact,
     Dataset,
     Job,
-    JobStatus,
     Layer,
     Project,
     RefLayerDef,
@@ -29,14 +25,8 @@ from core.models import (
     TableRelation,
     Trigger,
 )
-from persistence.gpkg_schema import MODEL_TABLE_MAPPING
 from persistence.repository import Repository
 from persistence.sqlite_repository import (
-    _BOOL_COLUMNS,
-    _DATETIME_COLUMNS,
-    _JSON_COLUMNS,
-    _UUID_COLUMNS,
-    _deserialise_value,
     _model_to_row,
     _row_to_model,
 )

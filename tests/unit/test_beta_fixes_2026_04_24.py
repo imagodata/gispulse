@@ -8,7 +8,6 @@ beta-test report stored in
 
 from __future__ import annotations
 
-import warnings
 
 import geopandas as gpd
 import numpy as np
@@ -17,7 +16,6 @@ import pytest
 from shapely.geometry import (
     GeometryCollection,
     LineString,
-    MultiPolygon,
     Point,
     Polygon,
 )

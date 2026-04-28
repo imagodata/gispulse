@@ -9,9 +9,8 @@ geometry preservation across reshape.
 from __future__ import annotations
 
 import geopandas as gpd
-import pandas as pd
 import pytest
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point
 
 from capabilities.registry import get as cap_get
 import capabilities  # noqa: F401

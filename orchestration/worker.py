@@ -25,7 +25,6 @@ import functools
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import geopandas as gpd
 

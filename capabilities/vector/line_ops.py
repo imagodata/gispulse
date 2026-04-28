@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import ast as _ast
-import re as _re
 
 import geopandas as gpd
 import numpy as np
-import pandas as pd
 
 from capabilities.base import Capability
 from capabilities.registry import register
-from capabilities.strategy import ExecutionContext, ExecutionStrategy, StrategyMode
 
 
 
@@ -45,7 +41,6 @@ class LineLocatePointCapability(Capability):
                           the matched reference feature (0-based).
             crs_meters:   Metric CRS for distance computation.
         """
-        from shapely.ops import nearest_points
 
         if ref_gdf is None or ref_gdf.empty:
             raise ValueError("line_locate_point requires a reference layer.")

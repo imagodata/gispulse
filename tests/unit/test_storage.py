@@ -7,13 +7,11 @@ import os
 import sys
 import tempfile
 from io import BytesIO
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from persistence.storage import (
-    DatasetStorage,
     LocalStorage,
     StorageError,
     create_storage,

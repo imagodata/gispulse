@@ -16,9 +16,7 @@ Out of scope for v1.3.0 #5 (handled in sibling issues):
 
 from __future__ import annotations
 
-import json
 import signal
-import sys
 import threading
 import time
 from pathlib import Path

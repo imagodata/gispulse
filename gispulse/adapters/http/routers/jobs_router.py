@@ -345,9 +345,7 @@ def get_job_features(
 
     Used by the playground frontend to display pipeline results on the map.
     """
-    import geopandas as gpd
     from persistence.io import read_vector
-    from fastapi.responses import JSONResponse
 
     job = job_repo.get(job_id)
     if job is None:

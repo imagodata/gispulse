@@ -10,7 +10,6 @@ Covers:
 """
 from __future__ import annotations
 
-from pathlib import Path
 
 import geopandas as gpd
 import pytest
@@ -18,7 +17,6 @@ from shapely.geometry import Point, Polygon
 
 from core.io.geoparquet import (
     DUCKDB_THRESHOLD,
-    _read_via_duckdb,
     _read_via_geopandas,
     _should_use_duckdb,
     read_geoparquet,

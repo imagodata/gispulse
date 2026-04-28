@@ -4,7 +4,6 @@ attribute outside the whitelist raises AttributeError via _SafeNamespace.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import geopandas as gpd

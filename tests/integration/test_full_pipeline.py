@@ -17,10 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -142,8 +140,8 @@ class TestRbacFullFlow:
         4. Verify the key maps back to the correct user
         5. Verify permissions via role comparison
         """
-        from persistence.auth_models import ApiKey, Organisation, User, role_gte
-        from persistence.auth_repository import AuthRepository, generate_api_key, hash_api_key
+        from persistence.auth_models import Organisation, User, role_gte
+        from persistence.auth_repository import AuthRepository, hash_api_key
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "auth_test.db"
@@ -203,8 +201,8 @@ class TestRbacFullFlow:
 
     def test_api_key_expiration_blocks_access(self):
         """An expired API key must be detectable by the auth layer."""
-        from persistence.auth_models import ApiKey, User
-        from persistence.auth_repository import AuthRepository, generate_api_key, hash_api_key
+        from persistence.auth_models import User
+        from persistence.auth_repository import AuthRepository, hash_api_key
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "auth_test.db"
@@ -243,7 +241,6 @@ class TestSchedulerCreateAndFire:
         from orchestration.scheduler import (
             PipelineScheduler,
             ScheduledPipeline,
-            _compute_next_run,
         )
 
         queue = InMemoryJobQueue()
@@ -523,7 +520,6 @@ class TestTierGatingAllFeatures:
     def test_community_blocks_s3_storage(self, monkeypatch):
         """S3 storage is gated to Pro tier — Community gets LocalStorage fallback."""
         from persistence.storage import create_storage
-        from persistence.tier import TierError
 
         monkeypatch.setenv("GISPULSE_S3_ENDPOINT", "http://minio:9000")
         monkeypatch.setenv("GISPULSE_TIER", "community")

@@ -72,7 +72,7 @@ class FixGapsCapability(Capability):
                            *crs_meters* units²). Larger ones are left alone.
             crs_meters:    Metric CRS used for area comparisons.
         """
-        from shapely.geometry import Polygon, MultiPolygon
+        from shapely.geometry import Polygon
         from shapely.ops import unary_union
 
         if max_gap_area < 0:

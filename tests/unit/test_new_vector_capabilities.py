@@ -15,7 +15,6 @@ from __future__ import annotations
 import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, Point, Polygon
-from shapely.geometry.polygon import LinearRing
 
 from capabilities.registry import get as get_capability
 from capabilities.vector import (

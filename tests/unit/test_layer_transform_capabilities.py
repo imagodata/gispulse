@@ -7,7 +7,6 @@ import pytest
 from shapely.geometry import (
     LineString,
     MultiLineString,
-    MultiPoint,
     MultiPolygon,
     Point,
     Polygon,

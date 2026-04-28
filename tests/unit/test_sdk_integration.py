@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import sys
 import os
-from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient

@@ -4,7 +4,6 @@ Unit tests for the Rules router — CRUD operations, validation, edge cases.
 
 from __future__ import annotations
 
-import os
 from uuid import uuid4
 
 import pytest

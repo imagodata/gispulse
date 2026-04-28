@@ -77,7 +77,7 @@ def main() -> int:
     src_health = ROOT / "examples" / "datasets" / "clermont_ferrand_health_osm.geojson"
     src_bdtopo = ROOT / "examples" / "datasets" / "clermont_ferrand_bdtopo.gpkg"
     if not src_health.exists() or not src_bdtopo.exists():
-        print(f"[precompute_accessibility] missing source data, skipping", file=sys.stderr)
+        print("[precompute_accessibility] missing source data, skipping", file=sys.stderr)
         return 0  # not fatal — CI without the GPKGs falls back to live API
 
     t0 = time.time()
