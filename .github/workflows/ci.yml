@@ -60,7 +60,14 @@ jobs:
         run: pip install -e ".[api,postgis,mcp,raster,network,classification,pointcloud,scheduling,sso,parquet]"
 
       - name: Verify capability coverage matrix is up to date
-        run: python scripts/build_capability_matrix.py --check
+        run: |
+          python scripts/build_capability_matrix.py
+          if ! git diff --quiet docs-site/; then
+            echo "::error::Capability matrix drift detected. Diff below:"
+            git --no-pager diff docs-site/
+            exit 1
+          fi
+          echo "Matrix in sync."
 
   security-audit:
     runs-on: ubuntu-latest
