@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @router.get("/providers", summary="List configured SSO providers (OSS stub)")
