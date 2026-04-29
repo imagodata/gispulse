@@ -14,6 +14,7 @@ fastmcp = pytest.importorskip("fastmcp")
 # Only import after the skip guard so the module-level ImportError in
 # server.py is not triggered in environments without fastmcp.
 from gispulse.adapters.mcp import server as mcp_server  # noqa: E402
+from core import plugin_hub  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +73,41 @@ def test_tools_registered():
     }
     missing = expected - tool_names
     assert not missing, f"Missing tools: {missing}"
+
+
+def test_plugin_tool_registered(monkeypatch):
+    """MCP tool entry-points can extend a freshly-created server."""
+    import asyncio
+
+    class FakeEntryPoint:
+        name = "fake-mcp-tool"
+
+        def load(self):
+            class FakeToolFactory:
+                name = "fake-mcp-tool"
+
+                def register(self, mcp):
+                    @mcp.tool()
+                    def plugin_ping() -> str:
+                        return "pong"
+
+            return FakeToolFactory
+
+    def fake_entry_points(group: str | None = None, **_kwargs):
+        if group == "gispulse.mcp_tools":
+            return [FakeEntryPoint()]
+        return []
+
+    monkeypatch.setattr(plugin_hub, "entry_points", fake_entry_points)
+    plugin_hub.PluginHub.reset()
+
+    server = mcp_server.create_mcp_server()
+    tools = asyncio.run(server.list_tools())
+    tool_names = {t.name for t in tools}
+
+    assert "plugin_ping" in tool_names
+
+    plugin_hub.PluginHub.reset()
 
 
 # ---------------------------------------------------------------------------

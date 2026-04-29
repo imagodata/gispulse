@@ -61,6 +61,9 @@ class TestPluginHubDiscovery:
         assert hub.auth_providers == {}
         assert hub.billing_provider is None
         assert hub.connectors == {}
+        assert hub.lifecycle == []
+        assert hub.mcp_tools == []
+        assert hub.mcp_resources == []
         # Default licence provider is the OSS NoOp.
         assert hub.licence_provider.name == "noop"
 
@@ -162,6 +165,43 @@ class TestPluginHubDiscovery:
         hub = plugin_hub.PluginHub.get()
         assert hub.routers["needs-stripe"].create(app=None) is None
 
+    def test_lifecycle_plugins_are_registered(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        class FakeLifecycle:
+            name = "fake-lifecycle"
+
+            def on_startup(self, app): return None
+
+            def on_shutdown(self, app): return None
+
+        _patch_eps(
+            monkeypatch,
+            {"gispulse.lifecycle": [_FakeEntryPoint("fake-lifecycle", FakeLifecycle)]},
+        )
+        hub = plugin_hub.PluginHub.get()
+        assert [p.name for p in hub.lifecycle] == ["fake-lifecycle"]
+
+    def test_mcp_plugins_are_registered(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        class FakeTools:
+            name = "fake-tools"
+
+            def register(self, mcp): return None
+
+        class FakeResources:
+            name = "fake-resources"
+
+            def register(self, mcp): return None
+
+        _patch_eps(
+            monkeypatch,
+            {
+                "gispulse.mcp_tools": [_FakeEntryPoint("fake-tools", FakeTools)],
+                "gispulse.mcp_resources": [_FakeEntryPoint("fake-resources", FakeResources)],
+            },
+        )
+        hub = plugin_hub.PluginHub.get()
+        assert [p.name for p in hub.mcp_tools] == ["fake-tools"]
+        assert [p.name for p in hub.mcp_resources] == ["fake-resources"]
+
 
 # ---------------------------------------------------------------------------
 # Default licence provider (OSS NoOp)
@@ -214,4 +254,4 @@ class TestPluginHubSingleton:
 
 
 def test_protocol_version_exposed() -> None:
-    assert PROTOCOL_VERSION == "1.0"
+    assert PROTOCOL_VERSION == "1.1"

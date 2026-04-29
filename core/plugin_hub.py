@@ -21,8 +21,11 @@ from core.plugin_contracts import (
     AuthProvider,
     BillingProvider,
     Connector,
+    LifecycleHook,
     LicenceProvider,
     LicenceState,
+    McpResourceFactory,
+    McpToolFactory,
     MiddlewareFactory,
     RouterFactory,
 )
@@ -117,6 +120,9 @@ class PluginHub:
     billing_provider: BillingProvider | None
     licence_provider: LicenceProvider
     connectors: dict[str, Connector]
+    lifecycle: list[LifecycleHook]
+    mcp_tools: list[McpToolFactory]
+    mcp_resources: list[McpResourceFactory]
 
     def __init__(self) -> None:
         self.routers = {}
@@ -125,6 +131,9 @@ class PluginHub:
         self.billing_provider = None
         self.licence_provider = NoOpLicenceProvider()
         self.connectors = {}
+        self.lifecycle = []
+        self.mcp_tools = []
+        self.mcp_resources = []
 
     # ------------------------------------------------------------------ API
 
@@ -151,6 +160,9 @@ class PluginHub:
         hub._load_billing_provider()
         hub._load_licence_provider()
         hub._load_connectors()
+        hub._load_lifecycle()
+        hub._load_mcp_tools()
+        hub._load_mcp_resources()
         log.info(
             "plugin_hub_initialized",
             routers=sorted(hub.routers),
@@ -159,6 +171,9 @@ class PluginHub:
             billing=(hub.billing_provider.name if hub.billing_provider else None),
             licence=hub.licence_provider.name,
             connectors=sorted(hub.connectors),
+            lifecycle=[p.name for p in hub.lifecycle],
+            mcp_tools=[p.name for p in hub.mcp_tools],
+            mcp_resources=[p.name for p in hub.mcp_resources],
         )
         return hub
 
@@ -206,6 +221,27 @@ class PluginHub:
             if obj is None:
                 continue
             self.connectors[ep.name] = obj
+
+    def _load_lifecycle(self) -> None:
+        for ep in _eps("gispulse.lifecycle"):
+            obj = _safe_load(ep, "lifecycle")
+            if obj is None:
+                continue
+            self.lifecycle.append(obj)
+
+    def _load_mcp_tools(self) -> None:
+        for ep in _eps("gispulse.mcp_tools"):
+            obj = _safe_load(ep, "mcp_tool")
+            if obj is None:
+                continue
+            self.mcp_tools.append(obj)
+
+    def _load_mcp_resources(self) -> None:
+        for ep in _eps("gispulse.mcp_resources"):
+            obj = _safe_load(ep, "mcp_resource")
+            if obj is None:
+                continue
+            self.mcp_resources.append(obj)
 
 
 # ---------------------------------------------------------------------------
