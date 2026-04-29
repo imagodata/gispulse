@@ -685,14 +685,16 @@ def create_app(
     # ------------------------------------------------------------------ Routers
     protected = {"dependencies": [Depends(validate_api_key)]}
 
-    # Auth router (SSO endpoints — enterprise plugin, requires OIDC provider)
-    if app.state.oidc_provider is not None:
-        try:
-            from gispulse.adapters.http.routers.auth_router import router as auth_router
-            app.include_router(auth_router)
-            log.info("auth_router_mounted")
-        except ImportError:
-            log.debug("auth_router_not_available", msg="gispulse-enterprise not installed")
+    # Auth router — always mounted so the portal UI can call /auth/providers
+    # and /auth/me without 404. Engine ships OSS stubs (empty providers, 401
+    # on /me); the gispulse-enterprise plugin overrides with full OIDC SSO
+    # endpoints when installed and an OIDC provider is configured.
+    try:
+        from gispulse.adapters.http.routers.auth_router import router as auth_router
+        app.include_router(auth_router)
+        log.info("auth_router_mounted", oidc_configured=app.state.oidc_provider is not None)
+    except ImportError:
+        log.debug("auth_router_not_available")
 
     if is_portal:
         # Portal mode: no auth on routers
