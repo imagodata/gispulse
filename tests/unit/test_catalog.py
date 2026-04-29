@@ -4,6 +4,24 @@ from catalog import registry
 from catalog.models import CatalogDomain, ProjectionEntry, BasemapEntry, FluxEntry
 
 
+GPU_FLUX_ENTRIES = {
+    "flux:ign:ign-gpu-zone-urba-wfs": {
+        "layer_name": "wfs_du:zone_urba",
+        "tags": {"gpu", "plu", "urbanisme", "zonage", "france", "vector"},
+    },
+    "flux:ign:ign-gpu-prescription-surf-wfs": {
+        "layer_name": "wfs_du:prescription_surf",
+        "tags": {"gpu", "plu", "urbanisme", "prescription", "france", "vector"},
+    },
+    "flux:ign:ign-gpu-doc-urba-wfs": {
+        "layer_name": "wfs_du:doc_urba",
+        "tags": {"gpu", "plu", "urbanisme", "document", "france", "vector"},
+    },
+}
+GPU_FLUX_IDS = set(GPU_FLUX_ENTRIES)
+GPU_WFS_SERVICE_URL = "https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0"
+
+
 class TestCatalogRegistry:
     def test_providers_registered(self):
         providers = registry.list_providers()
@@ -50,6 +68,21 @@ class TestCatalogRegistry:
         assert len(osm) > 0
         assert all(e.provider == "ign" for e in ign)
         assert all(e.provider == "osm" for e in osm)
+
+    def test_gpu_flux_entries_resolve(self):
+        for entry_id, expected in GPU_FLUX_ENTRIES.items():
+            entry = registry.get_entry(entry_id)
+            assert entry is not None, entry_id
+            assert isinstance(entry, FluxEntry)
+            assert entry.protocol == "wfs"
+            assert entry.service_url == GPU_WFS_SERVICE_URL
+            assert entry.layer_name == expected["layer_name"]
+            assert set(entry.tags) == expected["tags"]
+
+    def test_search_flux_gpu_returns_gpu_entries(self):
+        results = registry.search(domain=CatalogDomain.FLUX, search="gpu")
+        ids = {entry.id for entry in results}
+        assert GPU_FLUX_IDS <= ids
 
     def test_search_opendata_ign(self):
         results = registry.search(domain=CatalogDomain.OPENDATA, provider="ign")
