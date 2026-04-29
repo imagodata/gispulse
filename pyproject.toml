@@ -72,6 +72,8 @@ exclude = ["docs*", "tests*"]
 
 [tool.setuptools.package-data]
 viewer = ["dist/**/*", "dist/*"]
+core = ["pricing_catalog.yml"]
+catalog = ["data/*.json"]
 
 [tool.ruff]
 target-version = "py310"
