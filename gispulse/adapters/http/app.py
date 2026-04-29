@@ -885,6 +885,25 @@ def create_app(
 
         @app.get("/{path:path}", include_in_schema=False)
         async def spa_fallback_full(request: Request, path: str):
+            # Try a static file at the dist root first (favicon.svg, icons.svg,
+            # robots.txt, etc. — anything Vite emits outside /assets/). Path
+            # traversal is blocked by the resolved-relative-to check.
+            if path:
+                candidate = _PORTAL_DIST / path
+                try:
+                    resolved = candidate.resolve()
+                    dist_root = _PORTAL_DIST.resolve()
+                    if resolved.is_relative_to(dist_root) and resolved.is_file():
+                        import mimetypes
+                        from fastapi.responses import Response
+                        mime, _ = mimetypes.guess_type(str(resolved))
+                        return Response(
+                            resolved.read_bytes(),
+                            media_type=mime or "application/octet-stream",
+                        )
+                except (OSError, ValueError):
+                    pass
+
             # Match the first path segment so deep-links like /explorer/foo/bar
             # also fall back to the SPA index.
             first_segment = path.lstrip("/").split("/", 1)[0]
