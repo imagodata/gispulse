@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Packaging** — declare `httpx>=0.24,<1.0` as a core runtime dependency. Previously listed only under `[api]` / `[sso]` / `[dev]` extras, so `pipx install gispulse` produced a working CLI for `track` / `info` / `run` but `gispulse triggers run` and `gispulse watch` crashed on `ModuleNotFoundError: No module named 'httpx'` (the webhook client at `gispulse/adapters/webhooks/http_client.py` imports it unconditionally). Affects 1.3.0 release; users on 1.3.0 can work around with `pipx install "gispulse[api]"`.
+
 ## [1.3.0] - 2026-04-27
 
 ### Added
