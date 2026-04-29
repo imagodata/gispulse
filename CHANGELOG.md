@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Tests — `test_watch_help_registers` Rich rendering** — replace the substring assertion (`"--rules" in res.output`) with structural Click introspection via `typer.main.get_command()`. The `monkeypatch.setenv("COLUMNS", "200")` fix in 1218dfa was a no-op: `typer.testing.CliRunner` redirects stdout/stderr to `StringIO`, which Rich detects as non-TTY and falls back to a default 80-col width *regardless of the env*. Required option names like `--rules` then wrap mid-line and fail the substring match. The new assertion walks `click_app.commands["watch"].params` and checks each required `--rules` / `--webhook` / `--once` / `--bulk-threshold` is declared — this bypasses Rich entirely and is stable across Click 8.2 / 8.3, Typer 0.20 / 0.25, and any future GHA runner default.
+
 ## [1.3.1] - 2026-04-29
 
 Hotfix release that unblocks the v1.3.0 distribution: `pipx install gispulse` now ships a working `triggers run` / `watch` (httpx was missing from base deps), the local Docker stack boots on community tier, the portal serves favicon/robots/manifest correctly, and CI is green again.

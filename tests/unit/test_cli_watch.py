@@ -76,11 +76,33 @@ def valid_yaml(tmp_path: Path, tracked_gpkg: Path) -> Path:
 
 
 def test_watch_help_registers(runner: CliRunner) -> None:
+    # Smoke-test that ``--help`` exits 0 and prints the command summary. We
+    # do NOT assert on the rendered option list — Rich's panel rendering
+    # truncates long Typer apps under the GitHub Actions runner because
+    # CliRunner redirects stdout to a StringIO that Rich detects as
+    # non-TTY (defaulting to 80 cols regardless of the COLUMNS env, see
+    # commit 1218dfa chasing this gate). The structural test below is the
+    # source of truth.
     res = runner.invoke(app, ["watch", "--help"])
     assert res.exit_code == 0
     assert "Watch a GeoPackage" in res.output
-    assert "--rules" in res.output
-    assert "--webhook" in res.output
+
+    # Structural assertion: the underlying Click command must declare the
+    # options the rest of the CLI contract relies on. This bypasses Rich
+    # rendering and is stable across Click/Typer/terminal-width quirks.
+    from typer.main import get_command
+
+    click_app = get_command(app)
+    watch_cmd = click_app.commands["watch"]
+    opt_names: set[str] = set()
+    for param in watch_cmd.params:
+        if hasattr(param, "opts"):
+            opt_names.update(param.opts)
+    for required_opt in ("--rules", "--webhook", "--once", "--bulk-threshold"):
+        assert required_opt in opt_names, (
+            f"watch command is missing the {required_opt!r} option — "
+            f"declared options: {sorted(opt_names)}"
+        )
 
 
 def test_watch_missing_rules_exits_2(runner: CliRunner, tracked_gpkg: Path) -> None:
