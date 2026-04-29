@@ -31,15 +31,6 @@ _IGN_FLUX: list[dict] = [
         "tags": ["topo", "plan", "france"],
     },
     {
-        "id": "ign-scan25-wmts",
-        "name": "Cartes IGN (1:25000)",
-        "description": "Carte topographique IGN — couche MAPS libre d'accès",
-        "service_url": f"{_BASE_WMTS}?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.MAPS&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={{z}}&TILEROW={{y}}&TILECOL={{x}}",
-        "protocol": "wmts",
-        "layer_name": "GEOGRAPHICALGRIDSYSTEMS.MAPS",
-        "tags": ["topo", "cartes", "france", "randonnée"],
-    },
-    {
         "id": "ign-cadastre-wmts",
         "name": "Cadastre (parcellaire)",
         "description": "Parcelles cadastrales PCI vecteur",
