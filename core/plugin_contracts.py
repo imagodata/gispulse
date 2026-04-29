@@ -5,8 +5,8 @@ implement to extend the OSS engine via Python entry-points. The core
 discovery / instantiation logic lives in :mod:`core.plugin_hub`.
 
 Pattern reference: ``gispulse.capabilities`` (existing) — see
-``capabilities/registry.py``. We extend the same mechanism to five new
-groups documented in ``docs/PLUGIN_CONTRACT.md``.
+``capabilities/registry.py``. The same mechanism extends the host app and
+MCP facade without hard-coding optional packages.
 
 Entry-point groups
 ------------------
@@ -16,6 +16,9 @@ Entry-point groups
 - ``gispulse.billing_provider``— :class:`BillingProvider`
 - ``gispulse.licence_provider``— :class:`LicenceProvider`
 - ``gispulse.connectors``      — :class:`Connector`
+- ``gispulse.lifecycle``       — :class:`LifecycleHook`
+- ``gispulse.mcp_tools``       — :class:`McpToolFactory`
+- ``gispulse.mcp_resources``   — :class:`McpResourceFactory`
 """
 from __future__ import annotations
 
@@ -29,7 +32,7 @@ if TYPE_CHECKING:
 # Bumped MAJOR on breaking change, MINOR on additive change. Plugins
 # declare ``requires_protocol = ">=1.0,<2.0"`` and the hub warns on
 # mismatch.
-PROTOCOL_VERSION = "1.0"
+PROTOCOL_VERSION = "1.1"
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +87,19 @@ class MiddlewareFactory(Protocol):
     name: str
 
     def install(self, app: "FastAPI") -> None:
+        ...
+
+
+@runtime_checkable
+class LifecycleHook(Protocol):
+    """Plugin with explicit FastAPI startup and shutdown hooks."""
+
+    name: str
+
+    def on_startup(self, app: "FastAPI") -> Any:
+        ...
+
+    def on_shutdown(self, app: "FastAPI") -> Any:
         ...
 
 
@@ -160,4 +176,29 @@ class Connector(Protocol):
     schema_version: str
 
     def supports(self, source_type: str) -> bool:
+        ...
+
+
+# ---------------------------------------------------------------------------
+# MCP extension points
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class McpToolFactory(Protocol):
+    """Plugin that registers tools on a FastMCP server instance."""
+
+    name: str
+
+    def register(self, mcp: Any) -> None:
+        ...
+
+
+@runtime_checkable
+class McpResourceFactory(Protocol):
+    """Plugin that registers resources on a FastMCP server instance."""
+
+    name: str
+
+    def register(self, mcp: Any) -> None:
         ...

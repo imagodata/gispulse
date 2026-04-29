@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import inspect
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
@@ -68,6 +69,34 @@ log = get_logger(__name__)
 
 _PORTAL_DIST = Path(__file__).resolve().parent.parent.parent.parent / "portal" / "dist"
 _VIEWER_DIST = Path(__file__).resolve().parent.parent.parent.parent / "viewer" / "dist"
+
+
+async def _run_plugin_startup(app: FastAPI) -> None:
+    hub = getattr(app.state, "plugin_hub", None)
+    if hub is None:
+        return
+    for plugin in hub.lifecycle:
+        try:
+            result = plugin.on_startup(app)
+            if inspect.isawaitable(result):
+                await result
+            log.info("plugin_lifecycle_startup_complete", plugin=plugin.name)
+        except Exception as exc:
+            log.warning("plugin_lifecycle_startup_failed", plugin=plugin.name, error=str(exc))
+
+
+async def _run_plugin_shutdown(app: FastAPI) -> None:
+    hub = getattr(app.state, "plugin_hub", None)
+    if hub is None:
+        return
+    for plugin in reversed(hub.lifecycle):
+        try:
+            result = plugin.on_shutdown(app)
+            if inspect.isawaitable(result):
+                await result
+            log.info("plugin_lifecycle_shutdown_complete", plugin=plugin.name)
+        except Exception as exc:
+            log.warning("plugin_lifecycle_shutdown_failed", plugin=plugin.name, error=str(exc))
 
 
 def _load_api_keys() -> set[str] | None:
@@ -464,7 +493,11 @@ def create_app(
                 except Exception as exc:
                     log.warning("change_log_watcher_failed", error=str(exc))
 
+        await _run_plugin_startup(app)
+
         yield
+
+        await _run_plugin_shutdown(app)
 
         if not is_portal:
             # Graceful watcher registry shutdown — stops every per-dataset

@@ -42,6 +42,7 @@ except ImportError as exc:  # pragma: no cover
 
 from capabilities import list_all as _list_all_capabilities
 from capabilities.registry import REGISTRY
+from core.plugin_hub import PluginHub
 from core.models import Dataset, Job, JobStatus, Rule
 from core.logging import get_logger
 from persistence.repository import InMemoryRepository
@@ -63,10 +64,52 @@ _rule_engine = RuleEngine(repository=_rule_repo)
 _job_runner = JobRunner(repository=_rule_repo, rule_engine=_rule_engine)
 
 # ---------------------------------------------------------------------------
-# FastMCP server instance
+# FastMCP server helpers
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP("GISPulse")
+
+def create_mcp_server(name: str = "GISPulse", *, include_plugins: bool = True):
+    """Create a FastMCP server with built-in and plugin-contributed surfaces."""
+    server = FastMCP(name)
+    register_builtin_mcp_surface(server)
+    if include_plugins:
+        register_plugin_mcp_surface(server)
+    return server
+
+
+def register_builtin_mcp_surface(server: Any) -> None:
+    """Register the built-in GISPulse MCP tools and resources."""
+    for fn in (
+        list_capabilities,
+        get_capability_info,
+        create_rule,
+        list_rules,
+        validate_rule,
+        delete_rule,
+        list_datasets,
+        load_gpkg,
+        run_job,
+    ):
+        server.tool()(fn)
+    server.resource("gispulse://capabilities")(resource_capabilities)
+    server.resource("gispulse://rules")(resource_rules)
+
+
+def register_plugin_mcp_surface(server: Any) -> None:
+    """Install MCP tools/resources provided through PluginHub entry-points."""
+    hub = PluginHub.get()
+    for factory in hub.mcp_tools:
+        try:
+            factory.register(server)
+            log.info("plugin_mcp_tools_registered", plugin=factory.name)
+        except Exception as exc:
+            log.warning("plugin_mcp_tools_failed", plugin=factory.name, error=str(exc))
+    for factory in hub.mcp_resources:
+        try:
+            factory.register(server)
+            log.info("plugin_mcp_resources_registered", plugin=factory.name)
+        except Exception as exc:
+            log.warning("plugin_mcp_resources_failed", plugin=factory.name, error=str(exc))
 
 
 # ===========================================================================
@@ -74,7 +117,6 @@ mcp = FastMCP("GISPulse")
 # ===========================================================================
 
 
-@mcp.tool()
 def list_capabilities() -> list[dict[str, Any]]:
     """List all registered GISPulse capabilities with their schemas.
 
@@ -84,7 +126,6 @@ def list_capabilities() -> list[dict[str, Any]]:
     return _list_all_capabilities()
 
 
-@mcp.tool()
 def get_capability_info(name: str) -> dict[str, Any]:
     """Return detail for a single capability.
 
@@ -113,7 +154,6 @@ def get_capability_info(name: str) -> dict[str, Any]:
 # ===========================================================================
 
 
-@mcp.tool()
 def create_rule(
     name: str,
     capability: str,
@@ -147,7 +187,6 @@ def create_rule(
         return {"error": str(exc)}
 
 
-@mcp.tool()
 def list_rules() -> list[dict[str, Any]]:
     """List all rules stored in the session repository.
 
@@ -168,7 +207,6 @@ def list_rules() -> list[dict[str, Any]]:
     ]
 
 
-@mcp.tool()
 def validate_rule(rule_id: str) -> dict[str, Any]:
     """Validate a stored rule against its capability's schema.
 
@@ -198,7 +236,6 @@ def validate_rule(rule_id: str) -> dict[str, Any]:
     }
 
 
-@mcp.tool()
 def delete_rule(rule_id: str) -> dict[str, Any]:
     """Delete a stored rule from the session repository.
 
@@ -224,7 +261,6 @@ def delete_rule(rule_id: str) -> dict[str, Any]:
 # ===========================================================================
 
 
-@mcp.tool()
 def list_datasets() -> list[dict[str, Any]]:
     """List all datasets loaded in the current session.
 
@@ -244,7 +280,6 @@ def list_datasets() -> list[dict[str, Any]]:
     ]
 
 
-@mcp.tool()
 def load_gpkg(path: str, name: str = "") -> dict[str, Any]:
     """Load a GeoPackage file into the session engine.
 
@@ -301,7 +336,6 @@ def load_gpkg(path: str, name: str = "") -> dict[str, Any]:
 # ===========================================================================
 
 
-@mcp.tool()
 def run_job(
     name: str,
     dataset_id: str,
@@ -381,13 +415,11 @@ def run_job(
 # ===========================================================================
 
 
-@mcp.resource("gispulse://capabilities")
 def resource_capabilities() -> str:
     """MCP resource: list of all registered GISPulse capabilities (JSON)."""
     return json.dumps(_list_all_capabilities(), indent=2)
 
 
-@mcp.resource("gispulse://rules")
 def resource_rules() -> str:
     """MCP resource: list of all rules stored in the session (JSON)."""
     rules = [
@@ -402,3 +434,7 @@ def resource_rules() -> str:
         for rule in _rule_repo.list_all()
     ]
     return json.dumps(rules, indent=2)
+
+
+# Module-level compatibility instance used by existing imports.
+mcp = create_mcp_server()
