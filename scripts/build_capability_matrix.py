@@ -77,7 +77,11 @@ def _build_test_index() -> dict[str, list[Path]]:
     index: dict[str, list[Path]] = {}
     if not TESTS_ROOT.exists():
         return index
-    for path in TESTS_ROOT.rglob("test_*.py"):
+    # Sort `rglob` output: filesystem ordering is environment-dependent
+    # (local dev vs GitHub Actions runner) so the first test file picked
+    # for each capability would otherwise drift between runs and break
+    # the capability-matrix-drift CI gate.
+    for path in sorted(TESTS_ROOT.rglob("test_*.py")):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
