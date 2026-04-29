@@ -7,12 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-04-29
+
+Hotfix release that unblocks the v1.3.0 distribution: `pipx install gispulse` now ships a working `triggers run` / `watch` (httpx was missing from base deps), the local Docker stack boots on community tier, the portal serves favicon/robots/manifest correctly, and CI is green again.
+
 ### Fixed
-- **Packaging** — declare `httpx>=0.24,<1.0` as a core runtime dependency. Previously listed only under `[api]` / `[sso]` / `[dev]` extras, so `pipx install gispulse` produced a working CLI for `track` / `info` / `run` but `gispulse triggers run` and `gispulse watch` crashed on `ModuleNotFoundError: No module named 'httpx'` (the webhook client at `gispulse/adapters/webhooks/http_client.py` imports it unconditionally). Affects 1.3.0 release; users on 1.3.0 can work around with `pipx install "gispulse[api]"`.
+- **Packaging — `httpx` core runtime dependency** — moved `httpx>=0.24,<1.0` from the `[api]` / `[sso]` / `[dev]` extras into base dependencies. Without it, `pipx install gispulse` produced a working CLI for `track` / `info` / `run` but `gispulse triggers run` and `gispulse watch` crashed on `ModuleNotFoundError: No module named 'httpx'` (the webhook client at `gispulse/adapters/webhooks/http_client.py` imports it unconditionally). 1.3.0 users can work around with `pipx install "gispulse[api]"`.
+- **API — pipelines `ref_layer` 500** — `/pipelines/execute-steps` resolved `ref_layer` / `ref_layers` aliases into `ref_gdf` / `ref_gdfs` but left the original keys in `params`, so `execute_safe` rejected them as unknown kwargs and returned 500. Mirrors `PipelineExecutor` (`orchestration/pipeline_executor.py:170,178`) by using `dict.pop()` to strip the plumbing keys before the capability call.
+- **API — OSS auth stubs + websockets** — the portal UI calls `/api/auth/providers` and `/api/auth/me` on every page load. Without an enterprise OIDC plugin those endpoints 404'd and the UI logged errors. Ship OSS stubs returning `[]` and `401`, mount the router unconditionally so the enterprise plugin can override later. Mount prefix is `/api/auth` to match the portal client. Switch the `[api]` extra to `uvicorn[standard]` so `/ws/events` upgrades stop failing with `No supported WebSocket library detected`.
+- **API — SPA root static assets** — the SPA fallback 404'd on any root-level static asset shipped with the build (favicon.svg, icons.svg, robots.txt, …) because only `/assets/*` was mounted. The fallback now tries the dist root first (path-traversal blocked by `Path.resolve().is_relative_to(dist_root)`) before applying the SPA-route whitelist + index.html fallback.
+- **API — `/api/auth/me` console noise** — the OSS stub returned `401` for anonymous callers. The portal already treats null as anonymous, but browsers log every 4xx network response to DevTools regardless of how the JS client handles it. Switch to `200` with body `null`: silent and equally unambiguous.
+- **Compose — community-tier boot** — `docker-compose.local.yml` hardcoded `GISPULSE_ENGINE=postgis`, which crashed at startup under the default community tier (`TierError: Postgis engine requires GISPulse Pro`). PostGIS is now opt-in via `--profile postgis`; default is DuckDB so the local stack boots out of the box.
+- **Catalog — IGN Scan 25 dead entries** — IGN Géoplateforme deprecated `GEOGRAPHICALGRIDSYSTEMS.MAPS` (verified against `data.geopf.fr`). Drop `basemap:ign-scan25` and `ign-scan25-wmts`; `GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2` is exposed as `basemap:ign-plan` / `ign-plan-wmts` for users who still need an IGN background.
 
 ### Changed
 - **CI** — `test` job now installs `[dev,api,postgis,mcp,raster,network,classification,pointcloud,scheduling,sso]` extras instead of `[dev]` alone. Router and integration tests need `fastapi`, `psycopg2-binary`, etc. and were silently failing collection on `ModuleNotFoundError` (28+ test files affected). `capability-matrix-drift` job aligned to the same install set so the matrix it generates matches the one committed locally.
 - **CI** — `pip-audit` ignores `CVE-2026-3219` (pip 26.x tar/ZIP confusion, no fix release upstream as of 2026-04-28; re-evaluate quarterly).
+- **Docs** — README pipx quickstart aligned with v1.3 CLI surface (`gispulse triggers` / `track` / `watch`); `project.gpkg` removed from the tree (was tracked dev artifact).
 
 ### Security
 - **Dependencies** — bump `fastmcp` from `>=0.1,<2.0` to `>=2.14.2,<4.0` to fix CVE-2025-62800 / CVE-2025-62801 / CVE-2025-69196 / CVE-2025-64340 / CVE-2026-27124 / GHSA-rcfx-77hg-w2wv (XSS, command injection, OAuth confused-deputy, MCP SDK transitive). MCP extra users must `pip install -e ".[mcp]" --upgrade`.
