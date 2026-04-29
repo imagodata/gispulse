@@ -98,7 +98,7 @@ def _build_test_index() -> dict[str, list[Path]]:
 
 
 def _build_doc_set() -> set[str]:
-    """capability names that appear in `docs-site/guide/capabilities.md`.
+    r"""capability names that appear in `docs-site/guide/capabilities.md`.
 
     Only counts a capability when it shows up as a Markdown table-cell
     leader (``| \`name\` |``) — this is the convention used by every row
