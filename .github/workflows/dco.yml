@@ -24,7 +24,7 @@ jobs:
               ;;
           esac
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         if: steps.bot_check.outputs.skip != 'true'
         with:
           fetch-depth: 0
