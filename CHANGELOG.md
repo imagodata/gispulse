@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **CI** — `test` job now installs `[dev,api,postgis,mcp,raster,network,classification,pointcloud,scheduling,sso]` extras instead of `[dev]` alone. Router and integration tests need `fastapi`, `psycopg2-binary`, etc. and were silently failing collection on `ModuleNotFoundError` (28+ test files affected). `capability-matrix-drift` job aligned to the same install set so the matrix it generates matches the one committed locally.
+- **CI** — `pip-audit` ignores `CVE-2026-3219` (pip 26.x tar/ZIP confusion, no fix release upstream as of 2026-04-28; re-evaluate quarterly).
+
+### Security
+- **Dependencies** — bump `fastmcp` from `>=0.1,<2.0` to `>=2.14.2,<4.0` to fix CVE-2025-62800 / CVE-2025-62801 / CVE-2025-69196 / CVE-2025-64340 / CVE-2026-27124 / GHSA-rcfx-77hg-w2wv (XSS, command injection, OAuth confused-deputy, MCP SDK transitive). MCP extra users must `pip install -e ".[mcp]" --upgrade`.
+- **Dev dependency** — bump `pytest` from `>=7.0,<9.0` to `>=9.0.3,<10.0` to fix CVE-2025-71176 (`/tmp/pytest-of-{user}` predictable path on UNIX).
+
 ## [1.3.0] - 2026-04-27
 
 ### Added
