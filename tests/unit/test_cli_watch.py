@@ -19,7 +19,12 @@ from gispulse.cli import app
 
 
 @pytest.fixture()
-def runner() -> CliRunner:
+def runner(monkeypatch: pytest.MonkeyPatch) -> CliRunner:
+    # Widen the rendered help panel so option names like ``--rules`` /
+    # ``--webhook`` aren't dropped from the output when CI runs under a
+    # narrow default terminal (GitHub Actions defaults truncate Rich
+    # panels mid-option around 80 cols).
+    monkeypatch.setenv("COLUMNS", "200")
     return CliRunner()
 
 

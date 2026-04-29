@@ -22,7 +22,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies (with extras needed by router/integration tests)
-        run: pip install -e ".[dev,api,postgis,mcp,raster,network,classification,pointcloud,scheduling,sso]"
+        run: pip install -e ".[dev,api,postgis,mcp,raster,network,classification,pointcloud,scheduling,sso,parquet]"
 
       - name: Lint with ruff
         run: ruff check .
@@ -57,7 +57,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install project with all capability-bearing extras
-        run: pip install -e ".[api,postgis,mcp,raster,network,classification,pointcloud,scheduling,sso]"
+        run: pip install -e ".[api,postgis,mcp,raster,network,classification,pointcloud,scheduling,sso,parquet]"
 
       - name: Verify capability coverage matrix is up to date
         run: python scripts/build_capability_matrix.py --check

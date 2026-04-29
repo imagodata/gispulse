@@ -212,6 +212,7 @@ def build_runtime(
     webhook_allowlist: Iterable[str] | None = None,
     poll_interval: float = 1.0,
     batch_limit: int = 200,
+    bulk_threshold: int = 0,
     dataset_id: str = "__cli__",
     sql_executor: Callable[..., Any] | None = None,
     webhook_client: Callable[[str, dict[str, Any]], None] | None = None,
@@ -358,6 +359,7 @@ def build_runtime(
         dataset_id=dataset_id,
         poll_interval=poll_interval,
         batch_limit=batch_limit,
+        bulk_threshold=bulk_threshold,
         triggers_provider=_triggers_provider,
         action_dispatcher=dispatcher,
     )
