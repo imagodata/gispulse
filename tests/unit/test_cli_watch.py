@@ -19,13 +19,18 @@ from gispulse.cli import app
 
 
 @pytest.fixture()
-def runner(monkeypatch: pytest.MonkeyPatch) -> CliRunner:
-    # Widen the rendered help panel so option names like ``--rules`` /
-    # ``--webhook`` aren't dropped from the output when CI runs under a
-    # narrow default terminal (GitHub Actions defaults truncate Rich
-    # panels mid-option around 80 cols).
-    monkeypatch.setenv("COLUMNS", "200")
+def runner() -> CliRunner:
     return CliRunner()
+
+
+# Wide terminal env passed to ``runner.invoke(..., env=WIDE_ENV)`` so Rich
+# renders the help panel without wrapping option names like ``--rules`` /
+# ``--webhook``. ``CliRunner`` redirects stdout/stderr to StringIO, which
+# Rich detects as non-TTY and falls back to a default 80-column width
+# regardless of the parent process ``COLUMNS`` env (so monkeypatch.setenv
+# was a no-op in CI). ``runner.invoke(env=...)`` is the supported
+# Click/Typer hook that actually reaches Rich's terminal-size probe.
+WIDE_ENV = {"COLUMNS": "200"}
 
 
 @pytest.fixture()
@@ -76,7 +81,7 @@ def valid_yaml(tmp_path: Path, tracked_gpkg: Path) -> Path:
 
 
 def test_watch_help_registers(runner: CliRunner) -> None:
-    res = runner.invoke(app, ["watch", "--help"])
+    res = runner.invoke(app, ["watch", "--help"], env=WIDE_ENV)
     assert res.exit_code == 0
     assert "Watch a GeoPackage" in res.output
     assert "--rules" in res.output

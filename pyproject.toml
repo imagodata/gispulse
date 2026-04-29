@@ -30,6 +30,7 @@ dependencies = [
     "duckdb>=1.0,<2.0",
     "pyogrio>=0.7,<1.0",
     "pyproj>=3.6,<4.0",
+    "pyarrow>=14,<22",
     "typer>=0.9,<1.0",
     "structlog>=24.0,<26.0",
     "pydantic>=2.0,<3.0",

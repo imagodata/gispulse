@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Packaging — `pyarrow` core runtime dependency** — declared `pyarrow>=14,<22` in base dependencies. Without it, `gispulse run --output result.parquet`, the GeoParquet writer (`persistence/geoparquet.py`), and any DuckDB pipeline that lands GeoParquet via `COPY ... TO ... (FORMAT 'parquet')` crashed at runtime with `ImportError: Missing optional dependency 'pyarrow.parquet'` (geopandas raises this from `_compat.py` regardless of the host having the binary). Surfaced by 28+ pytest collection errors in `tests/unit/test_geoparquet.py` and `tests/unit/test_s12_cloud_native.py` on the v1.3.1 baseline CI.
+- **Tests — `test_cli_watch.py` help-panel rendering** — the `runner` fixture set `COLUMNS=200` via `monkeypatch.setenv`, but `typer.testing.CliRunner` redirects stdout/stderr to `StringIO`, which Rich detects as non-TTY and falls back to a default 80-column width regardless of the parent process env. Required option names like `--rules` got wrapped mid-line and the substring assertion (`"--rules" in res.output`) failed in CI even though the option was registered correctly. Switch to `runner.invoke(..., env={"COLUMNS": "200"})` which Click forwards to the subprocess env Rich reads.
+
 ## [1.3.1] - 2026-04-29
 
 Hotfix release that unblocks the v1.3.0 distribution: `pipx install gispulse` now ships a working `triggers run` / `watch` (httpx was missing from base deps), the local Docker stack boots on community tier, the portal serves favicon/robots/manifest correctly, and CI is green again.
