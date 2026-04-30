@@ -13,6 +13,7 @@ from catalog.registry import register_provider
 
 # Géoplateforme WFS base for direct bbox queries
 _WFS_BASE = "https://data.geopf.fr/wfs"
+_APICARTO_BASE = "https://apicarto.ign.fr"
 
 _IGN_DATASETS: list[dict] = [
     {
@@ -120,6 +121,70 @@ _IGN_DATASETS: list[dict] = [
         "tags": ["occupation-du-sol", "artificialisation", "environnement"],
         "update_frequency": "pluriannuel",
     },
+    {
+        "id": "apicarto-nature-natura-habitat",
+        "name": "API Carto Nature — Natura 2000 habitats",
+        "description": "Zonages Natura 2000 directive habitats retournés en GeoJSON par géométrie.",
+        "source_url": f"{_APICARTO_BASE}/api/nature/natura-habitat",
+        "download_url": None,
+        "format": "geojson",
+        "license": "Licence Ouverte 2.0",
+        "tags": ["apicarto", "nature", "natura2000", "habitats", "environnement"],
+        "update_frequency": "service live",
+        "metadata": {
+            "endpoint_path": "/api/nature/natura-habitat",
+            "query_param": "geom",
+            "rest_base_url": _APICARTO_BASE,
+        },
+    },
+    {
+        "id": "apicarto-nature-natura-oiseaux",
+        "name": "API Carto Nature — Natura 2000 oiseaux",
+        "description": "Zonages Natura 2000 directive oiseaux retournés en GeoJSON par géométrie.",
+        "source_url": f"{_APICARTO_BASE}/api/nature/natura-oiseaux",
+        "download_url": None,
+        "format": "geojson",
+        "license": "Licence Ouverte 2.0",
+        "tags": ["apicarto", "nature", "natura2000", "oiseaux", "environnement"],
+        "update_frequency": "service live",
+        "metadata": {
+            "endpoint_path": "/api/nature/natura-oiseaux",
+            "query_param": "geom",
+            "rest_base_url": _APICARTO_BASE,
+        },
+    },
+    {
+        "id": "apicarto-nature-znieff1",
+        "name": "API Carto Nature — ZNIEFF type 1",
+        "description": "Zonages ZNIEFF type 1 retournés en GeoJSON par géométrie.",
+        "source_url": f"{_APICARTO_BASE}/api/nature/znieff1",
+        "download_url": None,
+        "format": "geojson",
+        "license": "Licence Ouverte 2.0",
+        "tags": ["apicarto", "nature", "znieff", "znieff1", "environnement"],
+        "update_frequency": "service live",
+        "metadata": {
+            "endpoint_path": "/api/nature/znieff1",
+            "query_param": "geom",
+            "rest_base_url": _APICARTO_BASE,
+        },
+    },
+    {
+        "id": "apicarto-nature-znieff2",
+        "name": "API Carto Nature — ZNIEFF type 2",
+        "description": "Zonages ZNIEFF type 2 retournés en GeoJSON par géométrie.",
+        "source_url": f"{_APICARTO_BASE}/api/nature/znieff2",
+        "download_url": None,
+        "format": "geojson",
+        "license": "Licence Ouverte 2.0",
+        "tags": ["apicarto", "nature", "znieff", "znieff2", "environnement"],
+        "update_frequency": "service live",
+        "metadata": {
+            "endpoint_path": "/api/nature/znieff2",
+            "query_param": "geom",
+            "rest_base_url": _APICARTO_BASE,
+        },
+    },
 ]
 
 
@@ -132,7 +197,7 @@ class IGNOpenDataProvider(CatalogProvider):
         self._entries: dict[str, OpenDataEntry] = {}
         for item in _IGN_DATASETS:
             entry_id = f"opendata:ign:{item['id']}"
-            metadata: dict = {}
+            metadata: dict = dict(item.get("metadata", {}))
             if item.get("wfs_flux_id"):
                 metadata["wfs_flux_id"] = item["wfs_flux_id"]
             if item.get("wfs_layer"):

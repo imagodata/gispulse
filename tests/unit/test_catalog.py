@@ -20,6 +20,12 @@ GPU_FLUX_ENTRIES = {
 }
 GPU_FLUX_IDS = set(GPU_FLUX_ENTRIES)
 GPU_WFS_SERVICE_URL = "https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0"
+APICARTO_NATURE_ENTRIES = {
+    "opendata:ign:apicarto-nature-natura-habitat": "/api/nature/natura-habitat",
+    "opendata:ign:apicarto-nature-natura-oiseaux": "/api/nature/natura-oiseaux",
+    "opendata:ign:apicarto-nature-znieff1": "/api/nature/znieff1",
+    "opendata:ign:apicarto-nature-znieff2": "/api/nature/znieff2",
+}
 
 
 class TestCatalogRegistry:
@@ -78,6 +84,17 @@ class TestCatalogRegistry:
             assert entry.service_url == GPU_WFS_SERVICE_URL
             assert entry.layer_name == expected["layer_name"]
             assert set(entry.tags) == expected["tags"]
+
+    def test_apicarto_nature_entries_resolve_from_catalog(self):
+        for entry_id, endpoint_path in APICARTO_NATURE_ENTRIES.items():
+            entry = registry.get_entry(entry_id)
+
+            assert entry is not None, entry_id
+            assert entry.provider == "ign"
+            assert entry.source_url == f"https://apicarto.ign.fr{endpoint_path}"
+            assert entry.format == "geojson"
+            assert entry.metadata["endpoint_path"] == endpoint_path
+            assert entry.metadata["query_param"] == "geom"
 
     def test_search_flux_gpu_returns_gpu_entries(self):
         results = registry.search(domain=CatalogDomain.FLUX, search="gpu")
