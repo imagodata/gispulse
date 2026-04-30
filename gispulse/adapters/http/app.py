@@ -30,6 +30,7 @@ from gispulse.adapters.http.event_hub import get_event_hub
 from gispulse.adapters.http.routers.capabilities_router import router as capabilities_router
 from gispulse.adapters.http.routers.catalog_router import router as catalog_router
 from gispulse.adapters.http.routers.datasets_router import router as datasets_router
+from gispulse.adapters.http.routers.examples_router import router as examples_router
 from gispulse.adapters.http.routers.filter_router import router as filter_router
 from gispulse.adapters.http.routers.esb_router import router as esb_router
 from gispulse.adapters.http.routers.jobs_router import router as jobs_router, recover_stale_jobs
@@ -695,6 +696,13 @@ def create_app(
         log.info("auth_router_mounted", oidc_configured=app.state.oidc_provider is not None)
     except ImportError:
         log.debug("auth_router_not_available")
+
+    # Mode 2 "Try it" router (v1.5.x) — read-only, no auth, both modes.
+    # Exposes a fixed registry of bundled GPKG datasets for the public
+    # portal demo (#47/#48/#49). Hardened by ReadOnlyMiddleware which
+    # only whitelists the dryrun POST.
+    app.include_router(examples_router)
+    log.info("examples_router_mounted")
 
     if is_portal:
         # Portal mode: no auth on routers
