@@ -15,7 +15,7 @@ jobs:
         run: |
           actor='${{ github.event.pull_request.user.login }}'
           case "$actor" in
-            dependabot[bot]|github-actions[bot]|renovate[bot])
+            "dependabot[bot]"|"github-actions[bot]"|"renovate[bot]")
               echo "Skipping DCO for trusted bot: $actor"
               echo "skip=true" >> "$GITHUB_OUTPUT"
               ;;
