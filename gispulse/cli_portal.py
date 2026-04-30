@@ -19,7 +19,6 @@ Issue #51 — sprint v1.5.1.
 
 from __future__ import annotations
 
-import sys
 import threading
 import time
 import urllib.error
