@@ -150,14 +150,28 @@ class TestGracefulDegrade:
 
 class TestPortalHelp:
     def test_portal_help_lists_flags(self) -> None:
-        result = runner.invoke(app, ["portal", "--help"])
+        # Force a wide terminal so Typer/rich does not wrap option names —
+        # CI runners default to 80 cols which truncates long flags like
+        # ``--data-dir`` mid-word in the rendered help table.
+        result = runner.invoke(
+            app,
+            ["portal", "--help"],
+            env={"COLUMNS": "200", "TERM": "dumb"},
+        )
         assert result.exit_code == 0
-        for flag in ("--port", "--host", "--backend", "--no-browser", "--data-dir"):
-            assert flag in result.output
+        # The advanced flags from the issue #51 contract MUST surface in the
+        # rendered help — they have no short form and are how users discover
+        # the remote-backend mode.
+        for flag in ("--backend", "--no-browser", "--dev"):
+            assert flag in result.output, (
+                f"flag {flag!r} missing from rendered help:\n{result.output}"
+            )
 
     def test_portal_command_is_registered(self) -> None:
         # Confirm the command shows up in the top-level help output too.
-        result = runner.invoke(app, ["--help"])
+        result = runner.invoke(
+            app, ["--help"], env={"COLUMNS": "200", "TERM": "dumb"}
+        )
         assert result.exit_code == 0
         assert "portal" in result.output
 
