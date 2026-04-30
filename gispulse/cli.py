@@ -633,7 +633,7 @@ def _doctor_render(results: list[tuple[str, str, str]]) -> None:
 def engine(
     port: int = typer.Option(0, "--port", "-p", help="Port to listen on (0 = auto-detect free port)."),
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to."),
-    engine_backend: str = typer.Option("duckdb", "--engine", "-e", help="Spatial engine: 'duckdb' (local) or 'postgis'."),
+    engine_backend: str = typer.Option("duckdb", "--engine", "-e", help="Spatial engine: 'duckdb' (local), 'postgis' (server, requires GISPULSE_DSN), or 'hybrid' (Pro)."),
     data_dir: str = typer.Option("~/.gispulse/data", "--data-dir", "-d", help="Data directory."),
     no_browser: bool = typer.Option(False, "--no-browser", help="Don't open browser on start."),
 ) -> None:

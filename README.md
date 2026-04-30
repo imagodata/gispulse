@@ -98,6 +98,20 @@ gispulse serve parcels.gpkg
 gispulse doctor
 ```
 
+### Run the portal locally
+
+```bash
+# Install the CLI plus the bundled SPA workbench
+pipx install gispulse-portal
+
+# Start the local engine and open the browser at localhost:8001/portal
+gispulse portal
+```
+
+For headless runs (no SPA), use `gispulse engine` instead. See:
+[Running the Portal locally](https://imagodata.github.io/gispulse/en/guide/portal-local) ·
+[Running the engine](https://imagodata.github.io/gispulse/en/guide/engine).
+
 ### Docker (development)
 
 ```bash

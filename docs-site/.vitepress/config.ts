@@ -107,6 +107,8 @@ const frSidebar = {
       text: 'Guide',
       items: [
         { text: 'CLI — Référence', link: '/guide/cli' },
+        { text: 'Lancer le portail localement', link: '/guide/portal-local' },
+        { text: 'Lancer le moteur', link: '/guide/engine' },
         { text: 'Écrire des règles', link: '/guide/rules' },
         { text: 'Capabilities', link: '/guide/capabilities' },
         { text: 'Matrice de couverture', link: '/guide/coverage' },
@@ -225,6 +227,8 @@ const enSidebar = {
       text: 'Guide',
       items: [
         { text: 'CLI Reference', link: '/en/guide/cli' },
+        { text: 'Running the Portal locally', link: '/en/guide/portal-local' },
+        { text: 'Running the engine', link: '/en/guide/engine' },
         { text: 'Writing Rules', link: '/en/guide/rules' },
         { text: 'Capabilities', link: '/en/guide/capabilities' },
         { text: 'Coverage matrix', link: '/en/guide/coverage' },
