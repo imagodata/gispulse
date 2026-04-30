@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-04-30
+
+QML-grade styling release: load, classify server-side, edit, and export QGIS-compatible styles end-to-end. The change-log runtime keeps doing what it did since v1.3 — fire triggers on any DML coming from QGIS save, ogr2ogr, ArcGIS Pro, raw sqlite3.
+
+### Added
+- **`POST /datasets/{id}/layers/{layer}/breaks`** — server-side classification (quantile, equal-interval, Jenks, std-dev, pretty) wrapping `ClassifyCapability`. Same algorithm available via CLI and portal.
+- **`PUT /datasets/{id}/styles`** — persist `LayerStyleDef` to the GPKG `layer_styles` table.
+- **`POST /datasets/{id}/styles/import`** — multipart `.qml` upload, parsed via `persistence/style_converter.py` and persisted.
+- **QML roundtrip integration suite** — 5 representative fixtures (single, categorized, graduated, rule-based, labels) tested in CI to guard against lossy export/import cycles.
+
+### Changed
+- Style classification moves to server-side by default. Client still falls back to local computation for offline scenarios but the canonical path goes through `/breaks` so behavior is identical regardless of caller.
+- `persistence/style_converter.py` (~608 LOC) is now the source of truth for QML ↔ `LayerStyleDef`. GeoStyler bridge dropped (avoid vendor lock + Ant Design v4 dep).
+
+### Notes
+- The portal SPA continues to deploy via GitHub Pages on every push to `main` (no PyPI wheel for the portal in this release).
+- The first PyPI publish of `gispulse-portal` is planned for v1.5.1 alongside the Mode 2 portail sprint (bundled-SPA wheel + `gispulse portal` CLI command for a local workbench).
+
 ## [1.3.1] - 2026-04-29
 
 Hotfix release that unblocks the v1.3.0 distribution: `pipx install gispulse` now ships a working `triggers run` / `watch` (httpx + pyarrow were missing from base deps, `--bulk-threshold` crashed at runtime), the local Docker stack boots on community tier, the portal serves favicon/robots/manifest correctly, and CI is green again.
