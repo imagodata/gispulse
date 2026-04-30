@@ -306,7 +306,7 @@ gispulse serve output/result.gpkg --port 9000
 
 ## `gispulse portal`
 
-Launches the GISPulse Portal — visual pipeline editor and dataset manager.
+Launches the GISPulse Portal — a visual workbench (node canvas, capability registry, dataset manager) served by the local engine. Requires the optional `gispulse-portal` package. Full reference: [Running the Portal locally](/en/guide/portal-local).
 
 ```bash
 gispulse portal [OPTIONS]
@@ -316,16 +316,20 @@ gispulse portal [OPTIONS]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--port`, `-p` | `8001` | Listening port |
-| `--host` | `0.0.0.0` | Host (0.0.0.0 = LAN accessible) |
-| `--data-dir`, `-d` | `~/.gispulse/data` | Directory for uploaded datasets |
-| `--dev` | `false` | Dev mode: API only |
+| `--port`, `-p` | `8001` | Listening port (local mode). |
+| `--host` | `127.0.0.1` | Bind host (local mode). |
+| `--data-dir`, `-d` | `~/.gispulse/data` | Directory for uploaded datasets. |
+| `--backend URL` | — | Remote mode: open the GH-Pages portal pointed at a remote engine. |
+| `--no-browser` | `false` | Don't open the browser. |
+| `--dev` | `false` | Allow falling back to the local checkout's `portal/dist/` (contributor workflow). |
 
 ```bash
-# Standard startup
+# Local (default)
 gispulse portal
+# GISPulse Portal at http://127.0.0.1:8001/portal/
 
-# GISPulse Portal at http://127.0.0.1:8001
+# Remote (no local engine)
+gispulse portal --backend=https://api.example.com
 ```
 
 ---
@@ -368,18 +372,27 @@ gispulse update --force
 
 ## `gispulse engine`
 
-Launches the full GISPulse stack (API + Portal + Viewer) as a single process — convenient for local or single-server deployments.
+Launches the GISPulse engine in headless mode (REST API + WebSocket, **no SPA**). Used by the Tauri sidecar, server deployments and third-party integrations. For a local visual workbench, see [`gispulse portal`](#gispulse-portal) and [Running the Portal locally](/en/guide/portal-local).
 
 ```bash
-gispulse engine --host 0.0.0.0 --port 8000
+gispulse engine [OPTIONS]
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--host` | `127.0.0.1` | Bind address |
-| `--port` | `8000` | HTTP port |
-| `--mode` | `portal` | `portal` (visual editor) or `api` (headless) |
-| `--reload` | off | Enable uvicorn auto-reload (dev) |
+| `--port`, `-p` | `0` (auto) | Listening port (`0` = auto-detect free port for Tauri). |
+| `--host` | `127.0.0.1` | Bind host. |
+| `--engine`, `-e` | `duckdb` | Spatial backend (`duckdb`, `postgis`, `hybrid`). |
+| `--data-dir`, `-d` | `~/.gispulse/data` | Datasets directory. |
+| `--no-browser` | `false` | Don't open the browser. |
+
+Emits a startup JSON line on stdout for the Tauri sidecar:
+
+```
+GISPULSE_READY:{"port": 8001, "host": "127.0.0.1", "engine": "duckdb", "pid": 12345}
+```
+
+Full reference: [Running the engine](/en/guide/engine).
 
 ---
 
