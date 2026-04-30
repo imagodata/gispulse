@@ -360,34 +360,8 @@ def serve(
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
-@app.command()
-def portal(
-    port: int = typer.Option(8001, "--port", "-p", help="Port to listen on."),
-    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind to (0.0.0.0 = LAN accessible)."),
-    data_dir: str = typer.Option("~/.gispulse/data", "--data-dir", "-d", help="Directory for uploaded datasets."),
-    dev: bool = typer.Option(False, "--dev", help="Dev mode: API only, no static files (use with Vite dev server)."),
-) -> None:
-    """Launch the GISPulse Portal — visual pipeline editor and dataset manager."""
-    import webbrowser
-
-    from gispulse.adapters.http.portal_app import create_portal_app, _PORTAL_DIST
-
-    static_dir = None if dev else _PORTAL_DIST
-    portal_app = create_portal_app(data_dir=data_dir, static_dir=static_dir)
-
-    if dev:
-        typer.echo(f"Portal API at http://{host}:{port}/api/portal/datasets")
-        typer.echo("Run 'cd portal && npm run dev' for the frontend.")
-    elif not _PORTAL_DIST.exists():
-        typer.echo("Warning: portal/dist/ not found. Run 'cd portal && npm run build' first.")
-        typer.echo(f"API-only at http://{host}:{port}/api/portal/datasets")
-    else:
-        url = f"http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"
-        typer.echo(f"GISPulse Portal at {url}")
-        webbrowser.open(url)
-
-    import uvicorn
-    uvicorn.run(portal_app, host=host, port=port, log_level="info")
+# `gispulse portal` — see gispulse/cli_portal.py for the implementation.
+# Registered after the Typer app is fully built, at the bottom of the file.
 
 
 @app.command()
@@ -1549,6 +1523,15 @@ app.add_typer(track_app, name="track")
 from gispulse.cli_watch import cmd_watch  # noqa: E402
 
 app.command(name="watch")(cmd_watch)
+
+
+# ---------------------------------------------------------------------------
+# portal — bundled SPA workbench (v1.5.1 #51)
+# ---------------------------------------------------------------------------
+
+from gispulse.cli_portal import cmd_portal  # noqa: E402
+
+app.command(name="portal")(cmd_portal)
 
 
 def main() -> None:
