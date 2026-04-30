@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-04-30
+
+Mode 2 portail Community: GISPulse now ships a local visual workbench. The portal you saw on `gispulse.dev` is now a Python package — `pip install gispulse-portal` adds it to your CLI install, and `gispulse portal` opens the bundled SPA on `http://localhost:8001/portal` with same-origin engine.
+
+### Added
+- **`gispulse portal` CLI command** — mounts the bundled `gispulse-portal` SPA on `/portal` via FastAPI `StaticFiles`, starts the engine on `localhost:8001`, opens the browser. `--port`, `--no-browser`, `--backend=URL`, `--dev` flags. Graceful-degrade with `pip install gispulse-portal` hint when the package isn't installed.
+- **`/api/examples/*` mini-backend** — read-only registry of bundled GPKG fixtures (`muret-parcels`, `muret-flood-zones`, `toulouse-isochrones`, `bordeaux-rpg`) for the public "Try it" demo. Endpoints: registry, metadata, TileJSON preview, MVT tiles, dryrun trigger evaluation, health. Hard-capped (5s timeout, 1000 DML records, 50 triggers, 50 MB tile cache); `DryRunDispatcher` captures actions but never executes side-effects.
+- **Docs — "Running the portal locally" + "Running the engine"** guides (FR + EN) covering the full local workbench flow.
+- **CLI ↔ Portal symmetry matrix** (`docs-site/guide/symmetry.md`) — 82 capabilities mapped row-by-row, 31 ⚠️ asymmetries logged inline for v1.6+ triage.
+
+### Companion release
+- **`gispulse-portal 1.5.1` ships on PyPI** for the first time. The wheel bundles the built VitePress SPA so `gispulse portal` can serve it same-origin on localhost (no mixed-content workaround needed). `pip install gispulse-portal` installs both `gispulse` and `gispulse-portal`.
+
+### Fixed
+- `cli.py` `engine -e/--engine` help string now mentions `hybrid` alongside `duckdb` and `postgis`.
+
+### Notes
+- Public demo backend (`demo.gispulse.dev/api/examples/*`) deployment is tracked separately in #50; the endpoints are available in the wheel and ready to deploy.
+- The `gispulse-portal` SPA continues to deploy via GitHub Pages on every push to `main` (independent of PyPI).
+
 ## [1.5.0] - 2026-04-30
 
 QML-grade styling release: load, classify server-side, edit, and export QGIS-compatible styles end-to-end. The change-log runtime keeps doing what it did since v1.3 — fire triggers on any DML coming from QGIS save, ogr2ogr, ArcGIS Pro, raw sqlite3.
