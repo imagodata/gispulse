@@ -1,4 +1,4 @@
-.PHONY: install test test-unit test-integration lint format clean docs build-sidecar build-portal build-viewer build-desktop docs-data docs-build docs-dev
+.PHONY: install test test-unit test-integration lint format clean docs build-sidecar build-portal build-viewer build-desktop docs-data docs-build docs-dev plugin-zip plugin-zip-check
 
 install:
 	pip install -e ".[dev]"
@@ -43,6 +43,12 @@ docs-build: docs-data
 	python scripts/smoke_test_docs.py
 
 # ── Build targets ──────────────────────────────────────────────────
+
+plugin-zip:
+	python scripts/build_qgis_plugin_zip.py
+
+plugin-zip-check:
+	python scripts/build_qgis_plugin_zip.py --check
 
 build-portal:
 	cd portal && npm ci && npm run build
