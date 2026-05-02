@@ -8,9 +8,13 @@ version = "0.1.0"
 description = "Example GISPulse capability plugin"
 requires-python = ">=3.10"
 dependencies = [
+    "fastapi>=0.100,<1.0",
     "geopandas>=0.14",
 ]
 
-# This is the key: register the entry-point so GISPulse discovers the plugin
+# Register entry-points so GISPulse discovers the plugin.
 [project.entry-points."gispulse.capabilities"]
 example = "gispulse_cap_example:register"
+
+[project.entry-points."gispulse.routers"]
+example = "gispulse_cap_example.routers:ExampleRouterFactory"
