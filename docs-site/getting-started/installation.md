@@ -11,6 +11,23 @@ GISPulse se déploie de quatre façons selon votre contexte. Choisissez le mode 
 
 Requiert Python 3.10+ et GDAL installé sur le système.
 
+::: warning Linux : installez `mod_spatialite` pour les GeoPackages trackés
+GISPulse installe des triggers SQLite qui appellent des fonctions SpatiaLite (`ST_IsEmpty`, etc.) pour détecter les changements de géométrie sur les couches trackées. Sur Linux, l'extension chargeable `mod_spatialite.so` n'est **pas** incluse avec `libspatialite` et doit être installée séparément, sinon toute opération DML sur une couche trackée échoue avec `sqlite3.OperationalError: no such function: ST_IsEmpty`.
+
+```bash
+# Debian / Ubuntu
+sudo apt install libsqlite3-mod-spatialite
+
+# Fedora / RHEL
+sudo dnf install libspatialite-devel
+
+# Alpine
+sudo apk add libspatialite-dev
+```
+
+macOS Homebrew (`spatialite-tools`), QGIS, FME et OSGeo4W embarquent `mod_spatialite` — aucune étape supplémentaire. `gispulse doctor` vérifie que l'extension est chargeable.
+:::
+
 ```bash
 # Community (gratuit) — DuckDB + CLI
 pip install gispulse

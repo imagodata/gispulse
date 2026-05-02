@@ -593,6 +593,33 @@ def doctor() -> None:
         except ImportError:
             results.append(("\u26a0", display_name, "not installed (optional)"))
 
+    # --- 7b. mod_spatialite (Linux loadable extension) ---
+    # Tracked GPKGs install SQLite triggers calling SpatiaLite functions
+    # (ST_IsEmpty, ...). On Linux, libspatialite ships without the loadable
+    # extension by default → DML on tracked layers crashes with
+    # "no such function: ST_IsEmpty". Verify the extension is loadable.
+    if platform.system() == "Linux":
+        import sqlite3 as _sqlite3
+
+        _conn = _sqlite3.connect(":memory:")
+        try:
+            _conn.enable_load_extension(True)
+            try:
+                _conn.load_extension("mod_spatialite")
+                results.append(("✓", "mod_spatialite", "loadable"))
+            except _sqlite3.OperationalError:
+                # Non-critical: only required for SQL editing of tracked GPKGs.
+                results.append((
+                    "⚠",
+                    "mod_spatialite",
+                    "not loadable — apt install libsqlite3-mod-spatialite (needed for tracked GPKG DML)",
+                ))
+        except (AttributeError, _sqlite3.NotSupportedError):
+            # Python compiled without enable_load_extension support — rare
+            results.append(("⚠", "mod_spatialite", "sqlite3 built without load_extension support"))
+        finally:
+            _conn.close()
+
     # --- 8. OIDC / Session secret ---
     from core.config import settings as _cfg2
     oidc_issuer = _cfg2.oidc.issuer.strip()
