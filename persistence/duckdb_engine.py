@@ -38,6 +38,7 @@ class DuckDBSession(SpatialEngine):
     def __init__(self, database: str = ":memory:") -> None:
         self.database = database
         self._conn: duckdb.DuckDBPyConnection | None = None
+        self._table_crs: dict[str, Any] = {}
 
     # -- context manager ---------------------------------------------------
 
@@ -173,12 +174,17 @@ class DuckDBSession(SpatialEngine):
         df = pd.DataFrame(gdf.drop(columns=[geom_col]))
         df["__wkb"] = to_wkb(gdf.geometry.values, include_srid=False)
         self.conn.register(name, df)
+        # Track CRS per registered table so sql() can re-attach it on output
+        # (WKB serialisation strips SRID; without this, the engine would
+        # silently emit CRS-less GeoDataFrames).
+        self._table_crs[name] = gdf.crs
         log.debug("gdf_registered", table=name, features=len(gdf))
 
     def sql(self, query: str) -> gpd.GeoDataFrame:
         """Execute a SQL query and return result as GeoDataFrame."""
         df = self.conn.execute(query).fetchdf()
         geom_col = _find_geom_column(df)
+        crs = self._infer_result_crs(query)
         if geom_col is not None:
             if geom_col == "__wkb":
                 # Direct WKB decode (raw bytes/bytearray from register_gdf)
@@ -188,7 +194,7 @@ class DuckDBSession(SpatialEngine):
                     for b in df["__wkb"]
                 ]
                 df = df.drop(columns=["__wkb"], errors="ignore")
-                return gpd.GeoDataFrame(df, geometry=geometries)
+                return gpd.GeoDataFrame(df, geometry=geometries, crs=crs)
 
             wkb_query = query.rstrip().rstrip(";")
             wrapped = (
@@ -202,11 +208,39 @@ class DuckDBSession(SpatialEngine):
                     for b in df2["__wkb"]
                 ]
                 df2 = df2.drop(columns=["__wkb", geom_col], errors="ignore")
-                return gpd.GeoDataFrame(df2, geometry=geometries)
+                return gpd.GeoDataFrame(df2, geometry=geometries, crs=crs)
             except Exception as exc:
                 log.warning("duckdb_sql_wkb_fallback", error=str(exc), query=query[:200])
                 return gpd.GeoDataFrame(df)
         return gpd.GeoDataFrame(df)
+
+    def _infer_result_crs(self, query: str) -> Any | None:
+        """Pick a CRS for a SQL result by matching registered tables in *query*.
+
+        WKB serialisation in :meth:`register_gdf` drops the SRID, so the only
+        way to re-attach a CRS to the result is to remember the CRS of each
+        registered input. If the query references multiple tables with
+        diverging CRS, we return ``None`` rather than guess.
+        """
+        if not self._table_crs:
+            return None
+        import re
+        referenced: list[Any] = []
+        seen: set[str] = set()
+        for name, table_crs in self._table_crs.items():
+            if name in seen:
+                continue
+            pattern = rf"(?<![\w.]){re.escape(name)}(?![\w.])"
+            if re.search(pattern, query):
+                referenced.append(table_crs)
+                seen.add(name)
+        if not referenced:
+            return None
+        first = referenced[0]
+        for other in referenced[1:]:
+            if str(other) != str(first):
+                return None
+        return first
 
     # ------------------------------------------------------------------
     # SpatialEngine interface

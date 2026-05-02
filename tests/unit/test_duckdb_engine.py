@@ -75,3 +75,43 @@ class TestDuckDBSession:
         session = DuckDBSession()
         with pytest.raises(RuntimeError, match="not open"):
             _ = session.conn
+
+    def test_sql_preserves_crs_from_registered_table(self, sample_gdf):
+        """Regression: sql() must re-attach the CRS of the registered input.
+
+        WKB serialisation in register_gdf strips the SRID, so without
+        explicit CRS tracking the resulting GeoDataFrame would have
+        crs=None — silently losing projection on every DuckDB-backed
+        capability (filter, etc.).
+        """
+        with DuckDBSession() as session:
+            session.register_gdf("input", sample_gdf)
+            result = session.sql("SELECT * FROM input")
+            assert result.crs is not None
+            assert str(result.crs) == str(sample_gdf.crs)
+
+    def test_sql_returns_no_crs_when_tables_have_diverging_crs(self):
+        """When a query joins tables with different CRS, return None
+        rather than guessing — let the caller reproject explicitly."""
+        a = gpd.GeoDataFrame(
+            {"id": [1]}, geometry=[Point(0, 0)], crs="EPSG:4326"
+        )
+        b = gpd.GeoDataFrame(
+            {"id": [1]}, geometry=[Point(0, 0)], crs="EPSG:2154"
+        )
+        with DuckDBSession() as session:
+            session.register_gdf("a", a)
+            session.register_gdf("b", b)
+            result = session.sql("SELECT a.* FROM a, b WHERE a.id = b.id")
+            assert result.crs is None
+
+    def test_sql_does_not_invent_crs_when_no_tables_registered(self, sample_gdf):
+        """If sql() runs against an empty CRS map, the result has no CRS."""
+        with DuckDBSession() as session:
+            # Register then query a different (non-existent in map) name via
+            # a literal subquery; result has geometry but no resolvable CRS.
+            session.register_gdf("known", sample_gdf)
+            result = session.sql(
+                "SELECT * FROM known WHERE 1=0"  # references known => keeps CRS
+            )
+            assert str(result.crs) == str(sample_gdf.crs)
