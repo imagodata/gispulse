@@ -9,6 +9,7 @@ class GISPulsePlugin:
         self.plugin_dir = Path(__file__).resolve().parent
         self.actions: list = []
         self.menu = "&GISPulse"
+        self._dock = None
 
     def initGui(self) -> None:
         from qgis.PyQt.QtGui import QIcon
@@ -25,7 +26,16 @@ class GISPulsePlugin:
         self.iface.addPluginToMenu(self.menu, check_action)
         self.actions.append(check_action)
 
+        panel_action = QAction(icon, "Show panel", self.iface.mainWindow())
+        panel_action.triggered.connect(self._show_panel)
+        self.iface.addPluginToMenu(self.menu, panel_action)
+        self.actions.append(panel_action)
+
     def unload(self) -> None:
+        if self._dock is not None:
+            self.iface.removeDockWidget(self._dock)
+            self._dock.deleteLater()
+            self._dock = None
         for action in self.actions:
             self.iface.removePluginMenu(self.menu, action)
         self.actions.clear()
@@ -57,3 +67,14 @@ class GISPulsePlugin:
             )
             return
         show_install_dialog(self.iface.mainWindow(), result)
+
+    def _show_panel(self) -> None:
+        from qgis.PyQt.QtCore import Qt
+
+        from .ui.dock_widget import build_dock_widget
+
+        if self._dock is None:
+            self._dock = build_dock_widget(self.iface.mainWindow())
+            self.iface.addDockWidget(Qt.RightDockWidgetArea, self._dock)
+        self._dock.show()
+        self._dock.raise_()
