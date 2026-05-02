@@ -31,6 +31,7 @@ from gispulse.adapters.http.event_hub import get_event_hub
 from gispulse.adapters.http.routers.capabilities_router import router as capabilities_router
 from gispulse.adapters.http.routers.catalog_router import router as catalog_router
 from gispulse.adapters.http.routers.datasets_router import router as datasets_router
+from gispulse.adapters.http.routers.examples_router import router as examples_router
 from gispulse.adapters.http.routers.filter_router import router as filter_router
 from gispulse.adapters.http.routers.esb_router import router as esb_router
 from gispulse.adapters.http.routers.jobs_router import router as jobs_router, recover_stale_jobs
@@ -718,14 +719,23 @@ def create_app(
     # ------------------------------------------------------------------ Routers
     protected = {"dependencies": [Depends(validate_api_key)]}
 
-    # Auth router (SSO endpoints — enterprise plugin, requires OIDC provider)
-    if app.state.oidc_provider is not None:
-        try:
-            from gispulse.adapters.http.routers.auth_router import router as auth_router
-            app.include_router(auth_router)
-            log.info("auth_router_mounted")
-        except ImportError:
-            log.debug("auth_router_not_available", msg="gispulse-enterprise not installed")
+    # Auth router — always mounted so the portal UI can call /auth/providers
+    # and /auth/me without 404. Engine ships OSS stubs (empty providers, 401
+    # on /me); the gispulse-enterprise plugin overrides with full OIDC SSO
+    # endpoints when installed and an OIDC provider is configured.
+    try:
+        from gispulse.adapters.http.routers.auth_router import router as auth_router
+        app.include_router(auth_router)
+        log.info("auth_router_mounted", oidc_configured=app.state.oidc_provider is not None)
+    except ImportError:
+        log.debug("auth_router_not_available")
+
+    # Mode 2 "Try it" router (v1.5.x) — read-only, no auth, both modes.
+    # Exposes a fixed registry of bundled GPKG datasets for the public
+    # portal demo (#47/#48/#49). Hardened by ReadOnlyMiddleware which
+    # only whitelists the dryrun POST.
+    app.include_router(examples_router)
+    log.info("examples_router_mounted")
 
     if is_portal:
         # Portal mode: no auth on routers
@@ -916,6 +926,25 @@ def create_app(
 
         @app.get("/{path:path}", include_in_schema=False)
         async def spa_fallback_full(request: Request, path: str):
+            # Try a static file at the dist root first (favicon.svg, icons.svg,
+            # robots.txt, etc. — anything Vite emits outside /assets/). Path
+            # traversal is blocked by the resolved-relative-to check.
+            if path:
+                candidate = _PORTAL_DIST / path
+                try:
+                    resolved = candidate.resolve()
+                    dist_root = _PORTAL_DIST.resolve()
+                    if resolved.is_relative_to(dist_root) and resolved.is_file():
+                        import mimetypes
+                        from fastapi.responses import Response
+                        mime, _ = mimetypes.guess_type(str(resolved))
+                        return Response(
+                            resolved.read_bytes(),
+                            media_type=mime or "application/octet-stream",
+                        )
+                except (OSError, ValueError):
+                    pass
+
             # Match the first path segment so deep-links like /explorer/foo/bar
             # also fall back to the SPA index.
             first_segment = path.lstrip("/").split("/", 1)[0]
