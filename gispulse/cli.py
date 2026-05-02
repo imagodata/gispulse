@@ -33,6 +33,25 @@ app = typer.Typer(
 )
 
 
+def _version_callback(value: bool) -> None:
+    if not value:
+        return
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as pkg_version
+
+    try:
+        v = pkg_version("gispulse")
+    except PackageNotFoundError:
+        v = "unknown"
+    typer.echo(f"gispulse {v}")
+    try:
+        ent = pkg_version("gispulse-enterprise")
+        typer.echo(f"gispulse-enterprise {ent}")
+    except PackageNotFoundError:
+        pass
+    raise typer.Exit()
+
+
 @app.command()
 def init(
     directory: Path = typer.Argument(
@@ -573,6 +592,33 @@ def doctor() -> None:
             results.append(("\u2713", display_name, f"v{ver}"))
         except ImportError:
             results.append(("\u26a0", display_name, "not installed (optional)"))
+
+    # --- 7b. mod_spatialite (Linux loadable extension) ---
+    # Tracked GPKGs install SQLite triggers calling SpatiaLite functions
+    # (ST_IsEmpty, ...). On Linux, libspatialite ships without the loadable
+    # extension by default → DML on tracked layers crashes with
+    # "no such function: ST_IsEmpty". Verify the extension is loadable.
+    if platform.system() == "Linux":
+        import sqlite3 as _sqlite3
+
+        _conn = _sqlite3.connect(":memory:")
+        try:
+            _conn.enable_load_extension(True)
+            try:
+                _conn.load_extension("mod_spatialite")
+                results.append(("✓", "mod_spatialite", "loadable"))
+            except _sqlite3.OperationalError:
+                # Non-critical: only required for SQL editing of tracked GPKGs.
+                results.append((
+                    "⚠",
+                    "mod_spatialite",
+                    "not loadable — apt install libsqlite3-mod-spatialite (needed for tracked GPKG DML)",
+                ))
+        except (AttributeError, _sqlite3.NotSupportedError):
+            # Python compiled without enable_load_extension support — rare
+            results.append(("⚠", "mod_spatialite", "sqlite3 built without load_extension support"))
+        finally:
+            _conn.close()
 
     # --- 8. OIDC / Session secret ---
     from core.config import settings as _cfg2
@@ -1144,7 +1190,17 @@ def _startup_update_check() -> None:
 
 # Register the startup check as a Typer callback
 @app.callback(invoke_without_command=True)
-def _cli_callback(ctx: typer.Context) -> None:
+def _cli_callback(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the installed gispulse version (and gispulse-enterprise if present) and exit.",
+    ),
+) -> None:
     """GISPulse CLI entrypoint with startup update check."""
     if ctx.invoked_subcommand is None and ctx.info_name == "gispulse":
         # No subcommand: show help
@@ -1535,6 +1591,9 @@ app.command(name="portal")(cmd_portal)
 
 
 def main() -> None:
+    from gispulse._pyogrio_warnings import silence_gispulse_extension_warnings
+
+    silence_gispulse_extension_warnings()
     app()
 
 
