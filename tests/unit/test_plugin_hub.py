@@ -13,6 +13,7 @@ import pytest
 from fastapi import APIRouter, FastAPI
 
 from core import plugin_hub
+from core.plugin_hub import _version_satisfies, _check_protocol_version
 from core.plugin_contracts import LicenceState, PluginHostContext, PROTOCOL_VERSION
 from gispulse.adapters.http.app import _create_plugin_router
 
@@ -299,3 +300,136 @@ class TestPluginHubSingleton:
 
 def test_protocol_version_exposed() -> None:
     assert PROTOCOL_VERSION == "1.0"
+
+
+# ---------------------------------------------------------------------------
+# Protocol version handshake
+# ---------------------------------------------------------------------------
+
+
+class TestVersionSatisfies:
+    """Unit tests for the stdlib-only version specifier helper."""
+
+    def test_ge_satisfied(self) -> None:
+        assert _version_satisfies(">=1.0", "1.0") is True
+        assert _version_satisfies(">=1.0", "1.1") is True
+        assert _version_satisfies(">=1.0", "2.0") is True
+
+    def test_ge_not_satisfied(self) -> None:
+        assert _version_satisfies(">=1.1", "1.0") is False
+
+    def test_lt_satisfied(self) -> None:
+        assert _version_satisfies("<2.0", "1.0") is True
+        assert _version_satisfies("<2.0", "1.9") is True
+
+    def test_lt_not_satisfied(self) -> None:
+        assert _version_satisfies("<2.0", "2.0") is False
+        assert _version_satisfies("<2.0", "2.1") is False
+
+    def test_compound_satisfied(self) -> None:
+        assert _version_satisfies(">=1.0,<2.0", "1.0") is True
+        assert _version_satisfies(">=1.0,<2.0", "1.5") is True
+
+    def test_compound_not_satisfied(self) -> None:
+        assert _version_satisfies(">=1.0,<2.0", "0.9") is False
+        assert _version_satisfies(">=1.0,<2.0", "2.0") is False
+
+    def test_eq_satisfied(self) -> None:
+        assert _version_satisfies("==1.0", "1.0") is True
+
+    def test_eq_not_satisfied(self) -> None:
+        assert _version_satisfies("==1.0", "1.1") is False
+
+    def test_ne_satisfied(self) -> None:
+        assert _version_satisfies("!=1.0", "1.1") is True
+
+    def test_ne_not_satisfied(self) -> None:
+        assert _version_satisfies("!=1.0", "1.0") is False
+
+
+class TestProtocolVersionHandshake:
+    """Tests for requires_protocol discovery and version-check helpers."""
+
+    def test_matching_plugin_still_loads(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        class MatchingFactory:
+            name = "matching"
+            requires_protocol = ">=1.0,<2.0"
+
+            def create(self, app):
+                return None
+
+        _patch_eps(
+            monkeypatch,
+            {"gispulse.routers": [_FakeEntryPoint("matching", MatchingFactory)]},
+        )
+        hub = plugin_hub.PluginHub.get()
+        assert "matching" in hub.routers
+
+    def test_mismatched_plugin_still_loads_but_log_warning_is_called(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Plugin with incompatible requires_protocol still loads; warning is issued."""
+        class FutureFactory:
+            name = "future"
+            requires_protocol = ">=99.0"
+
+            def create(self, app):
+                return None
+
+        _patch_eps(
+            monkeypatch,
+            {"gispulse.routers": [_FakeEntryPoint("future", FutureFactory)]},
+        )
+        warned: list[str] = []
+        real_warning = plugin_hub.log.warning
+
+        def capture_warning(event: str, **kw: object) -> None:
+            warned.append(event)
+            real_warning(event, **kw)
+
+        monkeypatch.setattr(plugin_hub.log, "warning", capture_warning)
+        hub = plugin_hub.PluginHub.get()
+
+        # Plugin must survive — warning, not hard error.
+        assert "future" in hub.routers
+        assert any("mismatch" in w for w in warned), f"Expected mismatch warning, got: {warned}"
+
+    def test_plugin_without_requires_protocol_loads_with_no_protocol_warning(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class SilentFactory:
+            name = "silent"
+
+            def create(self, app):
+                return None
+
+        _patch_eps(
+            monkeypatch,
+            {"gispulse.routers": [_FakeEntryPoint("silent", SilentFactory)]},
+        )
+        warned: list[str] = []
+
+        def capture_warning(event: str, **kw: object) -> None:
+            warned.append(event)
+
+        monkeypatch.setattr(plugin_hub.log, "warning", capture_warning)
+        hub = plugin_hub.PluginHub.get()
+
+        assert "silent" in hub.routers
+        protocol_warns = [w for w in warned if "protocol" in w]
+        assert protocol_warns == [], f"Expected no protocol warnings, got: {protocol_warns}"
+
+    def test_check_protocol_version_does_not_raise(self) -> None:
+        """_check_protocol_version never raises; it only logs warnings."""
+        class Compatible:
+            requires_protocol = ">=1.0,<2.0"
+
+        class Incompatible:
+            requires_protocol = ">=99.0"
+
+        class NoSpec:
+            pass
+
+        _check_protocol_version(Compatible(), "compat", "router")
+        _check_protocol_version(Incompatible(), "incompat", "router")
+        _check_protocol_version(NoSpec(), "nospec", "router")
