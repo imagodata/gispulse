@@ -7,11 +7,10 @@ from __future__ import annotations
 
 import geopandas as gpd
 
-from capabilities.base import Capability
-from capabilities.registry import register
+from gispulse.plugins.api import Capability, register_capability
 
 
-@register
+@register_capability
 class CentroidCapability(Capability):
     """Compute the centroid of each geometry."""
 
@@ -25,7 +24,7 @@ class CentroidCapability(Capability):
             "additionalProperties": False,
         }
 
-    def execute(self, gdf: gpd.GeoDataFrame, config: dict) -> gpd.GeoDataFrame:
+    def execute(self, gdf: gpd.GeoDataFrame, **_params: object) -> gpd.GeoDataFrame:
         result = gdf.copy()
         result["geometry"] = result.geometry.centroid
         return result
