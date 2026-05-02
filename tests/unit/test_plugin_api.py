@@ -3,6 +3,20 @@
 from __future__ import annotations
 
 
+def test_plugin_api_core_imports_do_not_eagerly_import_source_clients() -> None:
+    import sys
+
+    sys.modules.pop("gispulse.plugins.api", None)
+    sys.modules.pop("gispulse.plugins.sources", None)
+
+    from gispulse.plugins.api import Capability, PluginHostContext, register_capability
+
+    assert Capability is not None
+    assert PluginHostContext is not None
+    assert register_capability is not None
+    assert "gispulse.plugins.sources" not in sys.modules
+
+
 def test_plugin_api_reexports_curated_runtime_primitives() -> None:
     from capabilities.base import Capability
     from capabilities.registry import register

@@ -1,35 +1,19 @@
 """Curated plugin-author API for GISPulse extensions."""
 
 from gispulse.plugins.api import (
-    CatalogEntry,
-    Capability,
-    FluxEntry,
-    OGCSourceConfig,
-    PipelineExecutor,
-    PipelineSpec,
-    PluginHostContext,
-    StepSpec,
-    fetch_wfs,
-    get_catalog_entry,
-    get_flux_entry,
-    is_angular,
-    register_capability,
-    suggest_metric_crs,
+    __all__ as _API_ALL,
+    Capability as Capability,
+    PluginHostContext as PluginHostContext,
+    register_capability as register_capability,
 )
 
-__all__ = [
-    "CatalogEntry",
-    "Capability",
-    "FluxEntry",
-    "OGCSourceConfig",
-    "PipelineExecutor",
-    "PipelineSpec",
-    "PluginHostContext",
-    "StepSpec",
-    "fetch_wfs",
-    "get_catalog_entry",
-    "get_flux_entry",
-    "is_angular",
-    "register_capability",
-    "suggest_metric_crs",
-]
+
+def __getattr__(name: str) -> object:
+    from gispulse.plugins import api
+
+    value = getattr(api, name)
+    globals()[name] = value
+    return value
+
+
+__all__ = list(_API_ALL)
