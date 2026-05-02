@@ -10,9 +10,11 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import APIRouter, FastAPI
 
 from core import plugin_hub
-from core.plugin_contracts import LicenceState, PROTOCOL_VERSION
+from core.plugin_contracts import LicenceState, PluginHostContext, PROTOCOL_VERSION
+from gispulse.adapters.http.app import _create_plugin_router
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +163,70 @@ class TestPluginHubDiscovery:
         )
         hub = plugin_hub.PluginHub.get()
         assert hub.routers["needs-stripe"].create(app=None) is None
+
+
+# ---------------------------------------------------------------------------
+# Host router creation contract
+# ---------------------------------------------------------------------------
+
+
+class TestPluginRouterCreation:
+    def test_context_aware_factory_receives_plugin_host_context(self) -> None:
+        app = FastAPI()
+        hub = plugin_hub.PluginHub()
+        context = PluginHostContext(app=app, settings=object(), logger=object(), plugin_hub=hub)
+        seen: list[PluginHostContext] = []
+
+        class ContextAwareFactory:
+            name = "context-aware"
+
+            def create(self, ctx):
+                seen.append(ctx)
+                return APIRouter()
+
+        router = _create_plugin_router(ContextAwareFactory(), app, context)
+
+        assert isinstance(router, APIRouter)
+        assert seen == [context]
+
+    def test_legacy_factory_receives_app_when_signature_is_legacy(self) -> None:
+        app = FastAPI()
+        hub = plugin_hub.PluginHub()
+        context = PluginHostContext(app=app, settings=object(), logger=object(), plugin_hub=hub)
+        seen: list[FastAPI] = []
+
+        class LegacyFactory:
+            name = "legacy"
+
+            def create(self, app_arg):
+                if not isinstance(app_arg, FastAPI):
+                    raise TypeError("legacy factory expects FastAPI")
+                seen.append(app_arg)
+                return APIRouter()
+
+        router = _create_plugin_router(LegacyFactory(), app, context)
+
+        assert isinstance(router, APIRouter)
+        assert seen == [app]
+
+    def test_context_factory_type_error_is_not_treated_as_legacy_signature(self) -> None:
+        app = FastAPI()
+        hub = plugin_hub.PluginHub()
+        context = PluginHostContext(app=app, settings=object(), logger=object(), plugin_hub=hub)
+
+        class BrokenContextAwareFactory:
+            name = "broken-context-aware"
+
+            def create(self, ctx):
+                raise TypeError("plugin bug")
+
+        with pytest.raises(TypeError, match="plugin bug"):
+            _create_plugin_router(BrokenContextAwareFactory(), app, context)
+
+    def test_plugin_host_context_is_exported_from_plugin_author_api(self) -> None:
+        from gispulse.plugins.api import PluginHostContext as PublicPluginHostContext
+
+        assert PublicPluginHostContext is PluginHostContext
 
 
 # ---------------------------------------------------------------------------
