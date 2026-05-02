@@ -1,6 +1,7 @@
 """Curated plugin-author API for GISPulse extensions."""
 
 from gispulse.plugins.api import (
+    ApiCartoGeoJsonClient,
     CatalogEntry,
     Capability,
     FluxEntry,
@@ -18,6 +19,7 @@ from gispulse.plugins.api import (
 )
 
 __all__ = [
+    "ApiCartoGeoJsonClient",
     "CatalogEntry",
     "Capability",
     "FluxEntry",

@@ -9,6 +9,7 @@ from capabilities.registry import register as register_capability
 from core.plugin_contracts import PluginHostContext
 from gispulse.plugins.pipeline import PipelineExecutor, PipelineSpec, StepSpec
 from gispulse.plugins.sources import (
+    ApiCartoGeoJsonClient,
     CatalogEntry,
     FluxEntry,
     OGCSourceConfig,
@@ -19,6 +20,7 @@ from gispulse.plugins.sources import (
 from gispulse.plugins.spatial import is_angular, suggest_metric_crs
 
 __all__ = [
+    "ApiCartoGeoJsonClient",
     "CatalogEntry",
     "Capability",
     "FluxEntry",
