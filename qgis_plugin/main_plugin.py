@@ -15,10 +15,15 @@ class GISPulsePlugin:
         from qgis.PyQt.QtWidgets import QAction
 
         icon = QIcon(str(self.plugin_dir / "icon.png"))
-        action = QAction(icon, "About GISPulse", self.iface.mainWindow())
-        action.triggered.connect(self._show_about)
-        self.iface.addPluginToMenu(self.menu, action)
-        self.actions.append(action)
+        about_action = QAction(icon, "About GISPulse", self.iface.mainWindow())
+        about_action.triggered.connect(self._show_about)
+        self.iface.addPluginToMenu(self.menu, about_action)
+        self.actions.append(about_action)
+
+        check_action = QAction(icon, "Check gispulse install…", self.iface.mainWindow())
+        check_action.triggered.connect(self._check_install)
+        self.iface.addPluginToMenu(self.menu, check_action)
+        self.actions.append(check_action)
 
     def unload(self) -> None:
         for action in self.actions:
@@ -36,3 +41,19 @@ class GISPulsePlugin:
             "Attach trigger dock, sub-process runner, layer refresh.\n\n"
             "https://gispulse.dev",
         )
+
+    def _check_install(self) -> None:
+        from qgis.PyQt.QtWidgets import QMessageBox
+
+        from .runtime import detect_gispulse
+        from .runtime.error_dialog import show_install_dialog
+
+        result = detect_gispulse(use_cache=False)
+        if result.found:
+            QMessageBox.information(
+                self.iface.mainWindow(),
+                "GISPulse",
+                f"GISPulse {result.version_str} found at:\n{result.path}",
+            )
+            return
+        show_install_dialog(self.iface.mainWindow(), result)
