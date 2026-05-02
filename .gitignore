@@ -37,3 +37,7 @@ viewer/dist/
 *.gpkg-wal
 *.sqlite-shm
 *.sqlite-wal
+
+# Local scratchpad GPKG at repo root (examples/datasets/*.gpkg stay tracked)
+/project.gpkg
+/*.gpkg-journal

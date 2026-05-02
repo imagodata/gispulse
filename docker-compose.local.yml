@@ -2,18 +2,28 @@
 # GISPulse — Local team stack (Mode B)
 #
 # Non-dev compose: no source code mounted, no hot-reload.
-# For LAN team usage with PostGIS.
+# For LAN team usage with PostGIS or solo with DuckDB.
 #
-# Usage:
-#   cp .env.example .env   # adjust POSTGRES_PASSWORD at minimum
+# Usage (DuckDB, free community tier — default):
 #   docker compose -f docker-compose.local.yml up -d
-#   open http://localhost:8001/docs
+#
+# Usage (PostGIS — requires GISPULSE_TIER=pro + license in .env):
+#   docker compose -f docker-compose.local.yml --profile postgis up -d
+#
+# Then open http://localhost:8001/docs
 ###############################################################################
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
-  # ── PostGIS database ─────────────────────────────────────────────────────
+  # ── PostGIS database (opt-in via --profile postgis) ──────────────────────
   postgis:
     image: postgis/postgis:16-3.4
+    profiles: ["postgis"]
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-gispulse}
@@ -27,10 +37,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging: *default-logging
     networks:
       - gispulse
 
-  # ── GISPulse API + Portal ────────────────────────────────────────────────
+  # ── GISPulse API ─────────────────────────────────────────────────────────
   gispulse-api:
     build:
       context: .
@@ -39,23 +50,23 @@ services:
     ports:
       - "${GISPULSE_PORT:-8001}:8001"
     environment:
-      GISPULSE_ENGINE: postgis
-      GISPULSE_DSN: postgresql://${POSTGRES_USER:-gispulse}:${POSTGRES_PASSWORD:-gispulse}@postgis:5432/${POSTGRES_DB:-gispulse}
-      GISPULSE_STORAGE: sqlite
+      GISPULSE_ENGINE: ${GISPULSE_ENGINE:-duckdb}
+      GISPULSE_DSN: ${GISPULSE_DSN:-postgresql://${POSTGRES_USER:-gispulse}:${POSTGRES_PASSWORD:-gispulse}@postgis:5432/${POSTGRES_DB:-gispulse}}
+      GISPULSE_STORAGE: ${GISPULSE_STORAGE:-sqlite}
       GISPULSE_TIER: ${GISPULSE_TIER:-community}
+      GISPULSE_LICENSE_KEY: ${GISPULSE_LICENSE_KEY:-}
       GISPULSE_API_KEYS: ${GISPULSE_API_KEYS:-}
-    depends_on:
-      postgis:
-        condition: service_healthy
+      GISPULSE_CORS_ORIGINS: ${GISPULSE_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 20s
     volumes:
       - gispulse_data:/root/.gispulse
       - uploads:/data
+    logging: *default-logging
     networks:
       - gispulse
 

@@ -466,7 +466,7 @@ def execute_pipeline_steps(
 
             cap = get_capability(step.capability)
             params = dict(step.params)
-            ref_layer_alias = params.get("ref_layer")
+            ref_layer_alias = params.pop("ref_layer", None)
             if ref_layer_alias and ref_layer_alias in inputs:
                 params["ref_gdf"] = inputs[ref_layer_alias]
             elif ref_layer_alias and ref_layer_alias in step_outputs_cache:
@@ -477,7 +477,7 @@ def execute_pipeline_steps(
             # ref_layer inputs first, then earlier step outputs. Mirrors
             # PipelineExecutor so capabilities like classify_by_ring and
             # merge_layers receive concrete GeoDataFrames (not just names).
-            ref_layers_aliases = params.get("ref_layers")
+            ref_layers_aliases = params.pop("ref_layers", None)
             if isinstance(ref_layers_aliases, list) and ref_layers_aliases:
                 resolved_gdfs = []
                 for a in ref_layers_aliases:

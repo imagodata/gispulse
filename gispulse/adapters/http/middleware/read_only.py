@@ -39,6 +39,11 @@ _COMPUTE_ALLOWLIST: tuple[re.Pattern[str], ...] = tuple(
         r"^/triggers/[^/]+/evaluate$",
         r"^/scenarios/[^/]+/run-node$",
         r"^/projects/[^/]+/detect-relations$",
+        # Mode 2 "Try it" mini-backend (v1.5.x) — pure in-memory trigger
+        # evaluation. The endpoint never touches the bundled GPKGs and
+        # the dispatcher is stubbed out to capture, not execute. Safe to
+        # leave open even on the public read-only deployment.
+        r"^/examples/[^/]+/triggers/dryrun$",
     )
 )
 

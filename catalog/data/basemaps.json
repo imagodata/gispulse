@@ -50,16 +50,6 @@
     "tags": ["france", "ign", "satellite", "ortho"]
   },
   {
-    "id": "ign-scan25",
-    "name": "IGN Scan 25",
-    "description": "Cartes topographiques IGN — couche MAPS libre d'accès",
-    "url_template": "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.MAPS&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
-    "protocol": "wmts",
-    "attribution": "&copy; IGN Géoplateforme",
-    "max_zoom": 18,
-    "tags": ["france", "ign", "topo", "randonnée"]
-  },
-  {
     "id": "ign-cadastre",
     "name": "IGN Cadastre",
     "description": "Parcelles cadastrales — overlay transparent",

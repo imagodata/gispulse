@@ -14,6 +14,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from fastapi import File, UploadFile, Form
+
 from gispulse.adapters.http.layer_utils import build_layer_meta, get_layer_styles, load_layers, sanitize_datetime_columns
 from gispulse.adapters.http.rate_limit import limiter
 from core.config import settings as _cfg
@@ -558,4 +560,201 @@ async def get_field_stats(
         "mean": float(numeric.mean()),
         "std": float(numeric.std()),
         "quantiles": {str(q): round(v, 4) for q, v in zip(quantiles, q_values)},
+    })
+
+
+def _load_layer_gdf(request: Request, dataset_id: str, layer_name: str):
+    """Resolve dataset+layer to a GeoDataFrame, populating layer_cache. Raises HTTPException."""
+    layer_cache: dict = request.app.state.layer_cache
+    dataset_repo = request.app.state.dataset_repo
+
+    gdfs = layer_cache.get(dataset_id)
+    if gdfs is None:
+        ds = dataset_repo.get(uuid.UUID(dataset_id))
+        if ds is None:
+            raise HTTPException(404, f"Dataset {dataset_id} not found")
+        if not ds.source_path or not Path(ds.source_path).exists():
+            raise HTTPException(404, "Dataset file not found on disk")
+        _, gdfs = load_layers(ds.source_path, ds.name)
+        layer_cache[dataset_id] = gdfs
+    if layer_name not in gdfs:
+        raise HTTPException(404, f"Layer {layer_name} not found")
+    return gdfs[layer_name]
+
+
+_VALID_BREAKS_METHODS = {"quantile", "equal_interval", "jenks", "pretty", "std_dev"}
+
+
+class BreaksBody(BaseModel):
+    field: str
+    method: str = "jenks"
+    n_classes: int = 5
+
+
+@router.post("/datasets/{dataset_id}/layers/{layer_name}/breaks")
+async def compute_breaks(
+    request: Request,
+    dataset_id: str,
+    layer_name: str,
+    body: BreaksBody,
+) -> JSONResponse:
+    """Compute classification breaks for a numeric field via ClassifyCapability."""
+    if body.method not in _VALID_BREAKS_METHODS:
+        raise HTTPException(
+            400,
+            f"method must be one of {sorted(_VALID_BREAKS_METHODS)}, got '{body.method}'",
+        )
+    if body.n_classes < 2 or body.n_classes > 20:
+        raise HTTPException(400, "n_classes must be between 2 and 20")
+
+    gdf = _load_layer_gdf(request, dataset_id, layer_name)
+    if body.field not in gdf.columns:
+        raise HTTPException(404, f"Field {body.field} not found in layer {layer_name}")
+
+    try:
+        gdf[body.field].dropna().astype(float)
+    except (ValueError, TypeError):
+        raise HTTPException(400, f"Field {body.field} is not numeric")
+
+    from capabilities.classification import ClassifyCapability
+
+    try:
+        result = ClassifyCapability().execute(
+            gdf,
+            field=body.field,
+            method=body.method,
+            bins=body.n_classes,
+            color_col=None,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    meta = result.attrs.get("gispulse_style", {})
+    breaks = meta.get("breaks") or []
+    labels = [
+        f"{round(breaks[i], 4)} – {round(breaks[i + 1], 4)}"
+        for i in range(len(breaks) - 1)
+    ]
+    return JSONResponse(content={
+        "field": body.field,
+        "method": body.method,
+        "n_classes": len(breaks) - 1 if len(breaks) > 1 else 0,
+        "breaks": [float(b) for b in breaks],
+        "labels": labels,
+    })
+
+
+def _upsert_layer_style(gpkg_path: str, layer_name: str, qml_xml: str) -> None:
+    """DELETE existing styleQML for layer, then INSERT new one. Idempotent."""
+    import sqlite3
+
+    from persistence.gpkg import _CREATE_LAYER_STYLES
+
+    conn = sqlite3.connect(gpkg_path)
+    try:
+        conn.execute(_CREATE_LAYER_STYLES)
+        conn.execute(
+            "DELETE FROM layer_styles WHERE f_table_name = ?",
+            (layer_name,),
+        )
+        conn.execute(
+            "INSERT INTO layer_styles (f_table_name, styleName, styleQML, useAsDefault, description) "
+            "VALUES (?, ?, ?, 1, ?)",
+            (layer_name, f"{layer_name}_style", qml_xml, f"Style for {layer_name}"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+class StyleBody(BaseModel):
+    layer_name: str
+    style_def: dict[str, Any]
+    geom_type: str = "polygon"
+
+
+@router.put("/datasets/{dataset_id}/styles")
+async def put_dataset_style(
+    request: Request,
+    dataset_id: str,
+    body: StyleBody,
+) -> JSONResponse:
+    """Persist a LayerStyleDef into the GPKG layer_styles table (overwrites)."""
+    dataset_repo = request.app.state.dataset_repo
+    layer_cache: dict = request.app.state.layer_cache
+
+    ds = dataset_repo.get(uuid.UUID(dataset_id))
+    if ds is None:
+        raise HTTPException(404, f"Dataset {dataset_id} not found")
+    if not ds.source_path or not Path(ds.source_path).exists():
+        raise HTTPException(404, "Dataset file not found on disk")
+
+    from persistence.style_converter import style_def_to_qml
+
+    try:
+        qml = style_def_to_qml(body.style_def, body.geom_type)
+    except Exception as exc:
+        raise HTTPException(400, f"Invalid style_def: {exc}")
+
+    _upsert_layer_style(ds.source_path, body.layer_name, qml)
+    layer_cache.pop(dataset_id, None)
+
+    return JSONResponse(content={
+        "layer_name": body.layer_name,
+        "qml_size_bytes": len(qml.encode("utf-8")),
+    })
+
+
+_QML_MAX_BYTES = 1_048_576
+
+
+@router.post("/datasets/{dataset_id}/styles/import")
+async def import_qml_style(
+    request: Request,
+    dataset_id: str,
+    layer_name: str = Form(...),
+    geom_type: str = Form("polygon"),
+    file: UploadFile = File(...),
+) -> JSONResponse:
+    """Import a .qml file: parse → LayerStyleDef → persist via upsert."""
+    dataset_repo = request.app.state.dataset_repo
+    layer_cache: dict = request.app.state.layer_cache
+
+    ds = dataset_repo.get(uuid.UUID(dataset_id))
+    if ds is None:
+        raise HTTPException(404, f"Dataset {dataset_id} not found")
+    if not ds.source_path or not Path(ds.source_path).exists():
+        raise HTTPException(404, "Dataset file not found on disk")
+
+    raw = await file.read()
+    if len(raw) > _QML_MAX_BYTES:
+        raise HTTPException(413, "QML file exceeds 1 MB limit")
+
+    try:
+        qml_xml = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(400, "QML file must be UTF-8 encoded")
+
+    import xml.etree.ElementTree as _ET
+
+    from persistence.style_converter import qml_to_style_def, style_def_to_qml
+
+    try:
+        _ET.fromstring(qml_xml)
+    except _ET.ParseError as exc:
+        raise HTTPException(400, f"Invalid QML XML: {exc}")
+
+    try:
+        style_def = qml_to_style_def(qml_xml, geom_type)
+    except Exception as exc:
+        raise HTTPException(400, f"Invalid QML: {exc}")
+
+    canonical_qml = style_def_to_qml(style_def, geom_type)
+    _upsert_layer_style(ds.source_path, layer_name, canonical_qml)
+    layer_cache.pop(dataset_id, None)
+
+    return JSONResponse(content={
+        "layer_name": layer_name,
+        "style_def": style_def,
+        "qml_size_bytes": len(raw),
     })

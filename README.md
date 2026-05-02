@@ -12,7 +12,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-green.svg)](https://python.org)
 [![CI](https://img.shields.io/github/actions/workflow/status/imagodata/gispulse/ci.yml?label=tests)](https://github.com/imagodata/gispulse/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/codecov/c/github/imagodata/gispulse?logo=codecov)](https://codecov.io/gh/imagodata/gispulse)
-[![Discord](https://img.shields.io/discord/0000000000?logo=discord&label=discord&color=5865F2)](https://discord.gg/gispulse)
+[![GitHub Discussions](https://img.shields.io/github/discussions/imagodata/gispulse?logo=github&label=discussions)](https://github.com/imagodata/gispulse/discussions)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://imagodata.github.io/gispulse/)
 
 ## What is GISPulse?
@@ -47,17 +47,20 @@ A central geospatial engine that executes business rules, spatial processing, an
 ## Installation
 
 ```bash
-# Via pip (core only — DuckDB, no external dependencies)
+# Recommended: pipx (isolated CLI, no system Python pollution)
+pipx install gispulse
+
+# Or pip into a virtualenv / per-project environment
 pip install gispulse
 
 # With PostGIS + API extras
-pip install "gispulse[postgis,api]"
+pipx install "gispulse[postgis,api]"
 
 # With all extras (PostGIS, API, raster, network, S3, scheduling)
-pip install "gispulse[all]"
+pipx install "gispulse[all]"
 
 # Pro meta-package (PostGIS + API + Redis + S3 + scheduling)
-pip install gispulse-pro
+pipx install gispulse-pro
 
 # Via Homebrew (macOS)
 brew tap imagodata/gispulse
@@ -70,6 +73,8 @@ scoop install gispulse
 # Via install script (Linux / macOS)
 curl -fsSL https://raw.githubusercontent.com/imagodata/gispulse/main/scripts/install.sh | bash
 ```
+
+> **Note for macOS Sonoma+ / Debian recent / Ubuntu 23.04+** users — a global `pip install gispulse` may fail with `error: externally-managed-environment` (PEP 668). Use `pipx` (above) or activate a virtualenv first. `pipx` also keeps GISPulse isolated from any other `geopandas` / `pyproj` install on your system. Install pipx via [the official guide](https://pipx.pypa.io/stable/installation/).
 
 ## Quick start
 
@@ -92,6 +97,20 @@ gispulse serve parcels.gpkg
 # Check system health
 gispulse doctor
 ```
+
+### Run the portal locally
+
+```bash
+# Install the CLI plus the bundled SPA workbench
+pipx install gispulse-portal
+
+# Start the local engine and open the browser at localhost:8001/portal
+gispulse portal
+```
+
+For headless runs (no SPA), use `gispulse engine` instead. See:
+[Running the Portal locally](https://imagodata.github.io/gispulse/en/guide/portal-local) ·
+[Running the engine](https://imagodata.github.io/gispulse/en/guide/engine).
 
 ### Docker (development)
 

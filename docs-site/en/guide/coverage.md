@@ -13,29 +13,29 @@ Auto-generated source of truth produced by `scripts/build_capability_matrix.py`.
 
 | Capability | Source | Tests | Docs | Playground | Template |
 |---|---|---|---|---|---|
-| `add_field` | [schema.py](../../../capabilities/schema.py) | [✅](../../../tests/unit/test_schema_capabilities.py) | ✅ | — | — |
+| `add_field` | [schema.py](../../../capabilities/schema.py) | [✅](../../../tests/unit/test_capability_execute_safe.py) | ✅ | — | — |
 | `add_m` | [transforms.py](../../../capabilities/transforms.py) | [✅](../../../tests/unit/test_beta_fixes_2026_04_24.py) | ✅ | — | — |
 | `add_z` | [transforms.py](../../../capabilities/transforms.py) | [✅](../../../tests/unit/test_beta_fixes_2026_04_24.py) | ✅ | — | — |
 | `affine_transform` | [transforms.py](../../../capabilities/transforms.py) | [✅](../../../tests/unit/test_transforms_capabilities.py) | ✅ | — | — |
 | `alpha_shape` | [shape_ops_advanced.py](../../../capabilities/vector/shape_ops_advanced.py) | [✅](../../../tests/unit/test_density_and_advanced_vector_capabilities.py) | ✅ | — | — |
-| `area_length` | [centroid_area.py](../../../capabilities/vector/centroid_area.py) | [✅](../../../tests/unit/test_edge_cases.py) | ✅ | ✅ | ✅ |
+| `area_length` | [centroid_area.py](../../../capabilities/vector/centroid_area.py) | [✅](../../../tests/unit/test_capabilities.py) | ✅ | ✅ | ✅ |
 | `assign_projection` | [assign_projection.py](../../../capabilities/vector/assign_projection.py) | [✅](../../../tests/unit/test_layer_transform_capabilities.py) | ✅ | — | — |
-| `attribute_join` | [schema.py](../../../capabilities/schema.py) | [✅](../../../tests/unit/test_schema_capabilities.py) | ✅ | — | — |
+| `attribute_join` | [schema.py](../../../capabilities/schema.py) | [✅](../../../tests/unit/test_beta_fixes_2026_04_24.py) | ✅ | — | — |
 | `attribute_validation` | [validation.py](../../../capabilities/validation.py) | [✅](../../../tests/unit/test_capabilities_validation.py) | ✅ | — | ✅ |
 | `bivariate_choropleth` | [classification.py](../../../capabilities/classification.py) | [✅](../../../tests/unit/test_advanced_viz.py) | ✅ | — | — |
 | `boundary` | [boundary.py](../../../capabilities/vector/boundary.py) | [✅](../../../tests/unit/test_layer_transform_capabilities.py) | ✅ | — | — |
-| `buffer` | [buffer.py](../../../capabilities/vector/buffer.py) | [✅](../../../tests/unit/test_new_vector_capabilities.py) | — | — | ✅ |
+| `buffer` | [buffer.py](../../../capabilities/vector/buffer.py) | [✅](../../../tests/unit/test_capabilities.py) | — | — | ✅ |
 | `calculate` | [calculate.py](../../../capabilities/vector/calculate.py) | [✅](../../../tests/unit/test_calculate_capabilities.py) | ✅ | ✅ | ✅ |
 | `case_when` | [schema.py](../../../capabilities/schema.py) | [✅](../../../tests/unit/test_attr_logic_capabilities.py) | ✅ | — | — |
 | `cast_field` | [schema.py](../../../capabilities/schema.py) | [✅](../../../tests/unit/test_schema_capabilities.py) | ✅ | — | — |
-| `centroid` | [centroid_area.py](../../../capabilities/vector/centroid_area.py) | [✅](../../../tests/unit/test_edge_cases.py) | ✅ | — | ✅ |
+| `centroid` | [centroid_area.py](../../../capabilities/vector/centroid_area.py) | [✅](../../../tests/unit/test_capabilities.py) | ✅ | — | ✅ |
 | `chaikin_smooth` | [chaikin.py](../../../capabilities/vector/chaikin.py) | [✅](../../../tests/unit/test_density_and_advanced_vector_capabilities.py) | ✅ | — | — |
-| `change_detection` | [raster.py](../../../capabilities/raster.py) | [✅](../../../tests/unit/test_raster_capabilities_s11.py) | ✅ | — | — |
+| `change_detection` | [raster.py](../../../capabilities/raster.py) | [✅](../../../tests/unit/test_raster_capabilities.py) | ✅ | — | — |
 | `choropleth` | [classification.py](../../../capabilities/classification.py) | [✅](../../../tests/unit/test_categorical_and_normalize.py) | ✅ | — | — |
-| `classify` | [classification.py](../../../capabilities/classification.py) | [✅](../../../tests/unit/test_classify_capability.py) | ✅ | ✅ | — |
+| `classify` | [classification.py](../../../capabilities/classification.py) | [✅](../../../tests/unit/test_choropleth_capability.py) | ✅ | ✅ | — |
 | `classify_by_ring` | [classify.py](../../../capabilities/vector/classify.py) | [✅](../../../tests/unit/test_classify_by_ring_capability.py) | ✅ | ✅ | — |
 | `classify_categorical` | [classification.py](../../../capabilities/classification.py) | [✅](../../../tests/unit/test_categorical_and_normalize.py) | ✅ | — | — |
-| `clip` | [clip.py](../../../capabilities/vector/clip.py) | [✅](../../../tests/unit/test_edge_cases.py) | — | — | ✅ |
+| `clip` | [clip.py](../../../capabilities/vector/clip.py) | [✅](../../../tests/unit/test_advanced_vector_capabilities.py) | — | — | ✅ |
 | `cluster_dbscan` | [clustering.py](../../../capabilities/clustering.py) | [✅](../../../tests/unit/test_clustering_capabilities.py) | ✅ | — | — |
 | `cluster_hdbscan` | [clustering.py](../../../capabilities/clustering.py) | [✅](../../../tests/unit/test_clustering_capabilities.py) | ✅ | — | ✅ |
 | `cluster_kmeans` | [clustering.py](../../../capabilities/clustering.py) | [✅](../../../tests/unit/test_clustering_capabilities.py) | ✅ | — | — |
@@ -49,7 +49,7 @@ Auto-generated source of truth produced by `scripts/build_capability_matrix.py`.
 | `delaunay_triangulation` | [shape_ops_advanced.py](../../../capabilities/vector/shape_ops_advanced.py) | [✅](../../../tests/unit/test_advanced_vector_capabilities.py) | ✅ | — | — |
 | `densify_vertices` | [extract_ops.py](../../../capabilities/vector/extract_ops.py) | [✅](../../../tests/unit/test_vertex_ops_capabilities.py) | ✅ | — | — |
 | `describe` | [schema.py](../../../capabilities/schema.py) | [✅](../../../tests/unit/test_schema_capabilities.py) | ✅ | — | — |
-| `dissolve` | [dissolve.py](../../../capabilities/vector/dissolve.py) | [✅](../../../tests/unit/test_edge_cases.py) | ✅ | — | ✅ |
+| `dissolve` | [dissolve.py](../../../capabilities/vector/dissolve.py) | [✅](../../../tests/unit/test_capabilities.py) | ✅ | — | ✅ |
 | `drop_field` | [schema.py](../../../capabilities/schema.py) | [✅](../../../tests/unit/test_schema_capabilities.py) | ✅ | — | — |
 | `drop_m` | [transforms.py](../../../capabilities/transforms.py) | [✅](../../../tests/unit/test_transforms_capabilities.py) | ✅ | — | — |
 | `drop_z` | [transforms.py](../../../capabilities/transforms.py) | [✅](../../../tests/unit/test_transforms_capabilities.py) | ✅ | — | — |
@@ -59,15 +59,15 @@ Auto-generated source of truth produced by `scripts/build_capability_matrix.py`.
 | `extract_holes` | [extract_holes.py](../../../capabilities/vector/extract_holes.py) | [✅](../../../tests/unit/test_geometry_shape_capabilities.py) | ✅ | — | — |
 | `extract_segments` | [extract_ops.py](../../../capabilities/vector/extract_ops.py) | [✅](../../../tests/unit/test_vertex_ops_capabilities.py) | ✅ | — | — |
 | `extract_vertices` | [extract_ops.py](../../../capabilities/vector/extract_ops.py) | [✅](../../../tests/unit/test_vertex_ops_capabilities.py) | ✅ | — | — |
-| `filter` | [filter.py](../../../capabilities/vector/filter.py) | [✅](../../../tests/unit/test_edge_cases.py) | — | ✅ | ✅ |
+| `filter` | [filter.py](../../../capabilities/vector/filter.py) | [✅](../../../tests/unit/test_capabilities.py) | — | ✅ | ✅ |
 | `force_geometry_type` | [force_geometry_type.py](../../../capabilities/vector/force_geometry_type.py) | [✅](../../../tests/unit/test_beta_fixes_2026_04_24.py) | ✅ | — | — |
 | `getis_ord_g` | [spatial_stats.py](../../../capabilities/spatial_stats.py) | [✅](../../../tests/unit/test_spatial_stats_capabilities.py) | ✅ | — | — |
 | `graduated_size` | [classification.py](../../../capabilities/classification.py) | [✅](../../../tests/unit/test_advanced_viz.py) | ✅ | — | — |
 | `grid_create` | [density.py](../../../capabilities/density.py) | [✅](../../../tests/unit/test_density_and_advanced_vector_capabilities.py) | ✅ | ✅ | — |
 | `head_tail_breaks` | [classification.py](../../../capabilities/classification.py) | [✅](../../../tests/unit/test_advanced_viz.py) | ✅ | — | — |
 | `hexgrid_create` | [density.py](../../../capabilities/density.py) | [✅](../../../tests/unit/test_density_and_advanced_vector_capabilities.py) | ✅ | — | — |
-| `intersects` | [intersects.py](../../../capabilities/vector/intersects.py) | [✅](../../../tests/unit/test_edge_cases.py) | — | — | ✅ |
-| `isochrone` | [network.py](../../../capabilities/network.py) | [✅](../../../tests/unit/test_network_capabilities_s11.py) | ✅ | ✅ | ✅ |
+| `intersects` | [intersects.py](../../../capabilities/vector/intersects.py) | [✅](../../../tests/unit/test_advanced_vector_capabilities.py) | — | — | ✅ |
+| `isochrone` | [network.py](../../../capabilities/network.py) | [✅](../../../tests/unit/test_crs_helpers.py) | ✅ | ✅ | ✅ |
 | `kde_heatmap` | [density.py](../../../capabilities/density.py) | [✅](../../../tests/unit/test_density_and_advanced_vector_capabilities.py) | ✅ | — | — |
 | `line_locate_point` | [line_ops.py](../../../capabilities/vector/line_ops.py) | [✅](../../../tests/unit/test_density_and_advanced_vector_capabilities.py) | ✅ | — | — |
 | `line_merge` | [line_merge.py](../../../capabilities/vector/line_merge.py) | [✅](../../../tests/unit/test_advanced_vector_capabilities.py) | ✅ | — | — |
@@ -112,13 +112,13 @@ Auto-generated source of truth produced by `scripts/build_capability_matrix.py`.
 | `reproject` | [reproject.py](../../../capabilities/vector/reproject.py) | [✅](../../../tests/unit/test_capabilities.py) | — | — | ✅ |
 | `reverse_lines` | [transforms.py](../../../capabilities/transforms.py) | [✅](../../../tests/unit/test_transforms_capabilities.py) | ✅ | — | — |
 | `select_columns` | [schema.py](../../../capabilities/schema.py) | [✅](../../../tests/unit/test_schema_capabilities.py) | ✅ | — | — |
-| `shortest_path` | [network.py](../../../capabilities/network.py) | [✅](../../../tests/unit/test_network_capabilities_s11.py) | ✅ | — | — |
-| `simplify` | [simplify.py](../../../capabilities/vector/simplify.py) | [✅](../../../tests/unit/test_new_vector_capabilities.py) | ✅ | — | — |
-| `singleparts_to_multipart` | [parts.py](../../../capabilities/vector/parts.py) | [✅](../../../tests/unit/test_layer_transform_capabilities.py) | ✅ | — | — |
+| `shortest_path` | [network.py](../../../capabilities/network.py) | [✅](../../../tests/unit/test_network_capabilities.py) | ✅ | — | — |
+| `simplify` | [simplify.py](../../../capabilities/vector/simplify.py) | [✅](../../../tests/unit/test_advanced_vector_capabilities.py) | ✅ | — | — |
+| `singleparts_to_multipart` | [parts.py](../../../capabilities/vector/parts.py) | [✅](../../../tests/unit/test_beta_fixes_2026_04_24.py) | ✅ | — | — |
 | `snap_to_grid` | [snap_grid.py](../../../capabilities/vector/snap_grid.py) | [✅](../../../tests/unit/test_advanced_vector_capabilities.py) | ✅ | — | ✅ |
 | `sort` | [selection.py](../../../capabilities/selection.py) | [✅](../../../tests/unit/test_selection_capabilities.py) | ✅ | — | — |
 | `spatial_aggregate` | [aggregate.py](../../../capabilities/vector/aggregate.py) | [✅](../../../tests/unit/test_calculate_capabilities.py) | — | ✅ | ✅ |
-| `spatial_join` | [spatial_join.py](../../../capabilities/vector/spatial_join.py) | [✅](../../../tests/unit/test_edge_cases.py) | — | — | ✅ |
+| `spatial_join` | [spatial_join.py](../../../capabilities/vector/spatial_join.py) | [✅](../../../tests/unit/test_capabilities.py) | — | — | ✅ |
 | `spatial_weights` | [spatial_stats.py](../../../capabilities/spatial_stats.py) | [✅](../../../tests/unit/test_spatial_stats_capabilities.py) | ✅ | — | — |
 | `swap_xy` | [transforms.py](../../../capabilities/transforms.py) | [✅](../../../tests/unit/test_transforms_capabilities.py) | ✅ | — | — |
 | `symmetric_difference` | [diff.py](../../../capabilities/vector/diff.py) | [✅](../../../tests/unit/test_density_and_advanced_vector_capabilities.py) | ✅ | — | — |
@@ -126,11 +126,11 @@ Auto-generated source of truth produced by `scripts/build_capability_matrix.py`.
 | `temporal_join` | [temporal.py](../../../capabilities/temporal.py) | [✅](../../../tests/unit/test_temporal_capabilities.py) | ✅ | — | — |
 | `top_n` | [selection.py](../../../capabilities/selection.py) | [✅](../../../tests/unit/test_beta_fixes_2026_04_24.py) | ✅ | — | — |
 | `topology_check` | [validation.py](../../../capabilities/validation.py) | [✅](../../../tests/unit/test_capabilities_validation.py) | ✅ | — | ✅ |
-| `union` | [union.py](../../../capabilities/vector/union.py) | [✅](../../../tests/unit/test_edge_cases.py) | ✅ | — | ✅ |
+| `union` | [union.py](../../../capabilities/vector/union.py) | [✅](../../../tests/unit/test_capabilities.py) | ✅ | — | ✅ |
 | `unpivot` | [schema.py](../../../capabilities/schema.py) | — | ✅ | — | — |
 | `vector_diff` | [diff.py](../../../capabilities/vector/diff.py) | [✅](../../../tests/unit/test_density_and_advanced_vector_capabilities.py) | ✅ | — | — |
 | `voronoi_polygons` | [voronoi.py](../../../capabilities/vector/voronoi.py) | [✅](../../../tests/unit/test_advanced_vector_capabilities.py) | ✅ | — | ✅ |
-| `zonal_stats` | [raster.py](../../../capabilities/raster.py) | [✅](../../../tests/unit/test_raster_capabilities_s11.py) | ✅ | — | ✅ |
+| `zonal_stats` | [raster.py](../../../capabilities/raster.py) | [✅](../../../tests/unit/test_raster_capabilities.py) | ✅ | — | ✅ |
 | **Total** | — | 116 / 118 | 109 / 118 | 9 / 118 | 33 / 118 |
 
-*Generated by `scripts/build_capability_matrix.py` (2026-04-28). Run `python scripts/build_capability_matrix.py` after adding / removing a capability.*
+*Generated by `scripts/build_capability_matrix.py`. Run `python scripts/build_capability_matrix.py` after adding / removing a capability.*

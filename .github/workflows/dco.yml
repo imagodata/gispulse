@@ -10,11 +10,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - name: Bypass DCO for trusted bots (dependabot, github-actions)
+        id: bot_check
+        run: |
+          actor='${{ github.event.pull_request.user.login }}'
+          case "$actor" in
+            "dependabot[bot]"|"github-actions[bot]"|"renovate[bot]")
+              echo "Skipping DCO for trusted bot: $actor"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - uses: actions/checkout@v6
+        if: steps.bot_check.outputs.skip != 'true'
         with:
           fetch-depth: 0
 
       - name: Verify Signed-off-by trailer on every commit
+        if: steps.bot_check.outputs.skip != 'true'
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
