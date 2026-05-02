@@ -1564,6 +1564,9 @@ app.command(name="portal")(cmd_portal)
 
 
 def main() -> None:
+    from gispulse._pyogrio_warnings import silence_gispulse_extension_warnings
+
+    silence_gispulse_extension_warnings()
     app()
 
 
