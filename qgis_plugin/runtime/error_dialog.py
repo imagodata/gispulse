@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from .detector import DetectorResult, clear_cache, detect_gispulse, install_hint
 
-DOC_URL = "https://gispulse.dev/install"
+DOC_URL = "https://gispulse.dev/plugins/qgis-troubleshooting"
 
 
 def show_install_dialog(parent, result: DetectorResult) -> DetectorResult:

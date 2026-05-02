@@ -131,9 +131,16 @@ const frSidebar = {
   ],
   '/plugins/': [
     {
-      text: 'Plugins & intégrations',
+      text: 'Plugin QGIS',
       items: [
-        { text: 'Plugin QGIS', link: '/plugins/qgis' },
+        { text: 'Vue d\'ensemble', link: '/plugins/qgis' },
+        { text: 'Installer le plugin', link: '/plugins/qgis-install' },
+        { text: 'Dépannage', link: '/plugins/qgis-troubleshooting' },
+      ],
+    },
+    {
+      text: 'Autres plugins',
+      items: [
         { text: 'Add-in ArcGIS', link: '/plugins/arcgis' },
         { text: 'Développer un plugin', link: '/plugins/developing' },
       ],
@@ -251,9 +258,16 @@ const enSidebar = {
   ],
   '/en/plugins/': [
     {
-      text: 'Plugins & Integrations',
+      text: 'QGIS plugin',
       items: [
-        { text: 'QGIS Plugin', link: '/en/plugins/qgis' },
+        { text: 'Overview', link: '/en/plugins/qgis' },
+        { text: 'Install the plugin', link: '/en/plugins/qgis-install' },
+        { text: 'Troubleshooting', link: '/en/plugins/qgis-troubleshooting' },
+      ],
+    },
+    {
+      text: 'Other plugins',
+      items: [
         { text: 'ArcGIS Add-in', link: '/en/plugins/arcgis' },
         { text: 'Develop a Plugin', link: '/en/plugins/developing' },
       ],
