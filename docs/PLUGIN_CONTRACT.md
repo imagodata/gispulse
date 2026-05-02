@@ -113,6 +113,41 @@ contract.
 from `capabilities.*` are transitional rather than the final new SDK shape. New
 plugins should import capability primitives from `gispulse.plugins.api`.
 
+## Plugin Author Imports
+
+New plugins should prefer the curated authoring namespace over internal module
+paths:
+
+```python
+from gispulse.plugins.api import (
+    CatalogEntry,
+    Capability,
+    OGCSourceConfig,
+    PipelineExecutor,
+    PipelineSpec,
+    StepSpec,
+    fetch_wfs,
+    get_catalog_entry,
+    get_flux_entry,
+    is_angular,
+    register_capability,
+    suggest_metric_crs,
+)
+```
+
+The namespace is intentionally thin for now. It re-exports the runtime
+primitives already exercised by real plugins while keeping the supported import
+path stable for plugin authors. Direct imports from `core.*`, `catalog.*`,
+`orchestration.*`, `capabilities.*`, or `gispulse.adapters.*` should be treated
+as legacy/transitional in new plugin code.
+
+Focused submodules are also available when plugins need narrower imports:
+
+- `gispulse.plugins.pipeline`: `PipelineSpec`, `StepSpec`, `PipelineExecutor`
+- `gispulse.plugins.sources`: catalog lookup, flux entry lookup, OGC source
+  config and WFS helpers
+- `gispulse.plugins.spatial`: CRS helpers used by spatial capabilities
+
 ## Additive Host Context
 
 `RouterFactory.create(app)` remains the legacy-compatible contract. This slice
@@ -135,9 +170,9 @@ class ExampleRouterFactory:
 ```
 
 The first context is deliberately small: `app`, `settings`, `logger` and
-`plugin_hub`. Catalog/source access, spatial helpers, auth/tenant context,
-cache/storage and pipeline execution should be added only as tested follow-up
-slices for `#68`.
+`plugin_hub`. Catalog/source, spatial and pipeline primitives are exposed
+through `gispulse.plugins.api`; auth/tenant context and cache/storage remain
+future tested slices for `#68`.
 
 ## Known Limits
 
@@ -158,3 +193,18 @@ create an accidental public API and make host refactors harder.
 
 See `examples/plugin-template` for a minimal package that declares both a
 capability entry point and a host router entry point.
+
+## PR Plan
+
+The issue is the durable target. The intended PR series is:
+
+1. `#72`: add the additive `PluginHostContext`, preserve `create(app)`, and
+   document the current host contract.
+2. Add the curated plugin-author imports in `gispulse.plugins.api` and focused
+   submodules for capabilities, pipeline, sources and spatial helpers.
+3. Migrate `gispulse-permis` to the new imports for capabilities and spatial
+   pipelines first, proving that product plugins can avoid `capabilities.*`,
+   `core.pipeline` and `orchestration.*` imports.
+4. Follow with source/client and MCP-compatible plugin integration once the
+   underlying host pieces exist on the upstream base, including any API Carto or
+   `gispulse.mcp_tools` discovery work needed to make the contract real.
