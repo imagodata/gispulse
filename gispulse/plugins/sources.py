@@ -5,6 +5,7 @@ from __future__ import annotations
 from catalog import registry
 from catalog.models import CatalogEntry, FluxEntry
 from core.models import OGCSourceConfig
+from gispulse.adapters.apicarto import ApiCartoGeoJsonClient
 from gispulse.adapters.ogc.wfs_client import fetch_wfs
 
 
@@ -22,6 +23,7 @@ def get_flux_entry(entry_id: str) -> FluxEntry | None:
 
 
 __all__ = [
+    "ApiCartoGeoJsonClient",
     "CatalogEntry",
     "FluxEntry",
     "OGCSourceConfig",

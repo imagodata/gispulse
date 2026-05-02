@@ -11,6 +11,7 @@ def test_plugin_api_reexports_curated_runtime_primitives() -> None:
     from core.models import OGCSourceConfig
     from core.pipeline import PipelineSpec, StepSpec
     from core.plugin_contracts import PluginHostContext
+    from gispulse.adapters.apicarto import ApiCartoGeoJsonClient
     from gispulse.adapters.ogc.wfs_client import fetch_wfs
     from gispulse.plugins import api
     from orchestration.pipeline_executor import PipelineExecutor
@@ -24,6 +25,7 @@ def test_plugin_api_reexports_curated_runtime_primitives() -> None:
     assert api.PipelineExecutor is PipelineExecutor
     assert api.FluxEntry is FluxEntry
     assert api.OGCSourceConfig is OGCSourceConfig
+    assert api.ApiCartoGeoJsonClient is ApiCartoGeoJsonClient
     assert api.fetch_wfs is fetch_wfs
     assert api.is_angular is is_angular
     assert api.suggest_metric_crs is suggest_metric_crs
@@ -34,6 +36,7 @@ def test_plugin_submodules_reexport_curated_runtime_primitives() -> None:
     from core.crs import is_angular, suggest_metric_crs
     from core.models import OGCSourceConfig
     from core.pipeline import PipelineSpec, StepSpec
+    from gispulse.adapters.apicarto import ApiCartoGeoJsonClient
     from gispulse.adapters.ogc.wfs_client import fetch_wfs
     from gispulse.plugins import pipeline, sources, spatial
     from orchestration.pipeline_executor import PipelineExecutor
@@ -44,6 +47,7 @@ def test_plugin_submodules_reexport_curated_runtime_primitives() -> None:
     assert sources.FluxEntry is FluxEntry
     assert sources.CatalogEntry is CatalogEntry
     assert sources.OGCSourceConfig is OGCSourceConfig
+    assert sources.ApiCartoGeoJsonClient is ApiCartoGeoJsonClient
     assert sources.fetch_wfs is fetch_wfs
     assert spatial.is_angular is is_angular
     assert spatial.suggest_metric_crs is suggest_metric_crs

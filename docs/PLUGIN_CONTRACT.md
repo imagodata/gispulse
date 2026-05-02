@@ -120,6 +120,7 @@ paths:
 
 ```python
 from gispulse.plugins.api import (
+    ApiCartoGeoJsonClient,
     CatalogEntry,
     Capability,
     OGCSourceConfig,
@@ -145,7 +146,7 @@ Focused submodules are also available when plugins need narrower imports:
 
 - `gispulse.plugins.pipeline`: `PipelineSpec`, `StepSpec`, `PipelineExecutor`
 - `gispulse.plugins.sources`: catalog lookup, flux entry lookup, OGC source
-  config and WFS helpers
+  config, WFS helpers and API Carto GeoJSON helpers
 - `gispulse.plugins.spatial`: CRS helpers used by spatial capabilities
 
 ## Additive Host Context
