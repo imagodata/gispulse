@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import importlib
+import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
+from core.plugin_contracts import PluginHostContext
 from core import plugin_hub
 
 
@@ -70,7 +72,13 @@ def test_plugin_template_declares_mountable_router_entry_point() -> None:
         sys.path.remove(str(TEMPLATE))
 
     app = FastAPI()
-    app.include_router(ExampleRouterFactory().create(app))
+    ctx = PluginHostContext(
+        app=app,
+        settings=None,
+        logger=logging.getLogger("test.plugin_template"),
+        plugin_hub=None,
+    )
+    app.include_router(ExampleRouterFactory().create(ctx))
 
     response = TestClient(app).get("/plugins/example/health")
 
@@ -97,7 +105,13 @@ def test_plugin_template_router_is_discoverable_through_plugin_hub(
     try:
         hub = plugin_hub.PluginHub.get()
         app = FastAPI()
-        app.include_router(hub.routers["example"].create(app))
+        ctx = PluginHostContext(
+            app=app,
+            settings=None,
+            logger=logging.getLogger("test.plugin_template"),
+            plugin_hub=hub,
+        )
+        app.include_router(hub.routers["example"].create(ctx))
     finally:
         sys.path.remove(str(TEMPLATE))
         plugin_hub.PluginHub.reset()
@@ -122,6 +136,7 @@ def test_plugin_contract_document_exists_for_current_host_surface() -> None:
     assert "RouterFactory.create(app)" in content
     assert "gispulse.plugins.api" in content
     assert "PluginHostContext" in content
+    assert "PR Plan" in content
     assert "not yet the full stable SDK" in content
     assert "transitional" in content
     assert "New plugins should not treat `app.state` as a\nstable SDK" in content

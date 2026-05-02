@@ -1,10 +1,10 @@
-"""Example host router factory for the current PluginHub contract."""
+"""Example host router factory for the typed PluginHostContext contract."""
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter
+
+from gispulse.plugins.api import PluginHostContext
 
 
 class ExampleRouterFactory:
@@ -12,7 +12,8 @@ class ExampleRouterFactory:
 
     name = "example"
 
-    def create(self, app: Any) -> APIRouter:
+    def create(self, ctx: PluginHostContext) -> APIRouter:
+        ctx.logger.debug("example_plugin_router_mounting")
         router = APIRouter(prefix="/plugins/example", tags=["plugins"])
 
         @router.get("/health")
