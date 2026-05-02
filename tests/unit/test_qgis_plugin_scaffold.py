@@ -93,3 +93,22 @@ def test_build_zip_produces_installable_archive(tmp_path: Path) -> None:
     )
     for required in ("gispulse/metadata.txt", "gispulse/__init__.py", "gispulse/icon.png"):
         assert required in names, f"missing {required} in ZIP"
+    # PUBLISHING.md is a maintainer-only guide; shipping it would clutter
+    # the QGIS Plugin Manager listing and confuse users.
+    assert "gispulse/PUBLISHING.md" not in names, (
+        "PUBLISHING.md must stay out of the user-facing ZIP — see EXCLUDED_FILES"
+    )
+
+
+def test_metadata_has_required_qgis_fields() -> None:
+    """plugins.qgis.org rejects uploads missing any of these fields,
+    so we enforce them here rather than discovering on submission."""
+    parser = configparser.ConfigParser()
+    parser.read(PLUGIN_DIR / "metadata.txt", encoding="utf-8")
+    g = parser["general"]
+    assert g["category"] == "Vector"
+    assert g["experimental"] in ("True", "true")
+    assert "changelog" in g
+    # Description must be a single line under the QGIS 512-char cap.
+    assert len(g["description"]) <= 512
+    assert "\n" not in g["description"].strip()

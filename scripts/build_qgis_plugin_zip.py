@@ -34,6 +34,9 @@ PLUGIN_FOLDER_NAME = "gispulse"
 
 INCLUDED_SUFFIXES = {".py", ".png", ".txt", ".md", ".svg", ".qml", ".ui"}
 EXCLUDED_DIRS = {"__pycache__", ".pytest_cache", ".mypy_cache"}
+# Files that live in qgis_plugin/ but are maintainer-only and should NOT
+# ship to end users via the QGIS Plugin Manager ZIP.
+EXCLUDED_FILES = {"PUBLISHING.md"}
 
 
 def _read_plugin_version() -> str:
@@ -66,6 +69,8 @@ def _iter_plugin_files() -> list[Path]:
         if path.is_dir():
             continue
         if any(part in EXCLUDED_DIRS for part in path.parts):
+            continue
+        if path.name in EXCLUDED_FILES:
             continue
         if path.suffix and path.suffix not in INCLUDED_SUFFIXES:
             continue
