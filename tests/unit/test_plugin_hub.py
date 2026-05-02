@@ -189,6 +189,24 @@ class TestPluginRouterCreation:
         assert isinstance(router, APIRouter)
         assert seen == [context]
 
+    def test_context_factory_can_be_detected_by_annotation_only(self) -> None:
+        app = FastAPI()
+        hub = plugin_hub.PluginHub()
+        context = PluginHostContext(app=app, settings=object(), logger=object(), plugin_hub=hub)
+        seen: list[PluginHostContext] = []
+
+        class AnnotatedFactory:
+            name = "annotated-context"
+
+            def create(self, host: PluginHostContext):
+                seen.append(host)
+                return APIRouter()
+
+        router = _create_plugin_router(AnnotatedFactory(), app, context)
+
+        assert isinstance(router, APIRouter)
+        assert seen == [context]
+
     def test_legacy_factory_receives_app_when_signature_is_legacy(self) -> None:
         app = FastAPI()
         hub = plugin_hub.PluginHub()
