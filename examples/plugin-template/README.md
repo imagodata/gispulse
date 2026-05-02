@@ -33,7 +33,7 @@ gispulse-cap-example/
    registry.
 
 4. In full HTTP mode, GISPulse scans `gispulse.routers`, instantiates the
-   factory, calls `RouterFactory.create(app)`, and mounts the returned
+   factory, calls `RouterFactory.create(ctx)`, and mounts the returned
    `APIRouter`.
 
 The example capability uses the current `execute(gdf, **params)` shape. Do not
@@ -50,8 +50,8 @@ use the old `execute(gdf, config: dict)` signature for new capabilities.
 6. Verify: `gispulse capabilities` should list your new capability
 7. Start the HTTP host and call `/plugins/example/health`
 
-The legacy router API still accepts `RouterFactory.create(app)`. New router
-factories can opt into the additive `PluginHostContext`; see
+The legacy router API still accepts `RouterFactory.create(app)` for existing
+plugins. New router factories should use `PluginHostContext`; see
 `docs/PLUGIN_CONTRACT.md`. Keep any direct `app.state` access narrow and
 temporary.
 
