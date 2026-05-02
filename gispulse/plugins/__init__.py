@@ -11,7 +11,10 @@ from gispulse.plugins.api import (
 def __getattr__(name: str) -> object:
     from gispulse.plugins import api
 
-    value = getattr(api, name)
+    try:
+        value = getattr(api, name)
+    except AttributeError:
+        raise AttributeError(f"module 'gispulse.plugins' has no attribute {name!r}") from None
     globals()[name] = value
     return value
 

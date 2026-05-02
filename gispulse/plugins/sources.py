@@ -1,12 +1,24 @@
-"""Catalog and source-client primitives supported for plugin authors."""
+"""Catalog and source-client primitives supported for plugin authors.
+
+Lightweight catalog helpers (``CatalogEntry``, ``FluxEntry``,
+``OGCSourceConfig``, ``get_catalog_entry``, ``get_flux_entry``) are
+importable immediately.  Heavy source-client objects (``ApiCartoGeoJsonClient``
+and ``fetch_wfs``) are deferred inside accessor functions so that importing
+this module does NOT pull in ``requests`` or the apicarto adapter when
+plugins don't need them.
+"""
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from catalog import registry
 from catalog.models import CatalogEntry, FluxEntry
 from core.models import OGCSourceConfig
-from gispulse.adapters.apicarto import ApiCartoGeoJsonClient
-from gispulse.adapters.ogc.wfs_client import fetch_wfs
+
+if TYPE_CHECKING:
+    from gispulse.adapters.apicarto import ApiCartoGeoJsonClient
+    from gispulse.adapters.ogc.wfs_client import fetch_wfs as _FetchWfsFn
 
 
 def get_catalog_entry(entry_id: str) -> CatalogEntry | None:
@@ -20,6 +32,19 @@ def get_flux_entry(entry_id: str) -> FluxEntry | None:
     if isinstance(entry, FluxEntry):
         return entry
     return None
+
+
+def __getattr__(name: str) -> object:
+    """Lazy-load heavy source-client symbols on first access."""
+    if name == "ApiCartoGeoJsonClient":
+        from gispulse.adapters.apicarto import ApiCartoGeoJsonClient
+        globals()["ApiCartoGeoJsonClient"] = ApiCartoGeoJsonClient
+        return ApiCartoGeoJsonClient
+    if name == "fetch_wfs":
+        from gispulse.adapters.ogc.wfs_client import fetch_wfs
+        globals()["fetch_wfs"] = fetch_wfs
+        return fetch_wfs
+    raise AttributeError(f"module 'gispulse.plugins.sources' has no attribute {name!r}")
 
 
 __all__ = [
