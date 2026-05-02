@@ -17,6 +17,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
+from typing import get_type_hints
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 
@@ -156,16 +157,28 @@ def _create_plugin_router(
     """Create a plugin router with context support and legacy fallback."""
     parameters = list(inspect.signature(factory.create).parameters.values())
     first_param = parameters[0] if parameters else None
-    wants_context = (
-        first_param is not None
-        and (
-            first_param.annotation is PluginHostContext
-            or first_param.name in {"context", "ctx", "host_context", "plugin_context"}
-        )
+    wants_context = first_param is not None and _plugin_factory_wants_context(
+        factory.create,
+        first_param,
     )
     if wants_context:
         return factory.create(context)  # type: ignore[arg-type]
     return factory.create(app)
+
+
+def _plugin_factory_wants_context(method: Any, first_param: inspect.Parameter) -> bool:
+    if first_param.name in {"context", "ctx", "host_context", "plugin_context"}:
+        return True
+    if first_param.annotation is PluginHostContext:
+        return True
+    if isinstance(first_param.annotation, str):
+        normalized = first_param.annotation.strip("'\"").rsplit(".", 1)[-1]
+        if normalized == "PluginHostContext":
+            return True
+    try:
+        return get_type_hints(method).get(first_param.name) is PluginHostContext
+    except Exception:
+        return False
 
 
 def create_app(
