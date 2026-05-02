@@ -108,10 +108,6 @@ class TestDuckDBSession:
     def test_sql_does_not_invent_crs_when_no_tables_registered(self, sample_gdf):
         """If sql() runs against an empty CRS map, the result has no CRS."""
         with DuckDBSession() as session:
-            # Register then query a different (non-existent in map) name via
-            # a literal subquery; result has geometry but no resolvable CRS.
             session.register_gdf("known", sample_gdf)
-            result = session.sql(
-                "SELECT * FROM known WHERE 1=0"  # references known => keeps CRS
-            )
+            result = session.sql("SELECT * FROM known WHERE 1=0")
             assert str(result.crs) == str(sample_gdf.crs)
