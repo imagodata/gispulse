@@ -12,14 +12,16 @@ variable (comma-separated list of valid keys). Absent or empty = auth disabled
 
 from __future__ import annotations
 
+import inspect
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 
 from core.config import settings as cfg
+from core.plugin_contracts import PluginHostContext, RouterFactory
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -144,6 +146,26 @@ def _setup_cors(app: FastAPI, origins: list[str]) -> None:
         allow_headers=["*"],
         allow_credentials=allow_creds,
     )
+
+
+def _create_plugin_router(
+    factory: RouterFactory,
+    app: FastAPI,
+    context: PluginHostContext,
+) -> APIRouter | None:
+    """Create a plugin router with context support and legacy fallback."""
+    parameters = list(inspect.signature(factory.create).parameters.values())
+    first_param = parameters[0] if parameters else None
+    wants_context = (
+        first_param is not None
+        and (
+            first_param.annotation is PluginHostContext
+            or first_param.name in {"context", "ctx", "host_context", "plugin_context"}
+        )
+    )
+    if wants_context:
+        return factory.create(context)  # type: ignore[arg-type]
+    return factory.create(app)
 
 
 def create_app(
@@ -534,6 +556,13 @@ def create_app(
 
     hub = PluginHub.get()
     app.state.plugin_hub = hub
+    plugin_context = PluginHostContext(
+        app=app,
+        settings=cfg,
+        logger=log,
+        plugin_hub=hub,
+    )
+    app.state.plugin_host_context = plugin_context
     for mw in hub.middleware:
         try:
             mw.install(app)
@@ -807,7 +836,7 @@ def create_app(
         # ``docs/PLUGIN_CONTRACT.md``.
         for plugin_name, factory in hub.routers.items():
             try:
-                router = factory.create(app)
+                router = _create_plugin_router(factory, app, plugin_context)
             except Exception as exc:
                 log.warning("plugin_router_create_failed", plugin=plugin_name, error=str(exc))
                 continue

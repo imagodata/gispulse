@@ -37,6 +37,21 @@ PROTOCOL_VERSION = "1.0"
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class PluginHostContext:
+    """Stable host context passed to context-aware plugin factories.
+
+    This first #68 slice is intentionally small. It exposes only the
+    runtime objects plugins already need at mount time without requiring
+    them to inspect ``app.state`` directly.
+    """
+
+    app: "FastAPI"
+    settings: Any
+    logger: Any
+    plugin_hub: Any
+
+
 @runtime_checkable
 class RouterFactory(Protocol):
     """Plugin that mounts an :class:`fastapi.APIRouter` on the host app.
@@ -49,6 +64,16 @@ class RouterFactory(Protocol):
     name: str
 
     def create(self, app: "FastAPI") -> "APIRouter | None":
+        ...
+
+
+@runtime_checkable
+class ContextAwareRouterFactory(Protocol):
+    """Additive router factory contract receiving :class:`PluginHostContext`."""
+
+    name: str
+
+    def create(self, context: PluginHostContext) -> "APIRouter | None":
         ...
 
 
