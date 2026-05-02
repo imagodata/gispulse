@@ -129,6 +129,9 @@ class TestCatalogRegistry:
             assert entry.layer_name == layer_name
             assert "sup" in entry.tags
             assert "servitude" in entry.tags
+            # SUP are part of the urbanism regulatory layer family;
+            # callers filtering by `urbanisme` must pick them up.
+            assert "urbanisme" in entry.tags
 
     def test_apicarto_nature_entries_resolve_from_catalog(self):
         for entry_id, endpoint_path in APICARTO_NATURE_ENTRIES.items():

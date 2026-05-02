@@ -163,7 +163,7 @@ _IGN_FLUX: list[dict] = [
         "service_url": f"{_BASE_OGC_FEATURES}?SERVICE=WFS&VERSION=2.0.0",
         "protocol": "wfs",
         "layer_name": "wfs_sup:assiette_sup_s",
-        "tags": ["sup", "servitude", "assiette", "surfacique", "france", "vector"],
+        "tags": ["sup", "servitude", "urbanisme", "assiette", "surfacique", "france", "vector"],
     },
     {
         "id": "ign-sup-assiette-l-wfs",
@@ -172,7 +172,7 @@ _IGN_FLUX: list[dict] = [
         "service_url": f"{_BASE_OGC_FEATURES}?SERVICE=WFS&VERSION=2.0.0",
         "protocol": "wfs",
         "layer_name": "wfs_sup:assiette_sup_l",
-        "tags": ["sup", "servitude", "assiette", "lineaire", "france", "vector"],
+        "tags": ["sup", "servitude", "urbanisme", "assiette", "lineaire", "france", "vector"],
     },
     {
         "id": "ign-sup-assiette-p-wfs",
@@ -181,7 +181,7 @@ _IGN_FLUX: list[dict] = [
         "service_url": f"{_BASE_OGC_FEATURES}?SERVICE=WFS&VERSION=2.0.0",
         "protocol": "wfs",
         "layer_name": "wfs_sup:assiette_sup_p",
-        "tags": ["sup", "servitude", "assiette", "ponctuel", "france", "vector"],
+        "tags": ["sup", "servitude", "urbanisme", "assiette", "ponctuel", "france", "vector"],
     },
     {
         "id": "ign-sup-generateur-s-wfs",
@@ -190,7 +190,7 @@ _IGN_FLUX: list[dict] = [
         "service_url": f"{_BASE_OGC_FEATURES}?SERVICE=WFS&VERSION=2.0.0",
         "protocol": "wfs",
         "layer_name": "wfs_sup:generateur_sup_s",
-        "tags": ["sup", "servitude", "generateur", "surfacique", "france", "vector"],
+        "tags": ["sup", "servitude", "urbanisme", "generateur", "surfacique", "france", "vector"],
     },
     {
         "id": "ign-sup-generateur-l-wfs",
@@ -199,7 +199,7 @@ _IGN_FLUX: list[dict] = [
         "service_url": f"{_BASE_OGC_FEATURES}?SERVICE=WFS&VERSION=2.0.0",
         "protocol": "wfs",
         "layer_name": "wfs_sup:generateur_sup_l",
-        "tags": ["sup", "servitude", "generateur", "lineaire", "france", "vector"],
+        "tags": ["sup", "servitude", "urbanisme", "generateur", "lineaire", "france", "vector"],
     },
     {
         "id": "ign-sup-generateur-p-wfs",
@@ -208,7 +208,7 @@ _IGN_FLUX: list[dict] = [
         "service_url": f"{_BASE_OGC_FEATURES}?SERVICE=WFS&VERSION=2.0.0",
         "protocol": "wfs",
         "layer_name": "wfs_sup:generateur_sup_p",
-        "tags": ["sup", "servitude", "generateur", "ponctuel", "france", "vector"],
+        "tags": ["sup", "servitude", "urbanisme", "generateur", "ponctuel", "france", "vector"],
     },
     {
         "id": "ign-sup-acte-wfs",
@@ -217,7 +217,7 @@ _IGN_FLUX: list[dict] = [
         "service_url": f"{_BASE_OGC_FEATURES}?SERVICE=WFS&VERSION=2.0.0",
         "protocol": "wfs",
         "layer_name": "wfs_sup:acte_sup",
-        "tags": ["sup", "servitude", "acte", "document", "france", "vector"],
+        "tags": ["sup", "servitude", "urbanisme", "acte", "document", "france", "vector"],
     },
     {
         "id": "ign-altitude-wms",
