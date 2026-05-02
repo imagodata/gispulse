@@ -756,33 +756,12 @@ def create_app(
         app.include_router(schedules_router, **write_protected)
         app.include_router(pipelines_router, **write_protected)
 
-        # Admin router (RBAC) — enterprise plugin
-        try:
-            from gispulse.adapters.http.routers.admin_router import router as admin_router
-            app.include_router(admin_router)
-            log.info("admin_router_mounted")
-        except ImportError:
-            log.debug("admin_router_not_available", msg="gispulse-enterprise not installed")
-
         # Marketplace (read endpoints open, install/uninstall admin-gated internally)
         app.include_router(marketplace_router)
 
-        # Billing router (optional — requires stripe package + config)
-        try:
-            from gispulse.adapters.billing.stripe_adapter import StripeAdapter, StripeConfigError
-            from persistence.licence import LicenceRepository
-
-            stripe_adapter = StripeAdapter()
-            app.state.stripe_adapter = stripe_adapter
-            app.state.licence_repo = LicenceRepository(db_path=db_path)
-
-            from gispulse.adapters.http.routers.billing_router import router as billing_router
-            app.include_router(billing_router)
-            log.info("billing_router_mounted")
-        except ImportError:
-            log.debug("billing_not_available", msg="stripe not installed")
-        except StripeConfigError as exc:
-            log.debug("billing_not_configured", reason=str(exc))
+        # Admin (RBAC) and Billing (Stripe) routers ship in the gispulse-enterprise
+        # plugin and are mounted by the PluginHub block below via
+        # ``gispulse.routers`` entry-points — no legacy try/except needed.
 
         from gispulse.adapters.http.routers.ogc_features_router import router as ogc_features_router
         app.include_router(ogc_features_router)
