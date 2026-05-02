@@ -33,6 +33,25 @@ app = typer.Typer(
 )
 
 
+def _version_callback(value: bool) -> None:
+    if not value:
+        return
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as pkg_version
+
+    try:
+        v = pkg_version("gispulse")
+    except PackageNotFoundError:
+        v = "unknown"
+    typer.echo(f"gispulse {v}")
+    try:
+        ent = pkg_version("gispulse-enterprise")
+        typer.echo(f"gispulse-enterprise {ent}")
+    except PackageNotFoundError:
+        pass
+    raise typer.Exit()
+
+
 @app.command()
 def init(
     directory: Path = typer.Argument(
@@ -1144,7 +1163,17 @@ def _startup_update_check() -> None:
 
 # Register the startup check as a Typer callback
 @app.callback(invoke_without_command=True)
-def _cli_callback(ctx: typer.Context) -> None:
+def _cli_callback(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the installed gispulse version (and gispulse-enterprise if present) and exit.",
+    ),
+) -> None:
     """GISPulse CLI entrypoint with startup update check."""
     if ctx.invoked_subcommand is None and ctx.info_name == "gispulse":
         # No subcommand: show help
