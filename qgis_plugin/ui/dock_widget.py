@@ -1,4 +1,4 @@
-"""Attach-trigger dock widget (issues v1.4-3 + v1.4-4).
+"""Attach-trigger dock widget (issues v1.4-3 + v1.4-4 + v1.4-5).
 
 UI surface and live runner integration:
 
@@ -7,9 +7,13 @@ UI surface and live runner integration:
 * QProcess-backed gispulse runner with streamed coloured logs, Cancel
   with SIGTERM→SIGKILL escalation, success/error status banner, and a
   Pause-autoscroll toggle (v1.4-4)
+* post-run change summary (added / modified / deleted), automatic layer
+  reload, edit-in-progress guard, and a 5-minute Restore button backed
+  by a `.gispulse/backups/` snapshot (v1.4-5)
 
 Pure validation/state logic lives in `state.py`; subprocess wrapping in
-`runtime/runner.py`. This module is the Qt glue between them.
+`runtime/runner.py`; diff + snapshot in `runtime/refresh.py`. This
+module is the Qt glue between them.
 """
 
 from __future__ import annotations
@@ -19,15 +23,24 @@ from pathlib import Path
 
 from ..runtime import LogLevel, detect_gispulse, format_log_html
 from ..runtime.error_dialog import show_install_dialog
+from ..runtime.refresh import (
+    compute_change_summary,
+    format_summary,
+    make_backup,
+    reload_layer_from_gpkg,
+    restore_from_backup,
+    signatures_from_gpkg,
+    signatures_from_qgs_layer,
+)
 from ..runtime.runner import make_runner_class
 from .state import CUSTOM_PROPERTY_KEY, AttachState
 
 
 def _qgis_imports():
-    """Lazy import so unit tests on the Qt-free `state` / `log_format`
-    modules don't pull in QGIS bindings."""
+    """Lazy import so unit tests on the Qt-free `state` / `log_format` /
+    `refresh` modules don't pull in QGIS bindings."""
     from qgis.core import QgsMapLayer, QgsProject, QgsVectorFileWriter
-    from qgis.PyQt.QtCore import Qt
+    from qgis.PyQt.QtCore import Qt, QTimer
     from qgis.PyQt.QtWidgets import (
         QCheckBox,
         QComboBox,
@@ -35,6 +48,7 @@ def _qgis_imports():
         QFileDialog,
         QHBoxLayout,
         QLabel,
+        QMessageBox,
         QPushButton,
         QTextEdit,
         QVBoxLayout,
@@ -46,12 +60,14 @@ def _qgis_imports():
         "QgsProject": QgsProject,
         "QgsVectorFileWriter": QgsVectorFileWriter,
         "Qt": Qt,
+        "QTimer": QTimer,
         "QCheckBox": QCheckBox,
         "QComboBox": QComboBox,
         "QDockWidget": QDockWidget,
         "QFileDialog": QFileDialog,
         "QHBoxLayout": QHBoxLayout,
         "QLabel": QLabel,
+        "QMessageBox": QMessageBox,
         "QPushButton": QPushButton,
         "QTextEdit": QTextEdit,
         "QVBoxLayout": QVBoxLayout,
@@ -120,6 +136,12 @@ def build_dock_widget(parent):
     status.setVisible(False)
     layout.addWidget(status)
 
+    # Restore (post-run, 5 min TTL)
+    restore_btn = q["QPushButton"](_tr("Restore previous version"), container)
+    restore_btn.setEnabled(False)
+    restore_btn.setVisible(False)
+    layout.addWidget(restore_btn)
+
     # Live logs area
     layout.addWidget(q["QLabel"](_tr("Logs:")))
     logs = q["QTextEdit"](container)
@@ -132,6 +154,7 @@ def build_dock_widget(parent):
     dock.setWidget(container)
 
     runner = GispulseRunner(container)
+    pending: dict = {}  # carries before_sigs / dataset_path / backup_path / layer_name across run
 
     # ─── helpers ─────────────────────────────────────────────────────
 
@@ -218,6 +241,28 @@ def build_dock_widget(parent):
         )
         return str(out)
 
+    def _confirm_editable_save_or_cancel(layer) -> bool:
+        """Block the run if the layer is being edited and let the user
+        choose: commit the buffer, discard it, or cancel the run.
+        Returns True if the run can proceed, False if the user cancelled.
+        """
+        if not layer.isEditable():
+            return True
+        ans = q["QMessageBox"].question(
+            container,
+            _tr("Layer is being edited"),
+            _tr(
+                "The selected layer has unsaved edits. Save them before running, "
+                "or cancel and resolve manually?"
+            ),
+            q["QMessageBox"].Save | q["QMessageBox"].Discard | q["QMessageBox"].Cancel,
+        )
+        if ans == q["QMessageBox"].Save:
+            return bool(layer.commitChanges())
+        if ans == q["QMessageBox"].Discard:
+            return bool(layer.rollBack())
+        return False
+
     def _on_run_clicked() -> None:
         det = detect_gispulse(use_cache=False)
         if not det.found:
@@ -225,12 +270,36 @@ def build_dock_widget(parent):
             return
         if not state.layer_id or not state.rules_path:
             return
+        layer = QgsProject.instance().mapLayer(state.layer_id)
+        if layer is None:
+            return
+        if not _confirm_editable_save_or_cancel(layer):
+            return
+        try:
+            before_sigs = signatures_from_qgs_layer(layer)
+        except Exception as exc:  # pragma: no cover - defensive
+            _show_status(_tr("Could not snapshot layer: {err}").format(err=exc), "#b00020")
+            return
         dataset_path = _export_layer_to_gpkg(state.layer_id)
         if not dataset_path:
             _show_status(_tr("Failed to export layer to GeoPackage."), "#b00020")
             return
+        try:
+            backup = make_backup(dataset_path, _project_dir())
+        except OSError as exc:
+            _show_status(_tr("Could not create backup: {err}").format(err=exc), "#b00020")
+            return
+        pending.clear()
+        pending.update(
+            before=before_sigs,
+            dataset_path=dataset_path,
+            layer_name=layer.name(),
+            backup=str(backup),
+        )
         logs.clear()
         status.setVisible(False)
+        restore_btn.setVisible(False)
+        restore_btn.setEnabled(False)
         run_btn.setEnabled(False)
         cancel_btn.setEnabled(True)
         runner.start(
@@ -254,18 +323,75 @@ def build_dock_widget(parent):
             scroll = logs.verticalScrollBar()
             scroll.setValue(scroll.maximum())
 
+    def _enable_restore_with_ttl() -> None:
+        """Show + enable the Restore button for `BACKUP_TTL_SECONDS` after a
+        successful run, then auto-disable so the user doesn't restore a
+        stale backup by surprise."""
+        from ..runtime.refresh import BACKUP_TTL_SECONDS
+
+        restore_btn.setVisible(True)
+        restore_btn.setEnabled(True)
+        timer = q["QTimer"](container)
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: restore_btn.setEnabled(False))
+        timer.start(BACKUP_TTL_SECONDS * 1000)
+
     def _on_finished(exit_code: int) -> None:
         cancel_btn.setEnabled(False)
-        if exit_code == 0:
-            _show_status(_tr("Trigger completed successfully."), "#1f8a3a")
-        elif exit_code == 130:
+        if exit_code == 130:
             _show_status(_tr("Trigger cancelled."), "#c97a00")
-        else:
+            _refresh_run_state()
+            return
+        if exit_code != 0:
             _show_status(
                 _tr("Trigger failed (exit {code}). See logs above.").format(code=exit_code),
                 "#b00020",
             )
+            _refresh_run_state()
+            return
+        # Success — diff snapshot, reload layer, expose Restore.
+        layer = QgsProject.instance().mapLayer(state.layer_id) if state.layer_id else None
+        if layer is None or not pending:
+            _show_status(_tr("Trigger completed successfully."), "#1f8a3a")
+            _refresh_run_state()
+            return
+        try:
+            after_sigs = signatures_from_gpkg(pending["dataset_path"], pending["layer_name"])
+        except Exception as exc:
+            _show_status(
+                _tr("Trigger ran but the result could not be read: {err}").format(err=exc),
+                "#c97a00",
+            )
+            _refresh_run_state()
+            return
+        summary = compute_change_summary(pending["before"], after_sigs)
+        text = format_summary(summary)
+        _show_status(_tr("{summary}").format(summary=text), "#1f8a3a")
+        if summary.has_changes:
+            try:
+                reload_layer_from_gpkg(layer, pending["dataset_path"], pending["layer_name"])
+            except Exception as exc:
+                _show_status(
+                    _tr("Trigger succeeded but reload failed: {err}").format(err=exc),
+                    "#c97a00",
+                )
+            else:
+                _enable_restore_with_ttl()
         _refresh_run_state()
+
+    def _on_restore_clicked() -> None:
+        if not pending or not state.layer_id:
+            return
+        layer = QgsProject.instance().mapLayer(state.layer_id)
+        if layer is None:
+            return
+        try:
+            restore_from_backup(layer, pending["backup"], pending["layer_name"])
+        except Exception as exc:
+            _show_status(_tr("Restore failed: {err}").format(err=exc), "#b00020")
+            return
+        restore_btn.setEnabled(False)
+        _show_status(_tr("Previous version restored."), "#c97a00")
 
     # ─── signals ─────────────────────────────────────────────────────
 
@@ -273,6 +399,7 @@ def build_dock_widget(parent):
     rules_btn.clicked.connect(_on_browse_clicked)
     run_btn.clicked.connect(_on_run_clicked)
     cancel_btn.clicked.connect(_on_cancel_clicked)
+    restore_btn.clicked.connect(_on_restore_clicked)
     runner.log_line.connect(_on_log_line)
     runner.finished.connect(_on_finished)
 
