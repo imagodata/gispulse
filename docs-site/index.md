@@ -65,6 +65,12 @@ features:
     link: /api/sdk
     linkText: Integrations
 
+  - icon: "🧭"
+    title: Walkthroughs end-to-end
+    details: "Trois scenarios concrets QGIS save → trigger fire → action portail : classification de batiments, recompute d'isochrones, log d'audit. Zero plugin GIS-client."
+    link: /guide/walkthroughs/parcels
+    linkText: Parcelles · Isochrone · Audit
+
   - icon: "🔓"
     title: Open Source AGPL-3.0
     details: "Code source ouvert, auditable, contribuable. Aucun vendor lock-in. Self-hosted sur votre infra ou dans votre cloud."
