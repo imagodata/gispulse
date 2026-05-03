@@ -18,6 +18,7 @@ LEGACY_PATTERNS = (
     "gispulse.adapters.billing",
     "gispulse.adapters.http.routers.admin_router",
     "gispulse.adapters.http.routers.billing_router",
+    "gispulse.adapters.http.middleware.production_auth",
 )
 
 
