@@ -488,167 +488,35 @@ def info(
 
 
 @app.command()
-def doctor() -> None:
-    """Run system diagnostics and check environment health."""
-    import os
-    import platform
-    import shutil
-    import sys
+@app.command()
+def doctor(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON instead of the rich table."),
+) -> None:
+    """Run system diagnostics and check environment health.
 
-    has_critical = False
-    results: list[tuple[str, str, str]] = []  # (status_icon, check_name, detail)
+    Wraps :func:`gispulse.diagnostics.system.run_checks` so the CLI and the
+    ``POST /system/doctor`` HTTP endpoint produce identical results.
+    """
+    from gispulse.diagnostics import run_checks
 
-    # --- 1. GISPulse version ---
-    try:
-        from importlib.metadata import version as pkg_version
+    result = run_checks()
 
-        gp_version = pkg_version("gispulse")
-        results.append(("\u2713", "GISPulse", f"v{gp_version}"))
-    except Exception:
-        results.append(("\u2713", "GISPulse", "v0.1.0 (source)"))
-
-    # --- 2. Python version ---
-    py_ver = platform.python_version()
-    py_tuple = sys.version_info[:2]
-    if py_tuple >= (3, 10):
-        results.append(("\u2713", "Python", f"v{py_ver}"))
+    if json_output:
+        import json as _json
+        typer.echo(_json.dumps(result.to_dict(), default=str))
     else:
-        results.append(("\u2717", "Python", f"v{py_ver} (>= 3.10 required)"))
-        has_critical = True
+        _doctor_render(result.checks)
 
-    # --- 3. GDAL ---
-    try:
-        from osgeo import gdal
-
-        gdal_ver = gdal.VersionInfo("RELEASE_NAME")
-        results.append(("\u2713", "GDAL", f"v{gdal_ver}"))
-    except ImportError:
-        results.append(("\u26a0", "GDAL", "not installed (optional, needed for raster)"))
-
-    # --- 4. DuckDB + spatial extension ---
-    try:
-        import duckdb
-
-        ddb_ver = duckdb.__version__
-        detail = f"v{ddb_ver}"
-        try:
-            conn = duckdb.connect(":memory:")
-            conn.execute("INSTALL spatial; LOAD spatial;")
-            conn.execute("SELECT ST_Point(0, 0);")
-            detail += " + spatial extension"
-            conn.close()
-        except Exception:
-            detail += " (spatial extension NOT available)"
-        results.append(("\u2713", "DuckDB", detail))
-    except ImportError:
-        results.append(("\u2717", "DuckDB", "not installed (required)"))
-        has_critical = True
-
-    # --- 5. PostGIS connectivity ---
-    from core.config import settings as _cfg
-    db_url = _cfg.database.dsn or None
-    if db_url:
-        try:
-            import psycopg2
-
-            conn = psycopg2.connect(db_url)
-            cur = conn.cursor()
-            cur.execute("SELECT PostGIS_Version();")
-            pg_ver = cur.fetchone()[0]
-            cur.close()
-            conn.close()
-            results.append(("\u2713", "PostGIS", f"v{pg_ver}"))
-        except ImportError:
-            results.append(("\u26a0", "PostGIS", "psycopg2 not installed (pip install gispulse[postgis])"))
-        except Exception as e:
-            results.append(("\u2717", "PostGIS", f"connection failed: {e}"))
-            has_critical = True
-    else:
-        results.append(("\u26a0", "PostGIS", "GISPULSE_DATABASE_URL not set (optional)"))
-
-    # --- 6. Disk space ---
-    try:
-        usage = shutil.disk_usage(os.getcwd())
-        free_gb = usage.free / (1024**3)
-        if free_gb < 1.0:
-            results.append(("\u26a0", "Disk space", f"{free_gb:.1f} GB free (< 1 GB warning)"))
-        else:
-            results.append(("\u2713", "Disk space", f"{free_gb:.1f} GB free"))
-    except OSError:
-        results.append(("\u26a0", "Disk space", "unable to check"))
-
-    # --- 7. Optional dependencies ---
-    optional_deps = {
-        "geopandas": "geopandas",
-        "shapely": "shapely",
-        "fiona": "fiona",
-        "pyogrio": "pyogrio",
-        "rasterio": "rasterio",
-    }
-    for display_name, module_name in optional_deps.items():
-        try:
-            mod = __import__(module_name)
-            ver = getattr(mod, "__version__", getattr(mod, "gdal_version", "?"))
-            results.append(("\u2713", display_name, f"v{ver}"))
-        except ImportError:
-            results.append(("\u26a0", display_name, "not installed (optional)"))
-
-    # --- 7b. mod_spatialite (Linux loadable extension) ---
-    # Tracked GPKGs install SQLite triggers calling SpatiaLite functions
-    # (ST_IsEmpty, ...). On Linux, libspatialite ships without the loadable
-    # extension by default → DML on tracked layers crashes with
-    # "no such function: ST_IsEmpty". Verify the extension is loadable.
-    if platform.system() == "Linux":
-        import sqlite3 as _sqlite3
-
-        _conn = _sqlite3.connect(":memory:")
-        try:
-            _conn.enable_load_extension(True)
-            try:
-                _conn.load_extension("mod_spatialite")
-                results.append(("✓", "mod_spatialite", "loadable"))
-            except _sqlite3.OperationalError:
-                # Non-critical: only required for SQL editing of tracked GPKGs.
-                results.append((
-                    "⚠",
-                    "mod_spatialite",
-                    "not loadable — apt install libsqlite3-mod-spatialite (needed for tracked GPKG DML)",
-                ))
-        except (AttributeError, _sqlite3.NotSupportedError):
-            # Python compiled without enable_load_extension support — rare
-            results.append(("⚠", "mod_spatialite", "sqlite3 built without load_extension support"))
-        finally:
-            _conn.close()
-
-    # --- 8. OIDC / Session secret ---
-    from core.config import settings as _cfg2
-    oidc_issuer = _cfg2.oidc.issuer.strip()
-    session_secret = _cfg2.session.secret.strip()
-    if oidc_issuer:
-        if session_secret:
-            results.append(("\u2713", "OIDC session secret", "set"))
-        else:
-            results.append(("\u2717", "OIDC session secret", "GISPULSE_SESSION_SECRET not set — OIDC will refuse to start"))
-            has_critical = True
-    else:
-        results.append(("\u26a0", "OIDC", "not configured (optional)"))
-
-    # --- 9. Portal assets ---
-    portal_dist = Path(__file__).resolve().parent.parent / "portal" / "dist"
-    if portal_dist.exists() and any(portal_dist.iterdir()):
-        results.append(("\u2713", "Portal assets", str(portal_dist)))
-    else:
-        results.append(("\u26a0", "Portal assets", "portal/dist/ not found (run: cd portal && npm run build)"))
-
-    # --- Render output ---
-    _doctor_render(results)
-
-    if has_critical:
+    if result.has_critical:
         raise typer.Exit(1)
 
 
-def _doctor_render(results: list[tuple[str, str, str]]) -> None:
-    """Render doctor results as a formatted table, using rich if available."""
+_STATUS_ICON = {"ok": "\u2713", "error": "\u2717", "warning": "\u26a0", "skipped": "\u2026"}
+_STATUS_STYLE = {"ok": "green", "error": "red bold", "warning": "yellow", "skipped": "dim"}
+
+
+def _doctor_render(results) -> None:
+    """Render :class:`CheckResult` items as a rich table (with plain fallback)."""
     try:
         from rich.console import Console
         from rich.table import Table
@@ -658,22 +526,21 @@ def _doctor_render(results: list[tuple[str, str, str]]) -> None:
         table.add_column("Check", min_width=16)
         table.add_column("Detail")
 
-        style_map = {"\u2713": "green", "\u2717": "red bold", "\u26a0": "yellow"}
-        for icon, name, detail in results:
-            style = style_map.get(icon, "")
-            table.add_row(f"[{style}]{icon}[/{style}]", name, detail)
+        for r in results:
+            icon = _STATUS_ICON.get(r.status, "?")
+            style = _STATUS_STYLE.get(r.status, "")
+            table.add_row(f"[{style}]{icon}[/{style}]", r.name, r.detail)
 
         Console().print(table)
     except ImportError:
-        # Fallback: plain text
         typer.echo("")
         typer.echo("GISPulse Doctor")
         typer.echo("=" * 60)
-        name_width = max(len(r[1]) for r in results)
-        for icon, name, detail in results:
-            typer.echo(f"  {icon}  {name:<{name_width}}  {detail}")
+        name_width = max((len(r.name) for r in results), default=0)
+        for r in results:
+            icon = _STATUS_ICON.get(r.status, "?")
+            typer.echo(f"  {icon}  {r.name:<{name_width}}  {r.detail}")
         typer.echo("=" * 60)
-
 
 @app.command()
 def engine(

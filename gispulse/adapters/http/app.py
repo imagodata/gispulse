@@ -40,6 +40,7 @@ from gispulse.adapters.http.routers.rules_router import router as rules_router
 from gispulse.adapters.http.routers.scenarios_router import router as scenarios_router
 from gispulse.adapters.http.routers.sessions_router import router as sessions_router
 from gispulse.adapters.http.routers.schedules_router import router as schedules_router
+from gispulse.adapters.http.routers.system_router import router as system_router
 from gispulse.adapters.http.routers.triggers_router import router as triggers_router
 from gispulse.adapters.http.routers.relations_router import router as relations_router
 from gispulse.adapters.http.routers.marketplace_router import router as marketplace_router
@@ -718,6 +719,7 @@ def create_app(
         app.include_router(filter_router)
         app.include_router(schedules_router)
         app.include_router(pipelines_router)
+        app.include_router(system_router)
         try:
             app.include_router(catalog_router)
         except Exception:
@@ -755,6 +757,7 @@ def create_app(
         app.include_router(filter_router)
         app.include_router(schedules_router, **write_protected)
         app.include_router(pipelines_router, **write_protected)
+        app.include_router(system_router, **protected)
 
         # Marketplace (read endpoints open, install/uninstall admin-gated internally)
         app.include_router(marketplace_router)
