@@ -69,29 +69,32 @@ def _get_auth_repo(request: Request) -> AuthRepository | None:
 
 
 async def _resolve_user_from_session(request: Request) -> User | None:
-    """Attempt to resolve a user from the OIDC session cookie.
+    """Attempt to resolve a user from a session cookie via plugin AuthProviders.
 
-    Returns None if no session cookie is present or OIDC is not configured.
-    Raises HTTPException on invalid/expired session tokens.
+    Iterates ``PluginHub.auth_providers`` (e.g. the ``oidc`` provider shipped
+    by ``gispulse-enterprise``); the first provider that returns claims wins.
+    Returns ``None`` when no provider is registered, none accept the request,
+    no auth repository is configured, or the resolved user is inactive.
+
+    A provider raising during ``authenticate`` is treated as a soft failure
+    so API key auth can still take over.
     """
-    try:
-        from gispulse.adapters.http.oidc import OIDCError, OIDCProvider, decode_session_token
-    except ImportError:
-        # gispulse-enterprise not installed — OIDC sessions unavailable
+    from core.plugin_hub import PluginHub
+
+    providers = PluginHub.get().auth_providers
+    if not providers:
         return None
 
-    cookie = request.cookies.get("gispulse_session")
-    if not cookie:
-        return None
+    claims: dict | None = None
+    for provider in providers.values():
+        try:
+            claims = await provider.authenticate(request)
+        except Exception:
+            claims = None
+        if claims is not None:
+            break
 
-    oidc: OIDCProvider | None = getattr(request.app.state, "oidc_provider", None)
-    if oidc is None:
-        return None
-
-    try:
-        claims = decode_session_token(cookie, oidc.config.session_secret)
-    except OIDCError:
-        # Invalid/expired session — don't block, fall through to API key auth
+    if claims is None:
         return None
 
     auth_repo = _get_auth_repo(request)
