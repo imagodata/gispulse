@@ -70,10 +70,52 @@ jobs:
         if: github.event_name == 'push' || inputs.dry_run == false
         uses: pypa/gh-action-pypi-publish@release/v1
 
-  # ── 2. Create GitHub Release with sdist + wheel attached ────────────
+  # ── 2. Build QGIS plugin ZIP (lockstep with the wheel version) ──────
+  build-plugin-zip:
+    name: Build QGIS plugin ZIP
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Verify plugin metadata version matches tag
+        if: github.event_name == 'push'
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PLUGIN_VERSION=$(grep -E '^version=' qgis_plugin/metadata.txt | head -1 | cut -d= -f2 | tr -d ' \r\n')
+          echo "Tag: $TAG_VERSION"
+          echo "qgis_plugin/metadata.txt: $PLUGIN_VERSION"
+          if [ "$TAG_VERSION" != "$PLUGIN_VERSION" ]; then
+            echo "ERROR: tag and qgis_plugin/metadata.txt versions differ — bump them in lockstep."
+            exit 1
+          fi
+
+      - name: Verify metadata.txt ↔ pyproject.toml lockstep
+        run: python scripts/build_qgis_plugin_zip.py --check
+
+      - name: Build plugin ZIP
+        run: python scripts/build_qgis_plugin_zip.py
+
+      - name: List built artefact
+        run: ls -la dist/gispulse-qgis-plugin-*.zip
+
+      - name: Upload plugin ZIP artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qgis-plugin-zip
+          path: dist/gispulse-qgis-plugin-*.zip
+          retention-days: 30
+          if-no-files-found: error
+
+  # ── 3. Create GitHub Release with sdist + wheel + plugin ZIP ────────
   github-release:
     name: Create GitHub Release
-    needs: publish-pypi
+    needs: [publish-pypi, build-plugin-zip]
     runs-on: ubuntu-latest
 
     steps:
@@ -88,6 +130,27 @@ jobs:
         run: |
           pip install build
           python -m build
+
+      - name: Download plugin ZIP from build-plugin-zip job
+        uses: actions/download-artifact@v4
+        with:
+          name: qgis-plugin-zip
+          path: dist/
+
+      - name: Verify both artefacts exist before publishing
+        # Issue #472 acceptance: "Job échoue si l'un des deux artefacts
+        # manque → release reste draft." Failing here keeps the release
+        # uncreated rather than published with half its assets.
+        run: |
+          shopt -s nullglob
+          WHEELS=(dist/*.whl)
+          ZIPS=(dist/gispulse-qgis-plugin-*.zip)
+          if [ ${#WHEELS[@]} -eq 0 ]; then
+            echo "ERROR: no wheel found in dist/"; exit 1
+          fi
+          if [ ${#ZIPS[@]} -eq 0 ]; then
+            echo "ERROR: no plugin ZIP found in dist/"; exit 1
+          fi
 
       - name: Generate checksums
         run: |
@@ -127,8 +190,8 @@ jobs:
           gh release create "${{ github.ref_name }}" \
             --title "GISPulse ${{ github.ref_name }}" \
             --notes-file release-notes.md \
-            dist/*.whl dist/*.tar.gz dist/SHA256SUMS
+            dist/*.whl dist/*.tar.gz dist/gispulse-qgis-plugin-*.zip dist/SHA256SUMS
 
-  # ── 3. Docker image to GHCR (deferred — Dockerfile is engine + viewer
+  # ── 4. Docker image to GHCR (deferred — Dockerfile is engine + viewer
   #      only since the portal/ split. Push job will be reinstated as a
   #      follow-up once the GHCR creds + tagging policy are agreed.)
