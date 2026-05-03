@@ -1,0 +1,20 @@
+[general]
+name=GISPulse
+qgisMinimumVersion=3.28
+qgisMaximumVersion=3.99
+description=Trigger-driven spatial CDC for QGIS — attach gispulse rules to any layer.
+about=GISPulse turns QGIS layers into reactive datasets. Save a tracked GeoPackage and gispulse fires the rules attached to it: webhooks, downstream layer refresh, validation. Requires the gispulse Python CLI (pip install gispulse).
+version=1.5.1
+author=Imagodata
+email=hello@gispulse.dev
+homepage=https://gispulse.dev
+tracker=https://github.com/imagodata/gispulse/issues
+repository=https://github.com/imagodata/gispulse
+icon=icon.png
+category=Vector
+tags=cdc,triggers,rules,geopackage,automation,webhooks
+experimental=True
+deprecated=False
+hasProcessingProvider=no
+server=False
+plugin_dependencies=
