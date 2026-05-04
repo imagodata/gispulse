@@ -105,7 +105,7 @@ jobs:
         run: ls -la dist/gispulse-qgis-plugin-*.zip
 
       - name: Upload plugin ZIP artefact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: qgis-plugin-zip
           path: dist/gispulse-qgis-plugin-*.zip
