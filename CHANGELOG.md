@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-05-04
+
+Big-launch release. The runtime keeps the v1.5 surface; this release adds the QGIS plugin, three end-to-end walkthroughs, plugs a critical portal-mode middleware gap, and lands a `/system/doctor` health endpoint.
+
+### Added
+- **QGIS plugin (`qgis_plugin/`)** — thin dock widget that shells out to the system `gispulse` CLI via `QProcess`. Detects CLI presence with version-gate (≥1.5.0), OS-specific install dialog, attach-trigger combo (vector layers only), non-blocking runner with streamed coloured logs + Cancel (SIGTERM/SIGKILL), post-run change summary + auto-reload + 5-min Restore. ~500 KB unzipped, 99 tests, lockstep version with the wheel. Submitted to plugins.qgis.org. Source under AGPL v3 in the OSS repo. (#71, #73, #74, #76, #78, #80, #84)
+- **Walkthroughs (FR + EN)** — three end-to-end scenarios published as docs site pages: `classify_buildings_in_isochrones` (Parcels — buildings re-tiered into walking-isochrone rings on parcel edits), `recompute_isochrones` (Isochrone — 3 walking-isochrone rings recomputed via local OSM graph on parcel boundary moves), `log_event` (Audit — every INSERT/UPDATE/DELETE mirrored to `_gispulse_audit_log`, exportable via `gispulse audit export`). (#89)
+- **`POST /system/doctor`** — backend health endpoint that mirrors `gispulse track doctor` output (engine status, GPKG application_id, change-log table presence, per-layer triggers, busy_timeout) so the portal and CLI can surface the same health signal. Closes #91. (#97)
+- **CI — `build-plugin-zip` job** — packages and verifies the plugin ZIP on every tag. `release.yml` `github-release` step is now double-gated: fails if either the wheel or the plugin ZIP artefact is missing. Plugin ZIP attached to the GH Release. (#79)
+
+### Fixed
+- **Security — `ProductionAuthMiddleware` was never mounted in portal mode.** PluginHub middleware install was nested inside the `is_portal=False` branch of `create_app`, so the enterprise auth middleware (shipped via the `gispulse.middleware` entry-point) was never installed when `gispulse portal` ran. Combined with the legacy `gispulse.adapters.http.middleware.production_auth` import that no longer resolves post-split (silently caught by `except ImportError`), `GISPULSE_ENV=production` portal deployments were UNPROTECTED on `/filter/*`, `/ogc/*`, `/ws/*`. Hoisted the `hub.middleware` install loop above the `is_portal` branch so middleware applies to both modes; routers stay mode-gated. Closes part 2 of #87. (#96)
+- **CI — `test_p02_enable_tracking_full_lifecycle` flake on Python 3.10/3.12.** Wrapped `sqlite3.connect()` with a 3-attempt retry (50 ms / 100 ms / 200 ms) to absorb the GPKG file-lock race against pyogrio's reader on slower CI runners. Pre-#86 the test failed intermittently with `sqlite3.DatabaseError: file is not a database`. (#86, #57)
+- **Docs — dead `git clone` URL in QGIS plugin install guide.** The manual-install snippet pointed to `github.com/gispulse/gispulse` which 404s; the actual repo lives at `github.com/imagodata/gispulse`. Fixed in both FR and EN. (#101)
+
+### Changed
+- `release.yml` — `github-release` waits for both `publish-pypi` and `build-plugin-zip` before creating the release, so a missing plugin ZIP fails fast.
+
+### Security
+- **Dependencies** — bump `docker/build-push-action` 6 → 7, `actions/upload-pages-artifact` 4 → 5, `actions/upload-artifact` 4 → 7. (#98, #99, #100)
+
+### Notes
+- QGIS plugin reviewer turnaround on plugins.qgis.org is 1-4 weeks. Manual install via the attached ZIP works in the meantime.
+- Public demo (`demo.gispulse.dev`) `/examples/*` mini-backend has been live since 1.5.1; the SPA mount on `/portal` is tracked separately in #50.
+
 ## [1.5.1] - 2026-04-30
 
 Mode 2 portail Community: GISPulse now ships a local visual workbench. The portal you saw on `gispulse.dev` is now a Python package — `pip install gispulse-portal` adds it to your CLI install, and `gispulse portal` opens the bundled SPA on `http://localhost:8001/portal` with same-origin engine.
