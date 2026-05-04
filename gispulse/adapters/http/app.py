@@ -511,16 +511,32 @@ def create_app(
     else:
         app.state.read_only = False
 
-    # ------------------------------------------------------------------ Production auth middleware (#242)
-    # Unified auth: accepts both X-API-Key header and Authorization: Bearer.
-    # Keys are sourced from the same GISPULSE_API_KEYS store used by the
-    # dependency-based auth (auth.py).  GISPULSE_API_KEY (singular) is also
-    # accepted for backward compatibility and added to the set.
+    # ------------------------------------------------------------------ Plugin middleware (both modes)
+    # Middleware contributed by external packages (gispulse-enterprise's
+    # ProductionAuthMiddleware, etc.) is discovered through the
+    # ``gispulse.middleware`` entry-point group and installed for every
+    # mode — including ``portal`` — so production deployments stay
+    # protected regardless of how the app was created. Routers stay
+    # mode-gated below; only middleware applies universally.
+    from core.plugin_hub import PluginHub
+
+    hub = PluginHub.get()
+    app.state.plugin_hub = hub
+    for mw in hub.middleware:
+        try:
+            mw.install(app)
+            log.info("plugin_middleware_installed", plugin=mw.name)
+        except Exception as exc:
+            log.warning("plugin_middleware_install_failed", plugin=mw.name, error=str(exc))
+
+    # Production-env warning is emitted in OSS (factory-agnostic) so
+    # operators get a single grep target whether or not the enterprise
+    # plugin is installed. The factory in gispulse-enterprise re-checks
+    # the same condition and silently skips when no keys are set.
     if cfg.api.env == "production":
         _middleware_keys: set[str] = set(api_keys) if api_keys else set()
         if cfg.api.api_key.strip():
             _middleware_keys.add(cfg.api.api_key.strip())
-
         if not _middleware_keys:
             import warnings
             warnings.warn(
@@ -529,14 +545,6 @@ def create_app(
                 "Routes /filter/*, /ogc/*, /ws/* are UNPROTECTED.",
                 stacklevel=2,
             )
-
-        try:
-            from gispulse.adapters.http.middleware.production_auth import ProductionAuthMiddleware
-
-            app.add_middleware(ProductionAuthMiddleware, api_keys=_middleware_keys)
-            log.info("production_auth_middleware_active", routes="all non-public routes")
-        except ImportError:
-            log.debug("production_auth_not_available", msg="gispulse-enterprise not installed")
 
     # ------------------------------------------------------------------ Audit middleware (Pro, opt-in)
     audit_enabled = cfg.audit.enabled
@@ -776,13 +784,13 @@ def create_app(
         app.include_router(ws_router)
         app.include_router(esb_router, **protected)
 
-        # ------------------------------------------------------------------ Plugin hub
-        # Routers/middleware contributed by external packages
-        # (e.g. ``gispulse-enterprise``) are discovered through Python
-        # entry-points and mounted here. See ``docs/PLUGIN_CONTRACT.md``.
-        from core.plugin_hub import PluginHub
-
-        hub = PluginHub.get()
+        # ------------------------------------------------------------------ Plugin routers
+        # Routers contributed by external packages (e.g. gispulse-enterprise's
+        # admin/billing/auth) are discovered through the ``gispulse.routers``
+        # entry-point group and mounted here in full mode only. Plugin
+        # middleware was already installed earlier in ``create_app`` so it
+        # protects both portal and full deployments — see
+        # ``docs/PLUGIN_CONTRACT.md``.
         for plugin_name, factory in hub.routers.items():
             try:
                 router = factory.create(app)
@@ -794,13 +802,6 @@ def create_app(
                 continue
             app.include_router(router)
             log.info("plugin_router_mounted", plugin=plugin_name)
-        for mw in hub.middleware:
-            try:
-                mw.install(app)
-                log.info("plugin_middleware_installed", plugin=mw.name)
-            except Exception as exc:
-                log.warning("plugin_middleware_install_failed", plugin=mw.name, error=str(exc))
-        app.state.plugin_hub = hub
 
         app.state.event_hub = get_event_hub()
         app.state.viewer_state = {"file_path": None, "layer_cache": {}}
