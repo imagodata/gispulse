@@ -119,6 +119,14 @@ const frSidebar = {
         { text: 'Déploiement', link: '/guide/deployment' },
       ],
     },
+    {
+      text: 'Walkthroughs',
+      items: [
+        { text: 'Parcelles', link: '/guide/walkthroughs/parcels' },
+        { text: 'Isochrone', link: '/guide/walkthroughs/isochrone' },
+        { text: 'Audit', link: '/guide/walkthroughs/audit' },
+      ],
+    },
   ],
   '/api/': [
     {
@@ -244,6 +252,14 @@ const enSidebar = {
         { text: 'Engines — DuckDB / PostGIS', link: '/en/guide/engines' },
         { text: 'Architecture', link: '/en/guide/architecture' },
         { text: 'Deployment', link: '/en/guide/deployment' },
+      ],
+    },
+    {
+      text: 'Walkthroughs',
+      items: [
+        { text: 'Parcels', link: '/en/guide/walkthroughs/parcels' },
+        { text: 'Isochrone', link: '/en/guide/walkthroughs/isochrone' },
+        { text: 'Audit', link: '/en/guide/walkthroughs/audit' },
       ],
     },
   ],

@@ -291,6 +291,7 @@ This matrix is currently **maintained manually**. Any new feature (CLI or portal
 3. Request review from Marco (gis-lead-dev) or Jordan (jordan-po) to validate the status
 
 **See also:**
+- **End-to-end walkthroughs**: [Parcels](./walkthroughs/parcels) · [Isochrone](./walkthroughs/isochrone) · [Audit](./walkthroughs/audit) — each scenario demonstrates the symmetry in action (QGIS edit → trigger fires → action visible in the portal)
 - [Capability coverage matrix](./coverage) — for the 100+ pipeline capabilities (test ✕ docs ✕ playground ✕ template)
 - [CLI Reference](./cli)
 - [Architecture](./architecture)
