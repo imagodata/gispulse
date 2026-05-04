@@ -21,7 +21,7 @@ The GISPulse QGIS plugin connects QGIS to a GISPulse backend (local or remote) t
 
 ```bash
 # Clone the repository
-git clone https://github.com/gispulse/gispulse
+git clone https://github.com/imagodata/gispulse
 cd gispulse/clients/qgis
 
 # Build the plugin (creates gispulse_qgis.zip)
