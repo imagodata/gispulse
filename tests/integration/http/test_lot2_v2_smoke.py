@@ -78,7 +78,7 @@ def _wait_for_ready(proc: subprocess.Popen, timeout: float = 25.0) -> dict:
             continue
         line = line.strip()
         if line.startswith("GISPULSE_READY:"):
-            return json.loads(line[len("GISPULSE_READY:"):])
+            return json.loads(line[len("GISPULSE_READY:") :])
     raise TimeoutError("sidecar never emitted GISPULSE_READY")
 
 
@@ -127,19 +127,20 @@ def _sidecar(
     runner_path = os.pathsep.join(p for p in sys.path if p)
     if runner_path:
         existing = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = (
-            f"{runner_path}{os.pathsep}{existing}" if existing else runner_path
-        )
+        env["PYTHONPATH"] = f"{runner_path}{os.pathsep}{existing}" if existing else runner_path
 
     # Use the same Python interpreter that runs the test, via -m, so the
     # subprocess inherits the editable install and never pulls in a stale
     # gispulse from another env.
     args = [
         sys.executable,
-        "-m", "gispulse.cli",
+        "-m",
+        "gispulse.cli",
         "engine",
-        "--port", "0",
-        "--engine", engine,
+        "--port",
+        "0",
+        "--engine",
+        engine,
     ]
     if no_browser:
         args.append("--no-browser")
@@ -223,6 +224,51 @@ def _gpkg_point_blob(x: float = 0.0, y: float = 0.0, srs_id: int = 4326) -> byte
     return header + wkb
 
 
+def _connect_with_retry(
+    gpkg: Path, *, attempts: int = 8, delay: float = 0.15
+) -> sqlite3.Connection:
+    """Open a sqlite3 connection on a GPKG with retry on transient errors.
+
+    The lifecycle test (#57) toggles tracking, then immediately reaches
+    into the GPKG with raw sqlite3 to assert what the watcher sees.
+    On Python 3.10 CI the GPKG is occasionally caught mid-flush by the
+    pyogrio handle the server held open, surfacing as ``DatabaseError:
+    file is not a database`` or transient ``database is locked``. Both
+    clear within a few hundred milliseconds; this helper wraps the
+    connect in a retry loop so the assertion the test actually cares
+    about isn't masked by a file-state race.
+
+    Because ``sqlite3.connect()`` is lazy and won't read page 1 until
+    the first query, we force a header read with ``PRAGMA schema_version``
+    inside the retry — that's where the "file is not a database" error
+    actually surfaces.
+
+    `timeout=10` makes SQLite itself wait for write locks; the loop
+    handles the narrower "header not yet flushed" window.
+    """
+    last: sqlite3.DatabaseError | None = None
+    for _ in range(attempts):
+        con: sqlite3.Connection | None = None
+        try:
+            con = sqlite3.connect(str(gpkg), timeout=10)
+            con.execute("PRAGMA schema_version").fetchone()
+            return con
+        except sqlite3.DatabaseError as exc:
+            msg = str(exc).lower()
+            if "file is not a database" in msg or "database is locked" in msg:
+                last = exc
+                if con is not None:
+                    try:
+                        con.close()
+                    except sqlite3.Error:
+                        pass
+                time.sleep(delay)
+                continue
+            raise
+    assert last is not None
+    raise last
+
+
 def _drop_rtree_triggers(gpkg: Path, layer: str = "parcels") -> None:
     """Drop the GeoPackage RTree triggers that reference SpatiaLite's
     ``ST_IsEmpty`` / ``ST_MinX`` etc — these are missing on a vanilla
@@ -236,7 +282,7 @@ def _drop_rtree_triggers(gpkg: Path, layer: str = "parcels") -> None:
             "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'rtree_%'"
         ).fetchall()
         for (name,) in rows:
-            con.execute(f"DROP TRIGGER IF EXISTS \"{name}\"")
+            con.execute(f'DROP TRIGGER IF EXISTS "{name}"')
         con.commit()
     finally:
         con.close()
@@ -421,7 +467,7 @@ async def test_p02_enable_tracking_full_lifecycle(tmp_data_dir: Path, tmp_path: 
             open_timeout=5,
         ) as ws:
             # Direct sqlite3 INSERT bypassing the engine (true external write).
-            con = sqlite3.connect(str(gpkg_on_disk))
+            con = _connect_with_retry(gpkg_on_disk)
             try:
                 con.execute(
                     "INSERT INTO parcels(name, value, geom) VALUES (?, ?, NULL)",
@@ -463,7 +509,7 @@ async def test_p02_enable_tracking_full_lifecycle(tmp_data_dir: Path, tmp_path: 
             f"ws://127.0.0.1:{port}/ws/events?topics=dml.changed",
             open_timeout=5,
         ) as ws:
-            con = sqlite3.connect(str(gpkg_on_disk))
+            con = _connect_with_retry(gpkg_on_disk)
             try:
                 con.execute(
                     "INSERT INTO parcels(name, value, geom) VALUES (?, ?, NULL)",
@@ -494,7 +540,7 @@ async def test_p02_enable_tracking_full_lifecycle(tmp_data_dir: Path, tmp_path: 
             f"ws://127.0.0.1:{port}/ws/events?topics=dml.changed",
             open_timeout=5,
         ) as ws:
-            con = sqlite3.connect(str(gpkg_on_disk))
+            con = _connect_with_retry(gpkg_on_disk)
             try:
                 con.execute(
                     "INSERT INTO parcels(name, value, geom) VALUES (?, ?, NULL)",
@@ -581,9 +627,9 @@ async def test_p02_multi_gpkg_watcher_registry(tmp_data_dir: Path, tmp_path: Pat
                     rid = cur.lastrowid or -1
                     con.commit()
                     # Verify the row + change-log row landed.
-                    log_count = con.execute(
-                        "SELECT COUNT(*) FROM _gispulse_change_log"
-                    ).fetchone()[0]
+                    log_count = con.execute("SELECT COUNT(*) FROM _gispulse_change_log").fetchone()[
+                        0
+                    ]
                     insert_results.append((rid, log_count))
                 finally:
                     con.close()
@@ -688,7 +734,7 @@ def test_p04c_layer_name_sqli_rejected(tmp_data_dir: Path, tmp_path: Path) -> No
         )
         # Hostile layer name — quoted with double quotes in DDL via [..]
         bad = 'a"); DROP TABLE x; --'
-        con.execute(f'CREATE TABLE [{bad}] (fid INTEGER PRIMARY KEY, name TEXT, geom BLOB)')
+        con.execute(f"CREATE TABLE [{bad}] (fid INTEGER PRIMARY KEY, name TEXT, geom BLOB)")
         con.execute(
             "INSERT INTO gpkg_contents(table_name, data_type, srs_id) VALUES (?, 'features', 4326)",
             (bad,),
@@ -888,9 +934,7 @@ def test_p04a_stuck_backlog_resolved(tmp_path: Path) -> None:
             # the first broadcast() raised.
             con = sqlite3.connect(str(src))
             try:
-                rows = con.execute(
-                    "SELECT processed FROM _gispulse_change_log"
-                ).fetchall()
+                rows = con.execute("SELECT processed FROM _gispulse_change_log").fetchall()
             finally:
                 con.close()
             assert rows, "no change log rows recorded — trigger never fired"
