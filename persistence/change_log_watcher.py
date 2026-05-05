@@ -166,6 +166,7 @@ class ChangeLogWatcher:
         triggers_provider: Callable[[], list[Trigger]] | None = None,
         action_dispatcher: _ActionDispatcherProtocol | None = None,
         bulk_threshold: int = 0,
+        bulk_eval: str = "skip",
     ) -> None:
         if poll_interval <= 0:
             raise ValueError("poll_interval must be > 0")
@@ -173,6 +174,11 @@ class ChangeLogWatcher:
             raise ValueError("batch_limit must be > 0")
         if bulk_threshold < 0:
             raise ValueError("bulk_threshold must be >= 0 (0 disables bulk mode)")
+        if bulk_eval not in ("skip", "per_row"):
+            raise ValueError(
+                "bulk_eval must be 'skip' (collapse batch, no eval — Mode 2)"
+                " or 'per_row' (1 bulk WS event + per-row trigger eval — Mode 3)"
+            )
         # Lot 2 v2 (Beta E2E): ``dataset_id`` is mandatory. Multi-tenant
         # event consumers cannot tell two tables named ``parcels`` apart
         # across two GPKGs without it. Empty string is rejected because
@@ -189,10 +195,23 @@ class ChangeLogWatcher:
         self._batch_limit = int(batch_limit)
         # v1.3.0 #8: when len(pending_rows) >= bulk_threshold, the tick
         # collapses the batch into a single ``bulk.changed`` event instead
-        # of broadcasting one ``dml.changed`` per row. Trigger evaluation
-        # is also skipped — receivers get a summary, not a per-row stream.
-        # 0 (default) keeps the legacy per-row behaviour for safety.
+        # of broadcasting one ``dml.changed`` per row. ``0`` (default)
+        # keeps the legacy per-row behaviour (Mode 1) for safety.
+        # v1.5.3 #103 (B-01): ``bulk_eval`` selects what happens to
+        # trigger evaluation under bulk mode:
+        #   - ``"skip"``    — Mode 2 (default, back-compat): evaluation
+        #                     is skipped entirely, receivers get a
+        #                     summary and run their own batch-level
+        #                     reconciliation if they need to.
+        #   - ``"per_row"`` — Mode 3 (new): emit ONE ``bulk.changed``
+        #                     summary on the wire AND still evaluate
+        #                     triggers per row (firing
+        #                     ``trigger.fired`` + dispatching actions).
+        #                     The 50-paste-in-QGIS scenario gets one WS
+        #                     event for subscribers but every DSL
+        #                     trigger still sees every row.
         self._bulk_threshold = int(bulk_threshold)
+        self._bulk_eval = bulk_eval
         self._evaluator = trigger_evaluator
         self._triggers_provider = triggers_provider
         self._action_dispatcher = action_dispatcher
@@ -319,186 +338,22 @@ class ChangeLogWatcher:
 
         # v1.3.0 #8: bulk-mode short-circuit. When a single tick pulls
         # ``bulk_threshold`` or more rows (typical of an ogr2ogr append,
-        # a QGIS bulk paste, or a Python loop INSERT), collapse them into
-        # one summary event instead of broadcasting + evaluating per row.
-        # Receivers see a single ``bulk.changed`` with op_counts and a
-        # change_id range; trigger evaluation is skipped for that batch.
+        # a QGIS bulk paste, or a Python loop INSERT), collapse the
+        # per-row ``dml.changed`` flood into a single ``bulk.changed``
+        # summary. The bulk path's evaluation behaviour is driven by
+        # :attr:`_bulk_eval` (B-01 #103, v1.5.3):
+        #   - ``"skip"``    — Mode 2 (back-compat): no per-row eval.
+        #   - ``"per_row"`` — Mode 3: 1 bulk WS event + N trigger evals.
         if self._bulk_threshold > 0 and len(rows) >= self._bulk_threshold:
             return self._bulk_tick(rows)
 
-        # Resolve active triggers once per batch so changes made via the
-        # API show up on the next tick without restarting the watcher.
-        active_triggers: list[Trigger] = []
-        if self._triggers_provider is not None:
-            try:
-                active_triggers = list(self._triggers_provider() or [])
-            except Exception as exc:
-                logger.warning("change_log_triggers_provider_failed: %s", exc)
-                active_triggers = []
-        # Refresh the per-tick lookup so dispatch can recover full
-        # Trigger objects from FiredTrigger.trigger_id. Only built when
-        # an action_dispatcher is wired (otherwise pure overhead — and
-        # tolerates triggers_provider implementations that pass in
-        # placeholder strings rather than full :class:`Trigger`).
-        if self._action_dispatcher is not None:
-            self._trigger_lookup = {
-                t.id: t for t in active_triggers if hasattr(t, "id")
-            }
-        else:
-            self._trigger_lookup = {}
-
-        evaluator = self._evaluator
-        if active_triggers and evaluator is None:
-            # Lazy import: rules → core, persistence → core; this keeps
-            # the persistence layer free of a hard rules dependency.
-            from rules.trigger_evaluator import TriggerEvaluator
-
-            evaluator = TriggerEvaluator()
-            self._evaluator = evaluator
+        active_triggers, evaluator = self._resolve_active_triggers_and_evaluator()
 
         max_id = 0
         for row in rows:
-            try:
-                change_id = int(row["id"])
-            except (KeyError, TypeError, ValueError):
-                # Malformed row — skip but don't ack so the next tick can
-                # still see it (or surface the issue).
-                logger.warning("change_log_row_missing_id row=%r", row)
-                continue
-
-            table = str(row.get("table_name") or "")
-            op = str(row.get("operation") or "").upper()
-            fid_raw = row.get("row_pk")
-            fid = str(fid_raw) if fid_raw is not None else None
-            ts = row.get("changed_at")
-
-            # ---- Broadcast dml.changed ---------------------------------
-            # Payload is intentionally minimal: no field values, no geom.
-            # This matches the security note in Lot 2 (do not leak data
-            # via /ws/events when the endpoint is unauthenticated).
-            #
-            # P0-4a (Beta): wrap each broadcast in its own try/except. A
-            # buggy/dead subscriber must NOT abort the whole tick — that
-            # would block ack and create a stuck backlog (same rows
-            # re-broadcast forever).
-            try:
-                self._hub.broadcast(
-                    "dml.changed",
-                    {
-                        "dataset_id": self._dataset_id,
-                        "table": table,
-                        "op": op,
-                        "fid": fid,
-                        "change_id": change_id,
-                        "ts": ts,
-                    },
-                )
-            except Exception as exc:
-                logger.error(
-                    "event_hub_broadcast_failed change_id=%d table=%s op=%s err=%s",
-                    change_id,
-                    table,
-                    op,
-                    exc,
-                )
-                # Continue: still update max_id so we ack and don't loop.
-
-            # ---- Evaluate triggers -------------------------------------
-            if active_triggers and evaluator is not None:
-                try:
-                    operation = ChangeOperation(op)
-                except ValueError:
-                    operation = ChangeOperation.INSERT
-
-                # When any active trigger carries a DSL predicate
-                # (S4: ``conditions["predicate_ast"]``), fetch the
-                # row attributes from the underlying table so the
-                # evaluator can match against real values. This is
-                # opt-in per trigger — triggers without predicates
-                # never pay the SELECT cost.
-                #
-                # We guard with table+pk presence: DELETE rows have
-                # no row to load (``new_values`` stays empty, the
-                # predicate then evaluates over what amounts to
-                # NULLs everywhere, which is the documented semantics
-                # for DSL on DELETE).
-                new_values: dict[str, Any] = {}
-                if (
-                    op != "DELETE"
-                    and fid is not None
-                    and table
-                    and any(
-                        (getattr(t, "conditions", None) or {}).get("predicate_ast")
-                        is not None
-                        for t in active_triggers
-                    )
-                ):
-                    new_values = self._load_row_values(table, fid) or {}
-
-                record = ChangeRecord(
-                    session_id="",
-                    table_name=table,
-                    feature_id=fid,
-                    operation=operation,
-                    new_values=new_values,
-                )
-
-                try:
-                    fired = evaluator.evaluate(record, active_triggers)
-                except Exception as exc:
-                    logger.warning(
-                        "change_log_trigger_eval_failed change_id=%d: %s",
-                        change_id,
-                        exc,
-                    )
-                    fired = []
-
-                for ft in fired:
-                    matched = bool(getattr(ft, "matched", False))
-                    if not matched:
-                        continue
-                    trigger_id = getattr(ft, "trigger_id", None)
-                    try:
-                        self._hub.broadcast(
-                            "trigger.fired",
-                            {
-                                "dataset_id": self._dataset_id,
-                                "trigger_id": str(trigger_id) if trigger_id else None,
-                                "change_id": change_id,
-                                "table": table,
-                                "op": op,
-                                "fid": fid,
-                                "actions": list(getattr(ft, "actions_dispatched", []) or []),
-                                "eval_time_ms": float(getattr(ft, "eval_time_ms", 0.0)),
-                            },
-                        )
-                    except Exception as exc:
-                        logger.error(
-                            "event_hub_broadcast_failed event=trigger.fired "
-                            "change_id=%d trigger_id=%s err=%s",
-                            change_id,
-                            trigger_id,
-                            exc,
-                        )
-                        # Continue — don't abort the row.
-
-                    # ---- Dispatch actions (#458) ----------------------
-                    # Bridge to ActionDispatcher so NOTIFY / WEBHOOK /
-                    # SET_FIELD / RUN_SQL / … run end-to-end, not just
-                    # broadcast over WS. Wrapped in try/except: the
-                    # dispatcher already wraps each handler too, but a
-                    # bad Trigger lookup or context build must not abort
-                    # the tick.
-                    if self._action_dispatcher is not None:
-                        self._dispatch_fired(
-                            ft,
-                            table=table,
-                            operation=op,
-                            row_id=fid,
-                            change_id=change_id,
-                            ts=ts,
-                        )
-
+            change_id = self._process_row(
+                row, evaluator, active_triggers, broadcast_dml=True
+            )
             if change_id > max_id:
                 max_id = change_id
 
@@ -525,17 +380,26 @@ class ChangeLogWatcher:
     def _bulk_tick(self, rows: list[dict]) -> int:
         """Collapse a large batch into a single ``bulk.changed`` event.
 
-        Behaviour:
+        Behaviour driven by :attr:`_bulk_eval` (v1.5.3 #103, B-01):
+
+        * ``"skip"`` — Mode 2 (default, back-compat):
             - Broadcast ONE summary event with op_counts, layers, and
               the ``change_id_range`` so receivers can de-duplicate.
             - Skip per-row trigger evaluation entirely. Receivers that
               care about bulk imports should subscribe to ``bulk.changed``
               and run their own batch-level reconciliation; rules that
               filter on per-row attributes are not designed for bulk.
+
+        * ``"per_row"`` — Mode 3 (B-01):
+            - Same single ``bulk.changed`` summary on the wire.
+            - **Plus** evaluate triggers per row (firing ``trigger.fired``
+              for matched triggers and dispatching their actions). The
+              50-row QGIS paste scenario gets one WS event AND every DSL
+              trigger still sees every row.
+
+        Common to both modes:
             - Ack rows up to ``max(change_id)`` so the backlog drains in
               one go (no re-scan on the next tick).
-
-        Errors:
             - Broadcast failure → log + still ack (otherwise a dead
               subscriber pins the watcher to the same backlog forever).
             - Ack failure → log + return processed count anyway. Next
@@ -552,6 +416,19 @@ class ChangeLogWatcher:
                 exc,
             )
 
+        # Mode 3 (B-01): evaluate triggers per row even though we
+        # collapsed the WS broadcast. ``broadcast_dml=False`` skips the
+        # per-row ``dml.changed`` (already replaced by the bulk summary
+        # above). The trigger.fired + action dispatch still run.
+        if self._bulk_eval == "per_row":
+            active_triggers, evaluator = (
+                self._resolve_active_triggers_and_evaluator()
+            )
+            for row in rows:
+                self._process_row(
+                    row, evaluator, active_triggers, broadcast_dml=False
+                )
+
         max_id = int(payload["change_id_range"][1] or 0)
         if max_id > 0:
             try:
@@ -562,12 +439,208 @@ class ChangeLogWatcher:
                 )
 
         logger.info(
-            "change_log_bulk_tick rows=%d layers=%d max_id=%d",
+            "change_log_bulk_tick rows=%d layers=%d max_id=%d eval=%s",
             payload["row_count"],
             len(payload["layers"]),
             max_id,
+            self._bulk_eval,
         )
         return len(rows)
+
+    # ------------------------------------------------------------------
+    # Per-row dispatch helpers (extracted v1.5.3 #103, B-01)
+    # ------------------------------------------------------------------
+
+    def _resolve_active_triggers_and_evaluator(
+        self,
+    ) -> tuple[list[Trigger], _TriggerEvaluatorProtocol | None]:
+        """Resolve active triggers + evaluator once per tick.
+
+        Refreshes :attr:`_trigger_lookup` so the dispatcher can recover
+        a full Trigger from a ``FiredTrigger.trigger_id`` without
+        re-querying the repo. Lazy-imports
+        :class:`rules.trigger_evaluator.TriggerEvaluator` so the
+        persistence layer stays free of a hard rules dependency.
+        """
+        active_triggers: list[Trigger] = []
+        if self._triggers_provider is not None:
+            try:
+                active_triggers = list(self._triggers_provider() or [])
+            except Exception as exc:
+                logger.warning("change_log_triggers_provider_failed: %s", exc)
+                active_triggers = []
+        # Build the per-tick lookup only when an action_dispatcher is
+        # wired (otherwise pure overhead — and tolerates
+        # ``triggers_provider`` implementations that pass in placeholder
+        # strings rather than full :class:`Trigger`).
+        if self._action_dispatcher is not None:
+            self._trigger_lookup = {
+                t.id: t for t in active_triggers if hasattr(t, "id")
+            }
+        else:
+            self._trigger_lookup = {}
+
+        evaluator = self._evaluator
+        if active_triggers and evaluator is None:
+            from rules.trigger_evaluator import TriggerEvaluator
+
+            evaluator = TriggerEvaluator()
+            self._evaluator = evaluator
+        return active_triggers, evaluator
+
+    def _process_row(
+        self,
+        row: dict,
+        evaluator: _TriggerEvaluatorProtocol | None,
+        active_triggers: list[Trigger],
+        *,
+        broadcast_dml: bool,
+    ) -> int:
+        """Process one change-log row.
+
+        When *broadcast_dml* is ``True`` (Mode 1, default per-row tick),
+        emit a ``dml.changed`` event before evaluating triggers. When
+        ``False`` (Mode 3 bulk path), the bulk summary has already been
+        emitted upstream so we skip the per-row event but still evaluate
+        triggers, broadcast ``trigger.fired`` for matched ones, and
+        dispatch their actions.
+
+        Returns:
+            The row's ``change_id`` (or ``0`` when the row was malformed).
+        """
+        try:
+            change_id = int(row["id"])
+        except (KeyError, TypeError, ValueError):
+            # Malformed row — skip but don't ack so the next tick can
+            # still see it (or surface the issue).
+            logger.warning("change_log_row_missing_id row=%r", row)
+            return 0
+
+        table = str(row.get("table_name") or "")
+        op = str(row.get("operation") or "").upper()
+        fid_raw = row.get("row_pk")
+        fid = str(fid_raw) if fid_raw is not None else None
+        ts = row.get("changed_at")
+
+        if broadcast_dml:
+            # Payload is intentionally minimal: no field values, no
+            # geom. This matches the security note in Lot 2 (do not
+            # leak data via /ws/events when the endpoint is
+            # unauthenticated). P0-4a (Beta): wrap each broadcast in
+            # its own try/except — a buggy/dead subscriber must NOT
+            # abort the whole tick.
+            try:
+                self._hub.broadcast(
+                    "dml.changed",
+                    {
+                        "dataset_id": self._dataset_id,
+                        "table": table,
+                        "op": op,
+                        "fid": fid,
+                        "change_id": change_id,
+                        "ts": ts,
+                    },
+                )
+            except Exception as exc:
+                logger.error(
+                    "event_hub_broadcast_failed change_id=%d table=%s op=%s err=%s",
+                    change_id,
+                    table,
+                    op,
+                    exc,
+                )
+                # Continue: still update max_id so we ack and don't loop.
+
+        if active_triggers and evaluator is not None:
+            try:
+                operation = ChangeOperation(op)
+            except ValueError:
+                operation = ChangeOperation.INSERT
+
+            # When any active trigger carries a DSL predicate
+            # (S4: ``conditions["predicate_ast"]``), fetch the row
+            # attributes from the underlying table so the evaluator can
+            # match against real values. Opt-in per trigger — triggers
+            # without predicates never pay the SELECT cost.
+            new_values: dict[str, Any] = {}
+            if (
+                op != "DELETE"
+                and fid is not None
+                and table
+                and any(
+                    (getattr(t, "conditions", None) or {}).get("predicate_ast")
+                    is not None
+                    for t in active_triggers
+                )
+            ):
+                new_values = self._load_row_values(table, fid) or {}
+
+            record = ChangeRecord(
+                session_id="",
+                table_name=table,
+                feature_id=fid,
+                operation=operation,
+                new_values=new_values,
+            )
+
+            try:
+                fired = evaluator.evaluate(record, active_triggers)
+            except Exception as exc:
+                logger.warning(
+                    "change_log_trigger_eval_failed change_id=%d: %s",
+                    change_id,
+                    exc,
+                )
+                fired = []
+
+            for ft in fired:
+                matched = bool(getattr(ft, "matched", False))
+                if not matched:
+                    continue
+                trigger_id = getattr(ft, "trigger_id", None)
+                try:
+                    self._hub.broadcast(
+                        "trigger.fired",
+                        {
+                            "dataset_id": self._dataset_id,
+                            "trigger_id": str(trigger_id) if trigger_id else None,
+                            "change_id": change_id,
+                            "table": table,
+                            "op": op,
+                            "fid": fid,
+                            "actions": list(
+                                getattr(ft, "actions_dispatched", []) or []
+                            ),
+                            "eval_time_ms": float(
+                                getattr(ft, "eval_time_ms", 0.0)
+                            ),
+                        },
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "event_hub_broadcast_failed event=trigger.fired "
+                        "change_id=%d trigger_id=%s err=%s",
+                        change_id,
+                        trigger_id,
+                        exc,
+                    )
+                    # Continue — don't abort the row.
+
+                # Bridge to ActionDispatcher so NOTIFY / WEBHOOK /
+                # SET_FIELD / RUN_SQL / … run end-to-end, not just
+                # broadcast over WS. The dispatcher itself wraps every
+                # handler in try/except.
+                if self._action_dispatcher is not None:
+                    self._dispatch_fired(
+                        ft,
+                        table=table,
+                        operation=op,
+                        row_id=fid,
+                        change_id=change_id,
+                        ts=ts,
+                    )
+
+        return change_id
 
     # ------------------------------------------------------------------
     # Row materialisation for DSL predicate evaluation (S4)

@@ -140,6 +140,10 @@ def _make_watcher(
     bulk_threshold: int,
     hub: _CapturingHub | None = None,
     engine: _FakeEngine | None = None,
+    bulk_eval: str = "skip",
+    triggers_provider=None,
+    trigger_evaluator=None,
+    action_dispatcher=None,
 ) -> tuple[ChangeLogWatcher, _CapturingHub, _FakeEngine]:
     hub = hub or _CapturingHub()
     engine = engine or _FakeEngine([rows])
@@ -150,6 +154,10 @@ def _make_watcher(
         poll_interval=0.05,
         batch_limit=1000,
         bulk_threshold=bulk_threshold,
+        bulk_eval=bulk_eval,
+        triggers_provider=triggers_provider,
+        trigger_evaluator=trigger_evaluator,
+        action_dispatcher=action_dispatcher,
     )
     return watcher, hub, engine
 
@@ -217,3 +225,179 @@ def test_bulk_threshold_negative_rejected() -> None:
             dataset_id="ds",
             bulk_threshold=-1,
         )
+
+
+# ---------------------------------------------------------------------------
+# B-01 (v1.5.3, #103) — Mode 3: bulk WS event + per-row trigger eval
+# ---------------------------------------------------------------------------
+
+
+class _RecordingTrigger:
+    """Minimal Trigger duck-type for the watcher's eval+dispatch path."""
+
+    def __init__(self, trigger_id: str = "t-1") -> None:
+        self.id = trigger_id
+        self.name = f"name-{trigger_id}"
+        self.actions: list = []
+        self.conditions: dict = {}
+
+
+class _RecordingFiredTrigger:
+    def __init__(self, trigger_id: str) -> None:
+        self.trigger_id = trigger_id
+        self.matched = True
+        self.actions_dispatched: list = []
+        self.eval_time_ms = 0.5
+        self.transition = None
+
+
+class _RecordingEvaluator:
+    """Captures every (record, triggers) call, returns one fired Trigger
+    per call so we can count per-row evaluations end-to-end."""
+
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    def evaluate(self, record, triggers):
+        self.calls.append((record, list(triggers)))
+        if not triggers:
+            return []
+        return [_RecordingFiredTrigger(str(triggers[0].id))]
+
+
+class _RecordingDispatcher:
+    def __init__(self) -> None:
+        self.fired: list = []
+
+    def dispatch(self, *args, **kwargs):
+        # Real ActionDispatcher.dispatch(action, ctx) signature; the
+        # watcher calls a different internal helper, so this is just to
+        # satisfy the protocol surface.
+        self.fired.append((args, kwargs))
+
+
+def test_bulk_eval_skip_default_no_per_row_eval() -> None:
+    """Mode 2 (back-compat): ``bulk_eval='skip'`` (default) does not
+    evaluate triggers when bulk threshold is reached."""
+    rows = [_row(i, "parcels", "INSERT") for i in range(1, 11)]
+    triggers = [_RecordingTrigger("t-1")]
+    evaluator = _RecordingEvaluator()
+    watcher, hub, _ = _make_watcher(
+        rows=rows,
+        bulk_threshold=5,
+        triggers_provider=lambda: triggers,
+        trigger_evaluator=evaluator,
+    )
+    watcher._tick()  # noqa: SLF001
+    types = [e[0] for e in hub.events]
+    assert types == ["bulk.changed"], (
+        "Mode 2 must collapse to a single bulk.changed event"
+    )
+    assert evaluator.calls == [], (
+        "Mode 2 (bulk_eval='skip') must skip per-row evaluation"
+    )
+
+
+def test_bulk_eval_per_row_emits_bulk_and_evaluates_each_row() -> None:
+    """Mode 3: ``bulk_eval='per_row'`` emits ONE bulk.changed AND
+    evaluates triggers per row, broadcasting trigger.fired for matched
+    rows. The 50-paste-in-QGIS scenario in the EPIC #103 acceptance
+    criteria.
+    """
+    rows = [_row(i, "parcels", "INSERT") for i in range(1, 11)]
+    triggers = [_RecordingTrigger("t-1")]
+    evaluator = _RecordingEvaluator()
+    watcher, hub, _ = _make_watcher(
+        rows=rows,
+        bulk_threshold=5,
+        bulk_eval="per_row",
+        triggers_provider=lambda: triggers,
+        trigger_evaluator=evaluator,
+    )
+    watcher._tick()  # noqa: SLF001
+    types = [e[0] for e in hub.events]
+    # Exactly one bulk.changed (no dml.changed) plus one trigger.fired
+    # per matched row.
+    assert types.count("bulk.changed") == 1, (
+        "Mode 3 must still collapse the WS broadcast to one bulk event"
+    )
+    assert types.count("dml.changed") == 0, (
+        "Mode 3 must NOT emit per-row dml.changed (the bulk summary "
+        "replaces them)"
+    )
+    assert types.count("trigger.fired") == 10, (
+        "Mode 3 must evaluate every row and broadcast trigger.fired "
+        "for matched ones"
+    )
+    assert len(evaluator.calls) == 10, (
+        "evaluator.evaluate() must be called once per row in Mode 3"
+    )
+
+
+def test_bulk_eval_per_row_50_qgis_paste_acceptance() -> None:
+    """EPIC #103 acceptance: 50 features paste in QGIS → 1 bulk WS
+    event + 50 trigger evals."""
+    rows = [_row(i, "buildings", "INSERT") for i in range(1, 51)]
+    triggers = [_RecordingTrigger("compute-area")]
+    evaluator = _RecordingEvaluator()
+    watcher, hub, _ = _make_watcher(
+        rows=rows,
+        bulk_threshold=50,
+        bulk_eval="per_row",
+        triggers_provider=lambda: triggers,
+        trigger_evaluator=evaluator,
+    )
+    watcher._tick()  # noqa: SLF001
+    types = [e[0] for e in hub.events]
+    assert types.count("bulk.changed") == 1
+    assert len(evaluator.calls) == 50
+
+
+def test_bulk_eval_per_row_below_threshold_uses_per_row_path() -> None:
+    """When the batch is below ``bulk_threshold`` the watcher stays on
+    the Mode-1 per-row path (one ``dml.changed`` per row, no bulk
+    summary), regardless of ``bulk_eval``."""
+    rows = [_row(i, "parcels", "INSERT") for i in range(1, 4)]
+    triggers = [_RecordingTrigger("t-1")]
+    evaluator = _RecordingEvaluator()
+    watcher, hub, _ = _make_watcher(
+        rows=rows,
+        bulk_threshold=10,
+        bulk_eval="per_row",
+        triggers_provider=lambda: triggers,
+        trigger_evaluator=evaluator,
+    )
+    watcher._tick()  # noqa: SLF001
+    types = [e[0] for e in hub.events]
+    assert types.count("bulk.changed") == 0
+    assert types.count("dml.changed") == 3, (
+        "below-threshold batch stays on the per-row path"
+    )
+    assert len(evaluator.calls) == 3
+
+
+def test_bulk_eval_invalid_value_rejected() -> None:
+    """``bulk_eval`` is constrained to ``'skip'`` or ``'per_row'``."""
+    with pytest.raises(ValueError, match="bulk_eval"):
+        ChangeLogWatcher(
+            engine=_FakeEngine([]),
+            event_hub=_CapturingHub(),
+            dataset_id="ds",
+            bulk_threshold=10,
+            bulk_eval="lol",
+        )
+
+
+def test_bulk_eval_per_row_no_triggers_is_noop() -> None:
+    """Mode 3 with no triggers wired: bulk broadcast still happens,
+    eval loop runs but does nothing (no evaluator instantiated)."""
+    rows = [_row(i, "parcels", "INSERT") for i in range(1, 11)]
+    watcher, hub, _ = _make_watcher(
+        rows=rows,
+        bulk_threshold=5,
+        bulk_eval="per_row",
+        # No triggers_provider → empty active_triggers, no evaluator.
+    )
+    watcher._tick()  # noqa: SLF001
+    types = [e[0] for e in hub.events]
+    assert types == ["bulk.changed"]
