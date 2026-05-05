@@ -225,7 +225,7 @@ def _gpkg_point_blob(x: float = 0.0, y: float = 0.0, srs_id: int = 4326) -> byte
 
 
 def _connect_with_retry(
-    gpkg: Path, *, attempts: int = 20, delay: float = 0.25
+    gpkg: Path, *, attempts: int = 60, delay: float = 0.5
 ) -> sqlite3.Connection:
     """Open a sqlite3 connection on a GPKG with retry on transient errors.
 

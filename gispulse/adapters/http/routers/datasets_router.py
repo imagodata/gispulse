@@ -26,6 +26,7 @@ import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -664,3 +665,175 @@ def tracking_status(
         "enabled": enabled,
         "layers_tracked": layers,
     }
+
+
+# ---------------------------------------------------------------------------
+# Issue #93 — change-log inspect endpoints (CLI ↔ Portal parity P0-2)
+# ---------------------------------------------------------------------------
+#
+# Three endpoints back the portal's "Change-log" tab for a dataset.
+# All three open a fresh ``sqlite3`` connection on the GPKG, run their
+# read against the v3 schema, then close. Read-only paths use Row
+# factory so we can return ``dict(r)`` cleanly. The doctor path
+# delegates to ``persistence.changelog_doctor.run_doctor`` and may
+# call ``install_change_tracking`` when ``auto_fix=true`` — this is
+# the only branch that mutates the GPKG.
+
+
+def _open_dataset_gpkg(ds: Dataset) -> sqlite3.Connection:
+    """Open a SQLite connection on the dataset's GPKG with row factory.
+
+    Mirrors the CLI's ``_open_gpkg`` (cli_track) so the HTTP path
+    keeps the same lifecycle. Caller owns the connection.
+    """
+    path = _resolve_gpkg_path(ds)
+    conn = sqlite3.connect(str(path), isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+@router.get("/{dataset_id}/changelog")
+def get_changelog(
+    dataset_id: UUID,
+    layer: str | None = None,
+    op: str | None = None,
+    since_id: int = 0,
+    limit: int = 50,
+    repo: Repository = Depends(get_dataset_repo),
+) -> dict[str, Any]:
+    """Paginated tail of pending ``_gispulse_change_log`` rows.
+
+    Closes #93 part 1. Mirrors ``gispulse track tail`` from the CLI —
+    same SQL contract via :mod:`persistence.changelog_reader`. Use
+    ``since_id`` to page forward without offset drift.
+
+    Query params:
+        layer:    Optional ``table_name`` filter.
+        op:       Optional INSERT/UPDATE/DELETE filter (case-insensitive).
+        since_id: Cursor — return rows with ``id > since_id``. ``0`` = first page.
+        limit:    1 ≤ limit ≤ 500. Default 50.
+
+    Returns: ``{dataset_id, items, next_since_id, has_more}``.
+    """
+    from persistence.changelog_reader import (
+        ChangelogReaderError,
+        list_pending_changes,
+        next_since_id,
+    )
+
+    ds = repo.get(dataset_id)
+    if ds is None:
+        raise HTTPException(
+            status_code=404, detail=f"Dataset '{dataset_id}' not found."
+        )
+
+    conn = _open_dataset_gpkg(ds)
+    try:
+        try:
+            items = list_pending_changes(
+                conn,
+                layer=layer,
+                op=op,
+                since_id=since_id,
+                limit=limit,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except ChangelogReaderError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "code": "changelog_missing",
+                        "message": str(exc),
+                    }
+                },
+            )
+    finally:
+        conn.close()
+
+    cursor = next_since_id(items, fallback=since_id)
+    return {
+        "dataset_id": str(dataset_id),
+        "items": items,
+        "next_since_id": cursor,
+        "has_more": len(items) == limit,
+    }
+
+
+@router.get("/{dataset_id}/changelog/stats")
+def get_changelog_stats(
+    dataset_id: UUID,
+    repo: Repository = Depends(get_dataset_repo),
+) -> dict[str, Any]:
+    """Per-layer aggregates of the change-log.
+
+    Closes #93 part 2. Mirrors ``gispulse track list``'s aggregate
+    output. Returns total pending / processed plus a per-layer
+    breakdown ordered by layer name.
+    """
+    from persistence.changelog_reader import (
+        ChangelogReaderError,
+        changelog_stats,
+    )
+
+    ds = repo.get(dataset_id)
+    if ds is None:
+        raise HTTPException(
+            status_code=404, detail=f"Dataset '{dataset_id}' not found."
+        )
+
+    conn = _open_dataset_gpkg(ds)
+    try:
+        try:
+            stats = changelog_stats(conn)
+        except ChangelogReaderError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "code": "changelog_missing",
+                        "message": str(exc),
+                    }
+                },
+            )
+    finally:
+        conn.close()
+
+    return {"dataset_id": str(dataset_id), **stats}
+
+
+@router.post("/{dataset_id}/changelog/doctor")
+def post_changelog_doctor(
+    dataset_id: UUID,
+    auto_fix: bool = False,
+    repo: Repository = Depends(get_dataset_repo),
+) -> dict[str, Any]:
+    """Run the full health-check sweep on a tracked dataset.
+
+    Closes #93 part 3. Mirrors ``gispulse track doctor`` from the CLI —
+    same checks via :mod:`persistence.changelog_doctor`. When
+    ``auto_fix=true`` (editor / Pro), partially-installed layers get
+    their full trigger set re-installed in place.
+
+    Returns:
+        ``{dataset_id, ok, status, errors, repaired, checks,
+        health_score}``.
+    """
+    from persistence.changelog_doctor import health_score, run_doctor
+
+    ds = repo.get(dataset_id)
+    if ds is None:
+        raise HTTPException(
+            status_code=404, detail=f"Dataset '{dataset_id}' not found."
+        )
+
+    conn = _open_dataset_gpkg(ds)
+    try:
+        result = run_doctor(conn, auto_fix=auto_fix)
+    finally:
+        conn.close()
+
+    result["dataset_id"] = str(dataset_id)
+    result["health_score"] = health_score(result.get("checks", []))
+    return result
