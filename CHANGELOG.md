@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **B-05 — QGIS layer names with spaces, accents or dashes were rejected** (`v1.5.3` hotfix Beta). The change-tracking install path validated layer / column names against `^[A-Za-z_][A-Za-z0-9_]*$`, so common French desktop datasets (`Parcelles cadastrales 2024`, `voies-rapides`, `nb-bâtiments`) raised `ValueError` before any DDL ran — adoption blocker on QGIS / GDAL exports. The validator now delegates to a new `core.sql_safety.validate_layer_name()` that accepts any character safe inside a quoted identifier (`"..."`) and a quoted literal (`'...'`); only `"`, `'`, `;`, `\` and control chars are rejected. Trigger object names are derived through `core.sql_safety.slug_identifier()`, which preserves pre-B-05 ASCII names unchanged so existing v1.5.x GPKGs round-trip cleanly and rewrites Unicode names to `<safe-ascii>_<sha1[:8]>`. Same relaxation applied to `action_dispatcher`, `operation_executor`, `trigger_evaluator`; `relations_router` (HTTP-exposed) and PostgreSQL `NOTIFY` channels keep the strict regex. (#103)
+
 ## [1.5.2] - 2026-05-04
 
 Big-launch release. The runtime keeps the v1.5 surface; this release adds the QGIS plugin, three end-to-end walkthroughs, plugs a critical portal-mode middleware gap, and lands a `/system/doctor` health endpoint.

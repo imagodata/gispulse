@@ -362,25 +362,32 @@ class TestMigration:
 
 
 class TestIdentifierValidation:
-    """Beta P0-4c: identifier guard. ``install_change_tracking`` interpolates
-    layer_name into trigger DDL via f-strings (DDL cannot use bound params),
-    so an unsafe name is a textbook SQLi vector. ``_validate_identifier``
-    rejects anything that isn't ``[A-Za-z_]\\w*`` (Unicode-aware)."""
+    """Beta P0-4c (SQLi guard) + B-05 v1.5.3 (QGIS-friendly relaxation).
+
+    ``install_change_tracking`` interpolates ``layer_name`` into trigger
+    DDL via f-strings (DDL cannot use bound parameters), so a name
+    containing ``"``, ``'``, ``;`` or ``\\`` is a textbook SQLi vector
+    and must always raise. **B-05** widened the validator to accept
+    QGIS desktop layer names with spaces, dashes, accents, leading
+    digits — anything safe inside a quoted identifier / literal — so
+    French datasets like ``"Parcelles cadastrales 2024"`` no longer
+    fail at install time.
+    """
 
     @pytest.mark.parametrize(
         "name",
         [
-            "a';DROP TABLE x;--",
-            'a"; DROP TABLE x; --',
+            "a';DROP TABLE x;--",      # closes single-quoted literal
+            'a"; DROP TABLE x; --',    # closes double-quoted identifier
             "evil'); DROP TABLE _gispulse_change_log; --",
-            "with space",
-            "with-dash",
-            "table.dot",
-            "1starts_with_digit",
-            "",
-            ";",
-            "--comment",
-            "table\nname",
+            ";",                        # bare statement terminator
+            "tbl;DROP",                # statement terminator + injection
+            "back\\slash",            # backslash escape
+            "",                         # empty
+            "table\nname",             # newline (control char)
+            "table\rname",             # carriage return
+            "tab\tname",                # tab
+            "\x00null",                # NUL byte
         ],
     )
     def test_rejects_unsafe_identifiers(self, name):
@@ -390,12 +397,21 @@ class TestIdentifierValidation:
     @pytest.mark.parametrize(
         "name",
         [
+            # Strict ASCII names already worked pre-B-05 (no regression):
             "parcels",
             "parcels_2024",
             "_internal_metric",
             "Parcelles",
-            "parcelles_éàü",  # Unicode word chars allowed
+            "parcelles_éàü",   # Unicode word chars
             "naïve_layer",
+            # B-05 — QGIS desktop layer names previously rejected:
+            "Parcelles cadastrales 2024",  # spaces
+            "voies-rapides",                # dash
+            "table.dot",                    # dot (no schema in GPKG)
+            "1starts_with_digit",          # leading digit
+            "--comment",                    # SQL-comment marker (safe inside "...")
+            "café",                          # accented + non-ASCII
+            "couche QGIS éàüç-2024",       # full mix
         ],
     )
     def test_accepts_safe_identifiers(self, name):
@@ -411,15 +427,71 @@ class TestIdentifierValidation:
         with pytest.raises(ValueError):
             install_change_tracking(conn, "tbl;DROP")
 
-    def test_install_change_tracking_rejects_space(self, conn):
+    def test_install_change_tracking_accepts_space(self, conn):
+        """B-05: layer names with spaces install + fire end-to-end."""
         bootstrap_gpkg_project(conn)
-        with pytest.raises(ValueError):
-            install_change_tracking(conn, "with space")
+        layer = "Parcelles cadastrales 2024"
+        conn.execute(f'CREATE TABLE "{layer}" (fid INTEGER PRIMARY KEY, name TEXT)')
+        conn.commit()
+        install_change_tracking(conn, layer)
+        conn.execute(f'INSERT INTO "{layer}"(name) VALUES (?)', ("alpha",))
+        conn.commit()
+        row = conn.execute(
+            "SELECT table_name FROM _gispulse_change_log ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert row is not None and row["table_name"] == layer
+
+    def test_install_change_tracking_accepts_dash(self, conn):
+        """B-05: dashes are allowed (SQL identifier always quoted)."""
+        bootstrap_gpkg_project(conn)
+        layer = "voies-rapides"
+        conn.execute(f'CREATE TABLE "{layer}" (fid INTEGER PRIMARY KEY)')
+        conn.commit()
+        install_change_tracking(conn, layer)
+        # Round-trip: uninstall must drop the same triggers.
+        uninstall_change_tracking(conn, layer)
+        # No leftover trigger named after that layer.
+        leftovers = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger' "
+            "AND name LIKE '_gispulse_trg_%'"
+        ).fetchall()
+        for r in leftovers:
+            assert "voies" not in r["name"], f"leftover trigger: {r['name']!r}"
 
     def test_uninstall_change_tracking_rejects_unsafe(self, conn):
         bootstrap_gpkg_project(conn)
         with pytest.raises(ValueError):
             uninstall_change_tracking(conn, "a';--")
+
+    def test_install_change_tracking_slug_stable(self, conn):
+        """B-05: same Unicode layer name → same trigger names across calls."""
+        from core.sql_safety import slug_identifier
+
+        bootstrap_gpkg_project(conn)
+        layer = "Parcelles cadastrales 2024"
+        conn.execute(f'CREATE TABLE "{layer}" (fid INTEGER PRIMARY KEY)')
+        conn.commit()
+        install_change_tracking(conn, layer)
+        slug = slug_identifier(layer)
+        names = {
+            r["name"]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger'"
+            ).fetchall()
+        }
+        for op in ("insert", "update", "delete"):
+            assert f"_gispulse_trg_{slug}_{op}" in names
+
+    def test_install_change_tracking_legacy_ascii_unchanged(self, conn):
+        """B-05: pre-B-05 GPKGs use ``_gispulse_trg_<layer>_<op>`` trigger
+        names. The slug must keep returning the same identifier for
+        ASCII-safe layer names so legacy projects round-trip cleanly.
+        """
+        from core.sql_safety import slug_identifier
+
+        assert slug_identifier("parcels") == "parcels"
+        assert slug_identifier("my_table_2024") == "my_table_2024"
+        assert slug_identifier("_internal") == "_internal"
 
     def test_install_change_tracking_unicode_layer_still_works(self, conn):
         """Unicode word characters (accents) must remain valid identifiers

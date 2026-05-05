@@ -40,7 +40,7 @@ from typing import Any, Callable
 
 from core.logging import get_logger
 from core.sql_safety import validate_expression as _validate_expression
-from core.sql_safety import validate_identifier as _validate_identifier
+from core.sql_safety import validate_layer_name as _validate_identifier  # B-05
 
 log = get_logger(__name__)
 

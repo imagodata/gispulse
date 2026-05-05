@@ -126,14 +126,33 @@ class TestSetField:
         assert sql.calls == []
 
     def test_rejects_unsafe_field_name(self):
+        """B-05 (v1.5.3): field names go through ``validate_layer_name``,
+        which rejects only characters that break out of the surrounding
+        ``"..."`` quotes. ``--`` is fine inside a quoted identifier;
+        a literal ``"`` or ``;`` is not.
+        """
         sql = FakeSQL()
         d = ActionDispatcher(sql_executor=sql)
         action = ActionDef(
             action_type=ActionType.SET_FIELD,
-            config={"field": "evil--inject", "value": "x"},
+            config={"field": 'evil"; DROP TABLE--', "value": "x"},
         )
         d.dispatch(action, _make_context())
         assert sql.calls == []
+
+    def test_accepts_qgis_field_with_dash(self):
+        """B-05: column names like ``nb-bâtiments`` (Field Calculator
+        outputs) must reach the SQL executor — they are safe inside the
+        double-quoted ``"..."`` reference."""
+        sql = FakeSQL()
+        d = ActionDispatcher(sql_executor=sql)
+        action = ActionDef(
+            action_type=ActionType.SET_FIELD,
+            config={"field": "nb-bâtiments", "value": 12},
+        )
+        d.dispatch(action, _make_context(table="parcels", row_id="r1"))
+        assert len(sql.calls) == 1
+        assert '"nb-bâtiments"' in sql.calls[0][0]
 
     def test_missing_field_is_noop(self):
         sql = FakeSQL()
