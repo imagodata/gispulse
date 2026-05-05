@@ -14,7 +14,15 @@ from uuid import UUID
 from gispulse.core.dispatcher import BaseDispatcher, TriggerContext
 from core.logging import get_logger
 from core.models import ActionDef, ActionType
-from core.sql_safety import validate_identifier as _validate_identifier
+from core.sql_safety import validate_identifier as _validate_strict_identifier
+from core.sql_safety import validate_layer_name as _validate_layer_name
+
+# B-05 (v1.5.3): table / column names that originate from a local GPKG
+# (QGIS desktop) flow through :func:`validate_layer_name` to accept
+# spaces, accents, dashes. ``_validate_strict_identifier`` is reserved
+# for fields that must match a SQL keyword shape (PG NOTIFY channels,
+# aggregate function names, ...).
+_validate_identifier = _validate_layer_name
 
 log = get_logger(__name__)
 
@@ -94,7 +102,7 @@ class ActionDispatcher(BaseDispatcher):
 
     def _notify(self, action: ActionDef, ctx: TriggerContext) -> None:
         channel = action.config.get("channel", "gispulse_events")
-        _validate_identifier(channel, "notify_channel")
+        _validate_strict_identifier(channel, "notify_channel")
         payload = self._render_payload(action, ctx)
         if self._event_hub:
             self._event_hub.broadcast(f"trigger:{channel}", {

@@ -9,10 +9,10 @@ in ``gpkg_extensions`` per OGC GPKG Annex F.  They never appear in
 from __future__ import annotations
 
 import logging
-import re
 import sqlite3
 from pathlib import Path
 
+from core.sql_safety import slug_identifier, validate_layer_name
 from persistence.schema import (
     SCHEMA_VERSION,
     build_all_gpkg_schemas,
@@ -22,40 +22,34 @@ from persistence.schema import (
 # ---------------------------------------------------------------------------
 # Identifier validation
 # ---------------------------------------------------------------------------
-# P0-4c (Beta): layer/identifier names are interpolated into trigger DDL via
-# f-strings (CREATE TRIGGER + INSERT INTO ... VALUES('{layer}', ...)). A name
-# containing single-quotes, double-quotes or semicolons becomes a textbook
-# SQL injection vector. We refuse non-identifier names *up front* with
-# ValueError so callers (HTTP endpoints, engine wrappers) can surface a
-# clean 400 instead of a silently broken trigger or a dropped table.
-
-_IDENT_RE = re.compile(r"^[^\W\d][\w]*$", re.UNICODE)
-# Unicode-aware identifier rule (matches Python's ``str.isidentifier``-ish):
-# - first char: Unicode letter or underscore (no digit)
-# - body: Unicode word chars (letters, digits, underscore)
-# Rejects quotes, semicolons, spaces, dots, dashes — anything that would
-# break the f-string DDL or open an SQLi vector. Accented layer names like
-# ``parcelles_éàü`` are accepted; ``a'); DROP TABLE x; --`` is not.
+# P0-4c (Beta) + B-05 (v1.5.3): layer/identifier names are interpolated into
+# trigger DDL via f-strings (CREATE TRIGGER + INSERT INTO ... VALUES('{layer}',
+# ...)). A name containing single-quotes, double-quotes or semicolons becomes
+# a textbook SQL injection vector. We refuse such names up front with
+# ValueError so callers (HTTP endpoints, engine wrappers) can surface a clean
+# 400 instead of a silently broken trigger or a dropped table.
+#
+# B-05 (2026-05-04): the legacy regex ``^[^\W\d][\w]*$`` rejected QGIS
+# desktop layer names containing spaces ("Parcelles cadastrales 2024"),
+# dashes ("voies-rapides") or leading digits — killing FR adoption. The
+# validation now delegates to :func:`core.sql_safety.validate_layer_name`,
+# which accepts any character except those that break the quoted DDL
+# (``"``, ``'``, ``;``, ``\\``, NUL, control chars). Trigger names are
+# derived through :func:`core.sql_safety.slug_identifier` so they stay
+# pure-ASCII and stable across the original layer name's casing /
+# encoding.
 
 
 def _validate_identifier(name: str) -> str:
-    """Validate that *name* is a safe SQL identifier.
+    """Validate that *name* is a safe SQL layer/column identifier.
 
-    Args:
-        name: Candidate identifier (layer name, column name, etc.).
-
-    Returns:
-        The validated identifier (unchanged) for fluent use.
-
-    Raises:
-        ValueError: If *name* contains characters outside ``[A-Za-z0-9_]``
-            or starts with a digit. Quotes and semicolons are rejected.
+    Backward-compat shim — delegates to
+    :func:`core.sql_safety.validate_layer_name`. Kept as a module-level
+    import so existing tests
+    (``from persistence.gpkg_schema import _validate_identifier``) keep
+    working after the B-05 relaxation.
     """
-    if not isinstance(name, str) or not _IDENT_RE.match(name):
-        raise ValueError(
-            f"invalid identifier: {name!r} — must match [A-Za-z_][A-Za-z0-9_]*"
-        )
-    return name
+    return validate_layer_name(name)
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +115,15 @@ def _build_change_triggers(
     if geom_col is not None:
         _validate_identifier(geom_col)
 
+    # B-05: trigger object names must remain pure ASCII so they can be
+    # referenced without quoting in DROP TRIGGER and so SQLite's catalog
+    # ``sqlite_master`` stays readable. The layer reference in
+    # ``ON "{table_name}"`` and the literal in ``VALUES ('{table_name}',
+    # ...)`` keep the original (Unicode-safe) name because the validator
+    # has already refused single/double quotes that would close the
+    # surrounding quotes.
+    slug = slug_identifier(table_name)
+
     def _json_obj(ref: str) -> str:
         if not cols:
             return "json_object()"
@@ -135,7 +138,7 @@ def _build_change_triggers(
         gc_insert = gc_update = gc_delete = "0"
 
     insert_sql = (
-        f'CREATE TRIGGER IF NOT EXISTS "_gispulse_trg_{table_name}_insert"\n'
+        f'CREATE TRIGGER IF NOT EXISTS "_gispulse_trg_{slug}_insert"\n'
         f'AFTER INSERT ON "{table_name}"\n'
         f"BEGIN\n"
         f"  INSERT INTO _gispulse_change_log"
@@ -146,7 +149,7 @@ def _build_change_triggers(
     )
 
     update_sql = (
-        f'CREATE TRIGGER IF NOT EXISTS "_gispulse_trg_{table_name}_update"\n'
+        f'CREATE TRIGGER IF NOT EXISTS "_gispulse_trg_{slug}_update"\n'
         f'AFTER UPDATE ON "{table_name}"\n'
         f"BEGIN\n"
         f"  INSERT INTO _gispulse_change_log"
@@ -157,7 +160,7 @@ def _build_change_triggers(
     )
 
     delete_sql = (
-        f'CREATE TRIGGER IF NOT EXISTS "_gispulse_trg_{table_name}_delete"\n'
+        f'CREATE TRIGGER IF NOT EXISTS "_gispulse_trg_{slug}_delete"\n'
         f'AFTER DELETE ON "{table_name}"\n'
         f"BEGIN\n"
         f"  INSERT INTO _gispulse_change_log"
@@ -428,8 +431,9 @@ def install_change_tracking(
 
     Args:
         conn:       Open SQLite connection to the GPKG file.
-        layer_name: Spatial table to track. Must match
-                    ``[A-Za-z_][A-Za-z0-9_]*`` — see :func:`_validate_identifier`.
+        layer_name: Spatial table to track. Any string except those
+                    containing ``"``, ``'``, ``;``, ``\\`` or control
+                    chars — see :func:`_validate_identifier`.
         pk_col:     Primary key column (default ``fid`` per GPKG spec).
         columns:    Optional explicit list of columns to capture in the
                     JSON payload. When ``None``, all non-pk non-geom
@@ -473,8 +477,12 @@ def uninstall_change_tracking(conn: sqlite3.Connection, layer_name: str) -> None
         ValueError: If *layer_name* contains unsafe characters.
     """
     _validate_identifier(layer_name)
+    # B-05: derive the trigger name from the same slug used at install
+    # time so layer names with spaces / accents (post-B-05) and ASCII-safe
+    # legacy names (pre-B-05) both round-trip cleanly.
+    slug = slug_identifier(layer_name)
     for op in ("insert", "update", "delete"):
-        conn.execute(f'DROP TRIGGER IF EXISTS "_gispulse_trg_{layer_name}_{op}"')
+        conn.execute(f'DROP TRIGGER IF EXISTS "_gispulse_trg_{slug}_{op}"')
     conn.commit()
     logger.info("change_tracking_removed: %s", layer_name)
 

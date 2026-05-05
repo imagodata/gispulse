@@ -437,10 +437,10 @@ class TestLayerNameEdgeCases:
     @pytest.mark.parametrize(
         "evil_name",
         [
-            'foo"; DROP TABLE x; --',
-            "o'malley",
-            "foo;bar",
-            "foo bar",
+            'foo"; DROP TABLE x; --',     # double-quote breaks identifier
+            "o'malley",                   # single-quote breaks the literal
+            "foo;bar",                    # semicolon ends statement
+            "back\\slash",               # backslash escape
             "",
             'evil\'); DROP TABLE _gispulse_change_log; --',
         ],
@@ -448,14 +448,16 @@ class TestLayerNameEdgeCases:
     def test_install_change_tracking_rejects_unsafe_identifiers(
         self, evil_name: str
     ) -> None:
-        """P0-4c fix verified: ``install_change_tracking`` interpolates
-        ``layer_name`` into trigger DDL via f-strings (DDL cannot use bound
-        parameters), so unsafe names were a textbook SQL injection vector.
+        """P0-4c (SQLi guard) + B-05 (v1.5.3 relaxation).
 
-        The ``_validate_identifier`` guard now rejects anything outside
-        ``[A-Za-z_]\\w*`` **before** any SQL runs — a malicious or simply
-        whitespace-bearing layer name raises ``ValueError`` and the
-        change_log table stays intact.
+        ``install_change_tracking`` interpolates ``layer_name`` into
+        trigger DDL via f-strings (DDL cannot use bound parameters),
+        so a name that closes the surrounding ``"..."`` /  ``'...'``
+        quotes is a textbook SQL injection vector.  The guard now
+        delegates to :func:`core.sql_safety.validate_layer_name` which
+        rejects only the four characters that would let a caller break
+        out (``"``, ``'``, ``;``, ``\\``) plus control chars; spaces /
+        accents / dashes are accepted (see B-05 acceptance tests).
         """
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "evil.gpkg"
@@ -477,13 +479,23 @@ class TestLayerNameEdgeCases:
                 conn.close()
 
     @pytest.mark.parametrize(
-        "good_name", ["parcelles", "parcelles_2024", "_test"]
+        "good_name",
+        [
+            # Pre-B-05 strict ASCII identifiers (no regression):
+            "parcelles",
+            "parcelles_2024",
+            "_test",
+            # B-05 (v1.5.3) — QGIS-friendly names:
+            "Parcelles cadastrales 2024",  # spaces
+            "voies-rapides",                # dash
+            "couche.QGIS",                  # dot
+        ],
     )
     def test_install_change_tracking_accepts_safe_identifiers(
         self, good_name: str
     ) -> None:
-        """Plain identifiers must continue to install cleanly. Catches
-        regressions in the validation regex."""
+        """Plain ASCII identifiers AND B-05-relaxed QGIS layer names
+        (spaces, dashes, dots, accents) must install cleanly."""
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "ok.gpkg"
             conn = self._bootstrap_gpkg(path)

@@ -36,7 +36,7 @@ from core.models import (
     parse_conditions,
 )
 from core.sql_safety import validate_expression as _validate_business_expression
-from core.sql_safety import validate_identifier as _validate_identifier
+from core.sql_safety import validate_layer_name as _validate_identifier  # B-05
 from rules.predicates import PredicateEvaluator
 
 MAX_CASCADE_DEPTH = 3

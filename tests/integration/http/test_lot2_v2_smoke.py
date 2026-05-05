@@ -275,8 +275,15 @@ def _drop_rtree_triggers(gpkg: Path, layer: str = "parcels") -> None:
     sqlite3 module. Called by tests that issue raw INSERTs through
     sqlite3 (the production path goes through pyogrio/GDAL which bundles
     SpatiaLite, so this is a *test-only* tweak — it does NOT alter what
-    the watcher observes)."""
-    con = sqlite3.connect(str(gpkg))
+    the watcher observes).
+
+    v1.5.3 hardening: route through :func:`_connect_with_retry` so we
+    don't race the upload-side pyogrio handle on slower CI runners
+    (Py 3.10 / 3.12 surfaced ``DatabaseError: file is not a database``
+    intermittently — same pattern as the ``_connect_with_retry`` callers
+    in the lifecycle assertions).
+    """
+    con = _connect_with_retry(gpkg)
     try:
         rows = con.execute(
             "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'rtree_%'"

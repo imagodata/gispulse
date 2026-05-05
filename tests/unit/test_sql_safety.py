@@ -12,8 +12,10 @@ import pytest
 from core.sql_safety import (
     SAFE_IDENT_RE,
     SQL_BLOCKLIST,
+    slug_identifier,
     validate_expression,
     validate_identifier,
+    validate_layer_name,
     validate_ref_filter,
 )
 
@@ -158,6 +160,111 @@ class TestValidateRefFilterRejects:
     def test_rejects_unsafe(self, expr: str):
         with pytest.raises(ValueError, match="Unsafe ref_filter"):
             validate_ref_filter(expr)
+
+
+class TestValidateLayerNameAccepts:
+    """B-05 (v1.5.3): permissive validator for QGIS-friendly layer/column
+    names — accepts spaces, accents, dashes, dots, leading digits."""
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "parcels",
+            "Parcelles",
+            "Parcelles cadastrales 2024",   # spaces (B-05)
+            "voies-rapides",                 # dash (B-05)
+            "couche.qgis",                   # dot (B-05)
+            "1starts_with_digit",            # leading digit (safe inside "...")
+            "café",
+            "naïve_layer",
+            "couche QGIS éàüç-2024",
+            "_internal",
+            "T" + "x" * 127,                  # 128 chars — max allowed
+        ],
+    )
+    def test_accepts(self, name: str) -> None:
+        assert validate_layer_name(name) == name
+
+
+class TestValidateLayerNameRejects:
+    """B-05: SQLi vectors must still raise. Forbidden: ``"`` ``'`` ``;``
+    ``\\`` plus control chars."""
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "",                              # empty
+            "a';DROP TABLE x;--",
+            'a"; DROP TABLE x; --',
+            "evil'); DROP TABLE _gispulse_change_log; --",
+            ";",
+            "back\\slash",                  # backslash escape
+            "table\nname",
+            "table\rname",
+            "tab\tname",
+            "\x00null",
+            "x" * 129,                       # over 128 chars
+        ],
+    )
+    def test_rejects(self, name: str) -> None:
+        with pytest.raises(ValueError):
+            validate_layer_name(name)
+
+    def test_label_in_message(self) -> None:
+        with pytest.raises(ValueError, match="layer"):
+            validate_layer_name("a'", label="layer")
+        with pytest.raises(ValueError, match="field"):
+            validate_layer_name("a'", label="field")
+
+    def test_rejects_non_str(self) -> None:
+        with pytest.raises(ValueError):
+            validate_layer_name(42)  # type: ignore[arg-type]
+
+
+class TestSlugIdentifier:
+    """B-05: ``slug_identifier`` returns a stable ASCII slug usable as
+    a SQL trigger / index name. Pre-B-05 ASCII identifiers must round-trip
+    unchanged so existing GPKGs keep matching their trigger names."""
+
+    @pytest.mark.parametrize(
+        "name",
+        ["parcels", "parcelles_2024", "_internal", "MixedCase_99"],
+    )
+    def test_legacy_ascii_unchanged(self, name: str) -> None:
+        """ASCII-strict identifiers must NOT be hashed — preserves
+        backward-compat with v1.5.x triggers named ``_gispulse_trg_<layer>_<op>``.
+        """
+        assert slug_identifier(name) == name
+
+    def test_unicode_layer_gets_hashed_slug(self) -> None:
+        """Layer names with spaces / accents → ``<safe>_<hash8>``."""
+        slug = slug_identifier("Parcelles cadastrales 2024")
+        assert slug != "Parcelles cadastrales 2024"
+        # ASCII-only output, no spaces, no slashes
+        assert all(c.isalnum() or c == "_" for c in slug)
+        # Suffix is 8-hex-char hash
+        assert len(slug.split("_")[-1]) == 8
+
+    def test_slug_is_deterministic(self) -> None:
+        a = slug_identifier("Parcelles cadastrales 2024")
+        b = slug_identifier("Parcelles cadastrales 2024")
+        assert a == b
+
+    def test_slug_different_for_different_names(self) -> None:
+        a = slug_identifier("Parcelles 2024")
+        b = slug_identifier("Parcelles 2025")
+        assert a != b
+
+    def test_slug_handles_pure_punctuation(self) -> None:
+        """An input made entirely of unsafe-prefix characters still
+        returns a valid slug (no empty prefix)."""
+        slug = slug_identifier("---")
+        assert slug.startswith("x_")
+        assert len(slug) > 2
+
+    def test_slug_rejects_empty(self) -> None:
+        with pytest.raises(ValueError):
+            slug_identifier("")
 
 
 class TestPatternShapes:
