@@ -40,8 +40,10 @@ Security:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
+import time
 from typing import Any, Callable, Protocol
 
 from core.models import ChangeOperation, ChangeRecord, Trigger
@@ -167,6 +169,7 @@ class ChangeLogWatcher:
         action_dispatcher: _ActionDispatcherProtocol | None = None,
         bulk_threshold: int = 0,
         bulk_eval: str = "skip",
+        schema_drift_check_interval_s: float = 5.0,
     ) -> None:
         if poll_interval <= 0:
             raise ValueError("poll_interval must be > 0")
@@ -178,6 +181,11 @@ class ChangeLogWatcher:
             raise ValueError(
                 "bulk_eval must be 'skip' (collapse batch, no eval — Mode 2)"
                 " or 'per_row' (1 bulk WS event + per-row trigger eval — Mode 3)"
+            )
+        if schema_drift_check_interval_s < 0:
+            raise ValueError(
+                "schema_drift_check_interval_s must be >= 0 "
+                "(0 disables the drift watchdog)"
             )
         # Lot 2 v2 (Beta E2E): ``dataset_id`` is mandatory. Multi-tenant
         # event consumers cannot tell two tables named ``parcels`` apart
@@ -212,6 +220,19 @@ class ChangeLogWatcher:
         #                     trigger still sees every row.
         self._bulk_threshold = int(bulk_threshold)
         self._bulk_eval = bulk_eval
+        # B-13 (#103, v1.5.3): schema-drift watchdog. Every
+        # :attr:`_schema_drift_check_interval_s` wall-clock seconds the
+        # watcher re-hashes ``PRAGMA table_info("<layer>")`` for every
+        # tracked layer; on mismatch it drops + re-installs change
+        # tracking and broadcasts a ``schema.changed`` event so
+        # subscribers (portal, plugin) can refresh. Set to 0 to disable
+        # entirely (tests / SaaS Pro where mutating DDL goes through a
+        # different code path).
+        self._schema_drift_check_interval_s = float(
+            schema_drift_check_interval_s
+        )
+        self._schema_hashes: dict[str, str] = {}
+        self._last_drift_check_ts = 0.0
         self._evaluator = trigger_evaluator
         self._triggers_provider = triggers_provider
         self._action_dispatcher = action_dispatcher
@@ -323,7 +344,13 @@ class ChangeLogWatcher:
         cause: a transient SQLite lock during a concurrent QGIS save) we
         sleep on :attr:`_stop_event` rather than ``time.sleep`` so the
         external stop signal is honoured without an extra poll.
+
+        B-13 (#103): the wall-clock-throttled schema-drift watchdog
+        runs at the start of every tick. It is a no-op until
+        :attr:`_schema_drift_check_interval_s` seconds have passed,
+        and again a no-op when the engine has no ``_get_conn`` shim.
         """
+        self._maybe_drift_check()
         try:
             rows = self._engine.get_pending_changes(self._batch_limit)
         except Exception as exc:
@@ -760,6 +787,155 @@ class ChangeLogWatcher:
                 trigger_id,
                 exc,
             )
+
+    # ------------------------------------------------------------------
+    # Schema-drift watchdog (B-13, v1.5.3 #103)
+    # ------------------------------------------------------------------
+
+    def _maybe_drift_check(self) -> None:
+        """Throttled entry point for the schema-drift check.
+
+        Runs :meth:`_drift_check_tick` no more than once every
+        :attr:`_schema_drift_check_interval_s` wall-clock seconds; a
+        ``0`` interval disables the watchdog entirely (used by tests
+        and for SaaS contexts where DDL is gated through a different
+        code path).
+        """
+        if self._schema_drift_check_interval_s <= 0:
+            return
+        now = time.time()
+        if now - self._last_drift_check_ts < self._schema_drift_check_interval_s:
+            return
+        self._last_drift_check_ts = now
+        try:
+            self._drift_check_tick()
+        except Exception as exc:  # pragma: no cover — defensive
+            logger.warning("schema_drift_check_failed: %s", exc)
+
+    def _drift_check_tick(self) -> list[str]:
+        """Re-hash every tracked layer; on mismatch drop+reinstall the
+        triggers and broadcast ``schema.changed``.
+
+        Returns the list of layer names that drifted (and were
+        repaired). Empty when nothing changed since the last tick.
+
+        B-13 reproducer: a QGIS user adds / drops / renames a column
+        via Field Calculator. Pre-B-13 the AFTER UPDATE trigger's
+        baked ``new_values`` JSON references a stale column list;
+        further edits crash with ``no such column`` or silently
+        omit the new column from the change_log payload. The watchdog
+        rebuilds the trigger DDL the next time it ticks (default
+        every 5 s), and pushes a ``schema.changed`` event so the
+        portal / plugin can refresh their layer panels.
+        """
+        get_conn = getattr(self._engine, "_get_conn", None)
+        if get_conn is None:
+            return []
+        try:
+            conn = get_conn()
+        except Exception as exc:
+            logger.warning("schema_drift_get_conn_failed: %s", exc)
+            return []
+
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT tbl_name FROM sqlite_master "
+                "WHERE type = 'trigger' "
+                "AND name LIKE '\\_gispulse\\_trg\\_%' ESCAPE '\\'"
+            ).fetchall()
+        except Exception as exc:
+            logger.warning("schema_drift_enumerate_failed: %s", exc)
+            return []
+
+        # Cope with both sqlite3.Row (subscriptable by index) and bare
+        # tuple results (e.g. when the engine wraps the conn).
+        tracked = [str(r[0]) for r in rows if r[0]]
+        drifted: list[str] = []
+        for layer in tracked:
+            cur_hash = self._compute_schema_hash(conn, layer)
+            if cur_hash is None:
+                # Layer disappeared mid-check or PRAGMA returned
+                # nothing — drop the cached entry so a future
+                # re-creation triggers a rebuild.
+                self._schema_hashes.pop(layer, None)
+                continue
+            cached = self._schema_hashes.get(layer)
+            if cached is None:
+                # First sighting since the watcher started — cache
+                # without firing. Mass-replay of schema.changed at
+                # boot would just spam subscribers.
+                self._schema_hashes[layer] = cur_hash
+                continue
+            if cached == cur_hash:
+                continue
+            # Drift detected — repair via install_change_tracking
+            # which drops the existing GISPulse triggers, ensures the
+            # ``_gispulse_origin`` column (B-02), and recreates the
+            # full trigger set with the v3 WHEN clause baked over the
+            # *new* column list.
+            try:
+                from persistence.gpkg_schema import install_change_tracking
+
+                install_change_tracking(conn, layer)
+                self._schema_hashes[layer] = cur_hash
+                drifted.append(layer)
+            except Exception as exc:
+                logger.warning(
+                    "schema_drift_repair_failed layer=%s err=%s",
+                    layer,
+                    exc,
+                )
+                continue
+
+        for layer in drifted:
+            try:
+                self._hub.broadcast(
+                    "schema.changed",
+                    {
+                        "dataset_id": self._dataset_id,
+                        "table": layer,
+                        "change_type": "columns_changed",
+                    },
+                )
+            except Exception as exc:
+                logger.error(
+                    "schema_changed_broadcast_failed layer=%s err=%s",
+                    layer,
+                    exc,
+                )
+
+        if drifted:
+            logger.info(
+                "schema_drift_repaired layers=%s", drifted
+            )
+        return drifted
+
+    @staticmethod
+    def _compute_schema_hash(conn: Any, layer: str) -> str | None:
+        """Hash the layer's column structure (cid, name, type, notnull,
+        default, pk) so add / drop / rename / type-change all flip the
+        hash.
+
+        Returns ``None`` if the table is missing or PRAGMA fails — the
+        caller drops any cached hash so a future re-creation goes
+        through the first-sighting path.
+        """
+        try:
+            cols = conn.execute(
+                f'PRAGMA table_info("{layer}")'
+            ).fetchall()
+        except Exception:
+            return None
+        if not cols:
+            return None
+        payload = "\n".join(
+            "|".join(
+                "" if r[i] is None else str(r[i])
+                for i in range(6)
+            )
+            for r in cols
+        )
+        return hashlib.sha1(payload.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------
