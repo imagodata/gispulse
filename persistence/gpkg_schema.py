@@ -417,9 +417,14 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection) -> int:
     for layer in layer_names:
         # ``install_change_tracking`` validates the identifier, ensures
         # the sentinel column, drops legacy triggers, and re-creates
-        # them with the v3 WHEN clause.
+        # them with the v3 WHEN clause. Crucially we honour the
+        # original PK column name (``id``, ``fid``, ...) — the legacy
+        # default of ``fid`` would silently rewrite the trigger DDL
+        # with ``NEW."fid"`` and break tables whose PK is named
+        # otherwise.
         try:
-            install_change_tracking(conn, layer)
+            pk_col = _detect_pk_col(conn, layer)
+            install_change_tracking(conn, layer, pk_col=pk_col)
         except ValueError as exc:
             # A pre-B-05 GPKG could conceivably hold a layer name that
             # is now rejected by ``validate_layer_name`` (control char,
@@ -585,6 +590,43 @@ def _ensure_origin_column(conn: sqlite3.Connection, layer_name: str) -> bool:
     )
     logger.info("origin_column_added: %s._gispulse_origin", layer_name)
     return True
+
+
+def _detect_pk_col(conn: sqlite3.Connection, layer_name: str) -> str:
+    """Return the layer's primary key column name (defaults to ``"fid"``).
+
+    B-02 (#103): the v2→v3 migration re-installs change tracking on
+    every previously tracked layer. The legacy default of
+    ``pk_col="fid"`` would silently rewrite the trigger DDL with
+    ``NEW."fid"`` even on tables whose PK is named otherwise (``id``,
+    ``rowid``, ...) — breaking ``test_set_field_e2e`` and any caller
+    that originally passed an explicit ``pk_col=`` to
+    :func:`install_change_tracking`.
+
+    SQLite's ``PRAGMA table_info`` reports the PK position in column 5
+    (``pk``) — non-zero means PK, with the position when composite. We
+    pick the *first* PK column; for single-column PKs that's always
+    correct. For multi-column PKs (rare in GPKG layers) the change-log
+    can only carry one ``row_pk`` value, so taking the first is the
+    conservative compromise.
+
+    Falls back to ``"fid"`` when PRAGMA returns no PK (legacy GPKG
+    layers without a declared primary key would have failed install
+    too — keep the legacy default for graceful degradation).
+    """
+    try:
+        rows = conn.execute(
+            f'PRAGMA table_info("{layer_name}")'
+        ).fetchall()
+    except Exception:
+        return "fid"
+    pk_cols = sorted(
+        ((row[5], row[1]) for row in rows if row[5]),
+        key=lambda t: t[0],
+    )
+    if pk_cols:
+        return str(pk_cols[0][1])
+    return "fid"
 
 
 def _list_gispulse_triggers(
