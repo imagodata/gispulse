@@ -3,6 +3,7 @@ Triggers router for the GISPulse HTTP API.
 
 Endpoints:
     POST   /triggers                  — create a trigger
+    POST   /triggers/import           — validate (and optionally commit) a triggers.yaml
     GET    /triggers                  — list all triggers
     GET    /triggers/eval-stream      — SSE stream of trigger_fired events
     GET    /triggers/{id}             — detail for a single trigger
@@ -16,10 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from gispulse.adapters.http.dependencies import get_trigger_repo
 from gispulse.adapters.http.event_hub import get_event_hub
@@ -380,6 +382,270 @@ def create_trigger(
     )
     repo.save(trigger)
     return _trigger_to_response(trigger)
+
+
+# ---------------------------------------------------------------------------
+# Issue #94 — POST /triggers/import (CLI ↔ Portal parity P0-5)
+# ---------------------------------------------------------------------------
+
+
+_YAML_MIME_PREFIXES = ("application/x-yaml", "application/yaml", "text/yaml")
+_IMPORT_MAX_BYTES = 1 * 1024 * 1024  # 1 MiB — far above realistic triggers.yaml
+
+
+async def _read_yaml_payload(request: Request) -> str:
+    """Extract the YAML text from either a multipart upload or a raw body.
+
+    Issue #94: the CLI lets ``gispulse triggers validate --config`` point
+    at a path on disk; the portal needs the same validator over the
+    network. We accept *both* a ``multipart/form-data`` upload (one part
+    named ``file``) and a raw body with a YAML / plain-text content
+    type — same endpoint, no client-side guessing required.
+
+    Returns the YAML payload as a UTF-8 string.
+
+    Raises:
+        HTTPException 400 — body is missing, larger than
+            :data:`_IMPORT_MAX_BYTES`, or in an unrecognised content
+            type.
+    """
+    content_type = (request.headers.get("content-type") or "").lower()
+    if content_type.startswith("multipart/form-data"):
+        try:
+            form = await request.form()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400, detail=f"invalid multipart body: {exc}"
+            )
+        upload = form.get("file")
+        if upload is None:
+            raise HTTPException(
+                status_code=400,
+                detail="multipart upload must include a 'file' part",
+            )
+        # Starlette's UploadFile vs plain str (large/small fields).
+        read = getattr(upload, "read", None)
+        if read is None:
+            raise HTTPException(
+                status_code=400, detail="'file' part must be a file upload"
+            )
+        raw = await read()
+    else:
+        raw = await request.body()
+    if not raw:
+        raise HTTPException(status_code=400, detail="empty request body")
+    if len(raw) > _IMPORT_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"YAML payload too large "
+                f"({len(raw)} bytes > {_IMPORT_MAX_BYTES} max)"
+            ),
+        )
+    if isinstance(raw, bytes):
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"YAML body must be UTF-8: {exc}",
+            )
+    else:
+        text = str(raw)
+    return text
+
+
+def _summarise_imported_config(config: Any) -> dict[str, Any]:
+    """Build the dry-run preview block for ``POST /triggers/import``.
+
+    Returns the schema documented in the issue:
+    ``{ valid, summary: {triggers, actions}, preview: [...], warnings }``.
+    """
+    triggers = list(getattr(config, "triggers", []) or [])
+    actions_total = 0
+    preview: list[dict[str, Any]] = []
+    for entry in triggers:
+        actions = list(getattr(entry, "actions", []) or [])
+        actions_total += len(actions)
+        action_types = [getattr(a, "type", None) for a in actions]
+        when = list(getattr(entry, "when", []) or [])
+        preview.append(
+            {
+                "name": getattr(entry, "name", None),
+                "table": getattr(entry, "table", None),
+                "when": when,
+                # Backwards-compat alias for the body shape documented
+                # in the issue (``operation``). When several values are
+                # listed we surface the first; the canonical list is
+                # also exposed under ``when``.
+                "operation": when[0] if when else None,
+                "predicate": getattr(entry, "predicate", None),
+                "actions": [str(t) for t in action_types if t is not None],
+                "enabled": getattr(entry, "enabled", True),
+            }
+        )
+    return {
+        "valid": True,
+        "summary": {
+            "triggers": len(triggers),
+            "actions": actions_total,
+        },
+        "preview": preview,
+        "warnings": [],
+    }
+
+
+@router.post("/import")
+@limiter.limit("10/minute")
+async def import_triggers(
+    request: Request,
+    commit: bool = Query(
+        False,
+        description=(
+            "When true, persist the parsed triggers via the trigger "
+            "repository (idempotent on duplicate names). Default is "
+            "dry-run: validate only, return the preview block."
+        ),
+    ),
+    repo: Repository = Depends(get_trigger_repo),
+) -> dict[str, Any]:
+    """Validate (and optionally commit) a ``triggers.yaml`` config.
+
+    Closes #94 — CLI ↔ Portal parity P0-5. The portal's "Import YAML"
+    button hits this endpoint. Replaces ``gispulse triggers validate
+    --config <path>`` from the CLI: same validator (``parse_config_text``
+    in :mod:`gispulse.runtime.config_loader`), zero divergence between
+    the two surfaces.
+
+    Body: either a ``multipart/form-data`` upload with a ``file`` part
+    or a raw body with ``application/x-yaml`` / ``application/yaml`` /
+    ``text/yaml`` / ``text/plain`` content type.
+
+    Query params:
+        commit: When ``True``, persist the parsed triggers. Default
+                ``False`` runs a dry-run preview only. Note: the
+                ``gpkg:`` key in the YAML is **not** used for path
+                resolution in the importer — the caller's tenant
+                binding is implicit through the repository. This is a
+                deliberate hardening over the CLI which trusts the
+                ``gpkg:`` path because it always runs as the user.
+
+    Returns:
+        - dry-run: ``{valid, summary, preview, warnings}``.
+        - commit:  ``{valid, summary, preview, warnings, committed: [<trigger_id>...]}``.
+
+    Raises:
+        HTTPException 400/413 — bad request body / payload too large.
+        HTTPException 422 — YAML parses but fails validation. Body
+            includes a ``valid: false`` envelope with a list of
+            ``{path, message}`` errors.
+    """
+    _require_local_triggers()
+
+    text = await _read_yaml_payload(request)
+
+    # Local imports keep the router free of a hard runtime dependency
+    # at module-load time — matches the lazy-import style used elsewhere
+    # in this file.
+    from gispulse.runtime.config_loader import (
+        ConfigError,
+        parse_config_text,
+        to_triggers,
+    )
+
+    try:
+        config = parse_config_text(
+            text,
+            source="<upload>",
+            resolve_gpkg=False,
+        )
+    except ConfigError as exc:
+        # Skip the global error envelope so the portal can render the
+        # structured ``{path, message}`` list directly. ConfigError
+        # already wraps both yaml.YAMLError and pydantic.ValidationError.
+        return JSONResponse(
+            status_code=422,
+            content={
+                "valid": False,
+                "errors": [{"path": "$", "message": str(exc)}],
+            },
+        )
+
+    response = _summarise_imported_config(config)
+
+    if not commit:
+        return response
+
+    # Commit path — convert YAML to domain Triggers and persist via the
+    # repository. Idempotent: ignore triggers whose ``name`` already
+    # exists for the tenant (matches the issue spec "skip ceux qui
+    # existent déjà avec même hash" — name is the canonical key in v1.5.x).
+    try:
+        domain_triggers = to_triggers(config)
+    except Exception as exc:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "valid": False,
+                "errors": [
+                    {
+                        "path": "$",
+                        "message": f"unable to convert to domain triggers: {exc}",
+                    }
+                ],
+            },
+        )
+
+    # Tier cap for Community: max 5 active triggers per repo. Reject up
+    # front if the import would push us over.
+    existing = repo.list_all() if hasattr(repo, "list_all") else []
+    existing_names = {getattr(t, "name", None) for t in existing}
+    new_to_create = [
+        t for t in domain_triggers if getattr(t, "name", None) not in existing_names
+    ]
+
+    # Tier check — uses the same machinery as the per-trigger create path
+    # so a Community user gets a 402 with the upgrade hint instead of a
+    # silent partial commit.
+    if hasattr(repo, "list_all"):
+        active_after = sum(
+            1 for t in existing if getattr(t, "enabled", True)
+        ) + sum(1 for t in new_to_create if getattr(t, "enabled", True))
+        if not _is_pro_or_above() and active_after > _LOCAL_TRIGGER_MAX_ACTIVE:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"Community tier is capped at "
+                    f"{_LOCAL_TRIGGER_MAX_ACTIVE} active triggers; "
+                    f"importing this YAML would push you to "
+                    f"{active_after}. Upgrade to Pro or disable some."
+                ),
+            )
+
+    committed: list[str] = []
+    skipped: list[str] = []
+    for trigger in new_to_create:
+        try:
+            repo.save(trigger)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "valid": True,
+                    "summary": response["summary"],
+                    "preview": response["preview"],
+                    "committed": committed,
+                    "error": f"failed to persist '{getattr(trigger, 'name', '?')}': {exc}",
+                },
+            )
+        committed.append(str(getattr(trigger, "id", "")))
+    for trigger in domain_triggers:
+        if getattr(trigger, "name", None) in existing_names:
+            skipped.append(str(getattr(trigger, "name", "")))
+
+    response["committed"] = committed
+    response["skipped"] = skipped
+    return response
 
 
 @router.get("")
