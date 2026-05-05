@@ -148,9 +148,26 @@ def _build_change_triggers(
         f"END"
     )
 
+    # B-02 (v1.5.3, #103): origin-tagging M1. The AFTER UPDATE trigger
+    # gains a WHEN clause that suppresses re-fires when the
+    # ``action_dispatcher`` write-back tagged the row with
+    # ``trigger:<id>``. Two sub-conditions:
+    #   1. ``NEW._gispulse_origin`` not a trigger marker  → fire
+    #   2. ...except the action_dispatcher's own "clear sentinel"
+    #      UPDATE (``NEW=NULL`` while ``OLD`` was a trigger marker) —
+    #      that reset must NOT loop back, so we suppress it here.
+    # The column is added by :func:`install_change_tracking` (v3 schema),
+    # so the WHEN clause is safe to reference unconditionally.
     update_sql = (
         f'CREATE TRIGGER IF NOT EXISTS "_gispulse_trg_{slug}_update"\n'
         f'AFTER UPDATE ON "{table_name}"\n'
+        f"WHEN (NEW.\"_gispulse_origin\" IS NULL "
+        f"OR NEW.\"_gispulse_origin\" NOT LIKE 'trigger:%')\n"
+        f"  AND NOT (\n"
+        f"    NEW.\"_gispulse_origin\" IS NULL\n"
+        f"    AND OLD.\"_gispulse_origin\" IS NOT NULL\n"
+        f"    AND OLD.\"_gispulse_origin\" LIKE 'trigger:%'\n"
+        f"  )\n"
         f"BEGIN\n"
         f"  INSERT INTO _gispulse_change_log"
         f"(table_name, operation, row_pk, new_values, old_values, geom_changed)\n"
@@ -363,6 +380,68 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> bool:
     return True
 
 
+def _migrate_v2_to_v3(conn: sqlite3.Connection) -> int:
+    """Re-install change tracking on every previously tracked layer (v2→v3).
+
+    B-02 (#103): v3 grows the per-layer ``_gispulse_origin`` sentinel
+    column and the AFTER UPDATE WHEN-clause. Existing v2 GPKGs need
+    both the column added and their triggers rebuilt; a fresh-install
+    bootstrap leaves v3 triggers in place but does not touch user
+    layers.
+
+    The migration enumerates every distinct ``tbl_name`` referenced by
+    a ``_gispulse_trg_*`` trigger, pulls the layer's columns from
+    :func:`_inspect_layer` (so the existing JSON payload contract is
+    preserved), and calls :func:`install_change_tracking` — which
+    drops the v2 triggers and re-creates them with the v3 WHEN clause.
+
+    Idempotent.
+
+    Returns:
+        The number of layers that were re-installed (0 when no layer
+        was tracked or the project was already v3).
+    """
+    layer_names: list[str] = []
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT tbl_name FROM sqlite_master "
+            "WHERE type = 'trigger' "
+            "AND name LIKE '\\_gispulse\\_trg\\_%' ESCAPE '\\'"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        # sqlite_master always exists in SQLite, but be defensive.
+        return 0
+    layer_names = [str(r[0]) for r in rows if r[0]]
+    if not layer_names:
+        return 0
+    for layer in layer_names:
+        # ``install_change_tracking`` validates the identifier, ensures
+        # the sentinel column, drops legacy triggers, and re-creates
+        # them with the v3 WHEN clause. Crucially we honour the
+        # original PK column name (``id``, ``fid``, ...) — the legacy
+        # default of ``fid`` would silently rewrite the trigger DDL
+        # with ``NEW."fid"`` and break tables whose PK is named
+        # otherwise.
+        try:
+            pk_col = _detect_pk_col(conn, layer)
+            install_change_tracking(conn, layer, pk_col=pk_col)
+        except ValueError as exc:
+            # A pre-B-05 GPKG could conceivably hold a layer name that
+            # is now rejected by ``validate_layer_name`` (control char,
+            # quote, ...). Such a name could never have produced a
+            # legal trigger in the first place — log and skip.
+            logger.warning(
+                "schema_migration_v2_to_v3_skipped layer=%r reason=%s",
+                layer,
+                exc,
+            )
+    logger.info(
+        "schema_migration_v2_to_v3: rebuilt %d tracked layer(s)",
+        len(layer_names),
+    )
+    return len(layer_names)
+
+
 def bootstrap_gpkg_project(conn: sqlite3.Connection) -> None:
     """Create all _gispulse_* tables and register them in gpkg_extensions.
 
@@ -383,6 +462,11 @@ def bootstrap_gpkg_project(conn: sqlite3.Connection) -> None:
     # is added to existing tables (the DDL would skip the table entirely
     # because it already exists).
     _migrate_v1_to_v2(conn)
+    # B-02 (#103): v2 → v3 rebuilds per-layer triggers + adds the
+    # ``_gispulse_origin`` sentinel column. Runs after the internal
+    # tables exist (the migration relies on
+    # :func:`install_change_tracking`, which logs through the schema).
+    _migrate_v2_to_v3(conn)
 
     # Create internal tables
     for table_name, ddl in _TABLE_DDL.items():
@@ -456,6 +540,16 @@ def install_change_tracking(
         if geom_col is None:
             geom_col = auto_geom
 
+    # B-02 (#103): ensure the v3 sentinel column exists on the layer
+    # *before* the AFTER UPDATE trigger references it in its WHEN
+    # clause. Idempotent — skip when already present.
+    _ensure_origin_column(conn, layer_name)
+    # Drop any existing GISPulse triggers on this layer so a re-install
+    # picks up the v3 WHEN clause (CREATE TRIGGER IF NOT EXISTS would
+    # otherwise leave the v2 trigger in place).
+    for trg in _list_gispulse_triggers(conn, layer_name):
+        conn.execute(f'DROP TRIGGER IF EXISTS "{trg}"')
+
     for sql in _build_change_triggers(
         layer_name, pk_col, columns=columns, geom_col=geom_col
     ):
@@ -468,6 +562,90 @@ def install_change_tracking(
         len(columns or []),
         geom_col,
     )
+
+
+def _ensure_origin_column(conn: sqlite3.Connection, layer_name: str) -> bool:
+    """B-02: add ``_gispulse_origin TEXT`` to the layer if missing.
+
+    The column is the loop-bypass sentinel for origin-tagging M1: the
+    action_dispatcher writes ``trigger:<id>`` here, the AFTER UPDATE
+    trigger's WHEN clause skips when the marker is present.
+
+    Idempotent.
+
+    Returns:
+        ``True`` when an ``ALTER TABLE`` was issued, ``False`` when the
+        column was already there.
+    """
+    cols = {
+        row[1]
+        for row in conn.execute(
+            f'PRAGMA table_info("{layer_name}")'
+        ).fetchall()
+    }
+    if "_gispulse_origin" in cols:
+        return False
+    conn.execute(
+        f'ALTER TABLE "{layer_name}" ADD COLUMN "_gispulse_origin" TEXT'
+    )
+    logger.info("origin_column_added: %s._gispulse_origin", layer_name)
+    return True
+
+
+def _detect_pk_col(conn: sqlite3.Connection, layer_name: str) -> str:
+    """Return the layer's primary key column name (defaults to ``"fid"``).
+
+    B-02 (#103): the v2→v3 migration re-installs change tracking on
+    every previously tracked layer. The legacy default of
+    ``pk_col="fid"`` would silently rewrite the trigger DDL with
+    ``NEW."fid"`` even on tables whose PK is named otherwise (``id``,
+    ``rowid``, ...) — breaking ``test_set_field_e2e`` and any caller
+    that originally passed an explicit ``pk_col=`` to
+    :func:`install_change_tracking`.
+
+    SQLite's ``PRAGMA table_info`` reports the PK position in column 5
+    (``pk``) — non-zero means PK, with the position when composite. We
+    pick the *first* PK column; for single-column PKs that's always
+    correct. For multi-column PKs (rare in GPKG layers) the change-log
+    can only carry one ``row_pk`` value, so taking the first is the
+    conservative compromise.
+
+    Falls back to ``"fid"`` when PRAGMA returns no PK (legacy GPKG
+    layers without a declared primary key would have failed install
+    too — keep the legacy default for graceful degradation).
+    """
+    try:
+        rows = conn.execute(
+            f'PRAGMA table_info("{layer_name}")'
+        ).fetchall()
+    except Exception:
+        return "fid"
+    pk_cols = sorted(
+        ((row[5], row[1]) for row in rows if row[5]),
+        key=lambda t: t[0],
+    )
+    if pk_cols:
+        return str(pk_cols[0][1])
+    return "fid"
+
+
+def _list_gispulse_triggers(
+    conn: sqlite3.Connection, layer_name: str
+) -> list[str]:
+    """Return the names of every ``_gispulse_trg_*`` trigger on *layer_name*.
+
+    Used by :func:`install_change_tracking` (drop-then-recreate) and by
+    the v2 → v3 migration so it can re-install change tracking on every
+    layer that already had it.
+    """
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type = 'trigger' "
+        "AND tbl_name = ? "
+        "AND name LIKE '\\_gispulse\\_trg\\_%' ESCAPE '\\'",
+        (layer_name,),
+    ).fetchall()
+    return [r[0] for r in rows]
 
 
 def uninstall_change_tracking(conn: sqlite3.Connection, layer_name: str) -> None:
