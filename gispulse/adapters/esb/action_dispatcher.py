@@ -125,10 +125,34 @@ class ActionDispatcher(BaseDispatcher):
             return
         _validate_identifier(ctx.table, "table")
         _validate_identifier(target_field, "field")
-        self._sql_executor(
-            f'UPDATE "{ctx.table}" SET "{target_field}" = %s WHERE id = %s',
-            [value, ctx.row_id],
+        # B-02 (#103) origin-tagging M1: tag the row with
+        # ``trigger:<id>`` so the AFTER UPDATE WHEN clause skips the
+        # write-back and we don't loop. A second UPDATE clears the
+        # sentinel back to NULL — that one is also suppressed by the
+        # WHEN clause (NEW=NULL while OLD LIKE 'trigger:%') so a
+        # subsequent QGIS edit fires the trigger normally.
+        trigger_marker = (
+            f"trigger:{ctx.trigger.id}"
+            if getattr(ctx, "trigger", None) is not None
+            and getattr(ctx.trigger, "id", None) is not None
+            else None
         )
+        if trigger_marker is not None:
+            self._sql_executor(
+                f'UPDATE "{ctx.table}" SET "{target_field}" = %s, '
+                f'"_gispulse_origin" = %s WHERE id = %s',
+                [value, trigger_marker, ctx.row_id],
+            )
+            self._sql_executor(
+                f'UPDATE "{ctx.table}" SET "_gispulse_origin" = NULL '
+                f"WHERE id = %s",
+                [ctx.row_id],
+            )
+        else:
+            self._sql_executor(
+                f'UPDATE "{ctx.table}" SET "{target_field}" = %s WHERE id = %s',
+                [value, ctx.row_id],
+            )
 
     def _update_aggregate(self, action: ActionDef, ctx: TriggerContext) -> None:
         target_table = action.config.get("target_table", "")

@@ -109,11 +109,22 @@ class TestSetField:
             action_type=ActionType.SET_FIELD,
             config={"field": "status", "value": "archived"},
         )
-        d.dispatch(action, _make_context(table="zones", row_id="r1"))
-        assert len(sql.calls) == 1
+        ctx = _make_context(table="zones", row_id="r1")
+        d.dispatch(action, ctx)
+        # B-02 (#103) origin-tagging M1: SET_FIELD now emits two
+        # UPDATEs — first writes data + ``trigger:<id>`` marker, second
+        # clears the marker so the next QGIS edit isn't suppressed.
+        assert len(sql.calls) == 2
         assert 'UPDATE "zones"' in sql.calls[0][0]
         assert '"status"' in sql.calls[0][0]
-        assert sql.calls[0][1] == ["archived", "r1"]
+        assert '"_gispulse_origin"' in sql.calls[0][0]
+        assert sql.calls[0][1] == [
+            "archived",
+            f"trigger:{ctx.trigger.id}",
+            "r1",
+        ]
+        assert 'SET "_gispulse_origin" = NULL' in sql.calls[1][0]
+        assert sql.calls[1][1] == ["r1"]
 
     def test_rejects_unsafe_table(self):
         sql = FakeSQL()
@@ -143,7 +154,8 @@ class TestSetField:
     def test_accepts_qgis_field_with_dash(self):
         """B-05: column names like ``nb-bâtiments`` (Field Calculator
         outputs) must reach the SQL executor — they are safe inside the
-        double-quoted ``"..."`` reference."""
+        double-quoted ``"..."`` reference. B-02 still emits the two-step
+        marker UPDATE pair."""
         sql = FakeSQL()
         d = ActionDispatcher(sql_executor=sql)
         action = ActionDef(
@@ -151,8 +163,9 @@ class TestSetField:
             config={"field": "nb-bâtiments", "value": 12},
         )
         d.dispatch(action, _make_context(table="parcels", row_id="r1"))
-        assert len(sql.calls) == 1
+        assert len(sql.calls) == 2
         assert '"nb-bâtiments"' in sql.calls[0][0]
+        assert '"_gispulse_origin"' in sql.calls[0][0]
 
     def test_missing_field_is_noop(self):
         sql = FakeSQL()

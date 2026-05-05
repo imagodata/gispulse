@@ -263,4 +263,9 @@ def build_model_table_mapping(prefix: str = "_gispulse_") -> dict[str, str]:
 # Current schema version — increment when adding/removing/altering columns
 # v1 → v2 (2026-04-27, #7): added _gispulse_change_log.geom_changed,
 #                           triggers now populate new_values / old_values JSON
-SCHEMA_VERSION = 2
+# v2 → v3 (2026-05-05, #103 B-02): tracked layers grow a ``_gispulse_origin``
+#                                  TEXT column + AFTER UPDATE triggers gain a
+#                                  WHEN clause that suppresses re-fires when
+#                                  an action_dispatcher write-back tagged the
+#                                  row with ``trigger:<id>`` (origin-tagging M1).
+SCHEMA_VERSION = 3

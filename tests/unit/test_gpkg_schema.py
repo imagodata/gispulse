@@ -20,6 +20,9 @@ from persistence.gpkg_schema import (
     _build_change_triggers,
     _ensure_gpkg_core_tables,
     _ensure_gpkg_extensions_table,
+    _ensure_origin_column,
+    _list_gispulse_triggers,
+    _migrate_v2_to_v3,
     _register_extension,
     _validate_identifier,
     bootstrap_gpkg_project,
@@ -508,3 +511,231 @@ class TestIdentifierValidation:
             "SELECT table_name FROM _gispulse_change_log ORDER BY id DESC LIMIT 1"
         ).fetchone()
         assert row is not None and row["table_name"] == layer
+
+
+# ---------------------------------------------------------------------------
+# B-02 (v1.5.3, #103) — origin-tagging M1 (loop bypass + sentinel column)
+# ---------------------------------------------------------------------------
+
+
+class TestOriginTaggingM1:
+    """B-02 — sentinel column + AFTER UPDATE WHEN clause prevent the
+    SET_FIELD / RUN_SQL infinite loop where a trigger writes back to the
+    same table.
+
+    Bug reproducer: ``ON UPDATE buildings → SET_FIELD area =
+    ST_Area(geom)`` re-fired on every ``area`` write, locking CPU at
+    100% and ballooning the GPKG with ``_gispulse_change_log`` rows.
+    """
+
+    def _prep(self, conn):
+        bootstrap_gpkg_project(conn)
+        conn.execute(
+            'CREATE TABLE "buildings" '
+            "(fid INTEGER PRIMARY KEY, name TEXT, area REAL)"
+        )
+        conn.commit()
+        install_change_tracking(conn, "buildings")
+
+    def test_install_adds_sentinel_column(self, conn):
+        """Installing change tracking grows the layer with the v3
+        ``_gispulse_origin`` column. Idempotent on re-install."""
+        self._prep(conn)
+        cols = {
+            r[1]
+            for r in conn.execute('PRAGMA table_info("buildings")').fetchall()
+        }
+        assert "_gispulse_origin" in cols
+        # Re-install does not duplicate or recreate the column.
+        install_change_tracking(conn, "buildings")
+        cols_again = {
+            r[1]
+            for r in conn.execute('PRAGMA table_info("buildings")').fetchall()
+        }
+        assert cols == cols_again
+
+    def test_qgis_update_still_fires_trigger(self, conn):
+        """Baseline: a regular QGIS UPDATE (no marker) still produces a
+        change-log row. The WHEN clause must not over-suppress."""
+        self._prep(conn)
+        conn.execute('INSERT INTO "buildings"(fid, name) VALUES (1, "A")')
+        conn.commit()
+        # Truncate to isolate the UPDATE we care about.
+        conn.execute("DELETE FROM _gispulse_change_log")
+        conn.execute('UPDATE "buildings" SET name="B" WHERE fid=1')
+        conn.commit()
+        rows = conn.execute(
+            "SELECT operation FROM _gispulse_change_log"
+        ).fetchall()
+        assert [r["operation"] for r in rows] == ["UPDATE"]
+
+    def test_trigger_marked_update_is_suppressed(self, conn):
+        """Action-dispatcher write-back: an UPDATE that sets the marker
+        to ``trigger:<id>`` MUST NOT produce a change-log row — that's
+        the loop bypass."""
+        self._prep(conn)
+        conn.execute('INSERT INTO "buildings"(fid, name) VALUES (1, "A")')
+        conn.commit()
+        conn.execute("DELETE FROM _gispulse_change_log")
+        conn.execute(
+            'UPDATE "buildings" SET name="B", "_gispulse_origin" = ? '
+            "WHERE fid=1",
+            ("trigger:abc-123",),
+        )
+        conn.commit()
+        rows = conn.execute("SELECT * FROM _gispulse_change_log").fetchall()
+        assert rows == [], (
+            "row tagged as trigger:<id> must not re-fire the trigger — "
+            "that's the loop"
+        )
+
+    def test_clear_sentinel_update_is_suppressed(self, conn):
+        """Action-dispatcher clear pass: ``UPDATE ... _gispulse_origin =
+        NULL WHERE id = ?`` after a trigger marker MUST also be
+        suppressed, otherwise the clear loops back to the trigger."""
+        self._prep(conn)
+        conn.execute(
+            'INSERT INTO "buildings"(fid, name, "_gispulse_origin") '
+            'VALUES (1, "A", ?)',
+            ("trigger:abc-123",),
+        )
+        conn.commit()
+        conn.execute("DELETE FROM _gispulse_change_log")
+        conn.execute(
+            'UPDATE "buildings" SET "_gispulse_origin" = NULL WHERE fid=1'
+        )
+        conn.commit()
+        rows = conn.execute("SELECT * FROM _gispulse_change_log").fetchall()
+        assert rows == [], (
+            "the action_dispatcher's sentinel-clear UPDATE must be "
+            "suppressed (NEW=NULL while OLD LIKE 'trigger:%')"
+        )
+
+    def test_qgis_edit_after_trigger_cycle_fires(self, conn):
+        """End-to-end: trigger marker → clear → QGIS edit. The QGIS
+        edit MUST fire the trigger (not be silently swallowed because a
+        previous trigger ran on this row)."""
+        self._prep(conn)
+        conn.execute('INSERT INTO "buildings"(fid, name) VALUES (1, "A")')
+        conn.commit()
+        # Simulate the action_dispatcher pair: marker write + clear.
+        conn.execute(
+            'UPDATE "buildings" SET name="B", "_gispulse_origin" = ? '
+            "WHERE fid=1",
+            ("trigger:abc-123",),
+        )
+        conn.execute(
+            'UPDATE "buildings" SET "_gispulse_origin" = NULL WHERE fid=1'
+        )
+        conn.commit()
+        # Now a real QGIS edit.
+        conn.execute("DELETE FROM _gispulse_change_log")
+        conn.execute('UPDATE "buildings" SET name="C" WHERE fid=1')
+        conn.commit()
+        rows = conn.execute(
+            "SELECT operation FROM _gispulse_change_log"
+        ).fetchall()
+        assert [r["operation"] for r in rows] == ["UPDATE"], (
+            "after the action's marker+clear pair, a subsequent QGIS "
+            "UPDATE must still produce a change-log row"
+        )
+
+
+class TestSchemaMigrationV2ToV3:
+    """B-02 — :func:`_migrate_v2_to_v3` rebuilds tracked-layer triggers
+    on the new v3 contract (sentinel column + WHEN clause)."""
+
+    def _make_v2_gpkg(self, conn):
+        """Bootstrap a GPKG, install change tracking, then forcibly
+        downgrade to a v2-shaped trigger (no WHEN clause) so the
+        migration has work to do."""
+        bootstrap_gpkg_project(conn)
+        conn.execute(
+            'CREATE TABLE "parcels" (fid INTEGER PRIMARY KEY, name TEXT)'
+        )
+        conn.commit()
+        install_change_tracking(conn, "parcels")
+        for trg in _list_gispulse_triggers(conn, "parcels"):
+            conn.execute(f'DROP TRIGGER "{trg}"')
+        conn.execute(
+            'CREATE TRIGGER "_gispulse_trg_parcels_update" '
+            'AFTER UPDATE ON "parcels" BEGIN '
+            "  INSERT INTO _gispulse_change_log "
+            "(table_name, operation, row_pk, new_values, old_values, geom_changed) "
+            "  VALUES ('parcels', 'UPDATE', NEW.\"fid\", "
+            "          json_object('name', NEW.\"name\"), "
+            "          json_object('name', OLD.\"name\"), 0); "
+            "END"
+        )
+        conn.commit()
+
+    def test_no_op_when_no_tracked_layer(self, conn):
+        """A bootstrap-only GPKG (no tracked layer) is a no-op."""
+        bootstrap_gpkg_project(conn)
+        assert _migrate_v2_to_v3(conn) == 0
+
+    def test_rebuilds_triggers_with_when_clause(self, conn):
+        """After migration, the AFTER UPDATE trigger sql contains the
+        WHEN clause."""
+        self._make_v2_gpkg(conn)
+        v2_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' "
+            "AND name='_gispulse_trg_parcels_update'"
+        ).fetchone()
+        assert v2_sql is not None
+        assert "WHEN" not in v2_sql["sql"].upper()
+
+        rebuilt = _migrate_v2_to_v3(conn)
+        assert rebuilt == 1
+
+        v3_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' "
+            "AND name LIKE '_gispulse_trg_parcels_update%'"
+        ).fetchone()
+        assert v3_sql is not None
+        assert "WHEN" in v3_sql["sql"].upper()
+        assert "_gispulse_origin" in v3_sql["sql"]
+
+    def test_idempotent(self, conn):
+        """Running the migration twice on the same project is safe."""
+        self._make_v2_gpkg(conn)
+        _migrate_v2_to_v3(conn)
+        rebuilt = _migrate_v2_to_v3(conn)
+        assert rebuilt >= 1
+
+    def test_bootstrap_runs_migration(self, conn):
+        """Re-bootstrapping a v2 GPKG applies the v2→v3 migration so
+        existing projects upgrade in-place."""
+        self._make_v2_gpkg(conn)
+        bootstrap_gpkg_project(conn)
+        v3_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' "
+            "AND name LIKE '_gispulse_trg_parcels_update%'"
+        ).fetchone()
+        assert v3_sql is not None
+        assert "WHEN" in v3_sql["sql"].upper()
+
+
+class TestEnsureOriginColumn:
+    """``_ensure_origin_column`` is a low-level helper that adds the
+    sentinel column idempotently."""
+
+    def test_adds_when_missing(self, conn):
+        bootstrap_gpkg_project(conn)
+        conn.execute('CREATE TABLE "x" (fid INTEGER PRIMARY KEY)')
+        conn.commit()
+        added = _ensure_origin_column(conn, "x")
+        assert added is True
+        cols = {r[1] for r in conn.execute('PRAGMA table_info("x")').fetchall()}
+        assert "_gispulse_origin" in cols
+
+    def test_noop_when_present(self, conn):
+        bootstrap_gpkg_project(conn)
+        conn.execute(
+            'CREATE TABLE "x" '
+            '(fid INTEGER PRIMARY KEY, "_gispulse_origin" TEXT)'
+        )
+        conn.commit()
+        added = _ensure_origin_column(conn, "x")
+        assert added is False
+

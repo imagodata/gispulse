@@ -254,7 +254,13 @@ def test_bootstrap_upgrades_v1_gpkg_in_place(tmp_path: Path) -> None:
     )
     conn.close()
 
-    # Bootstrap should add the column and bump schema_version to 2.
+    # Bootstrap should add the geom_changed column (v1 → v2) and bump
+    # schema_version to the current version. v3 (B-02 #103) adds the
+    # per-layer ``_gispulse_origin`` migration but doesn't change the
+    # ``_gispulse_change_log`` shape, so the v1→v2 column-add behaviour
+    # is unchanged.
+    from persistence.schema import SCHEMA_VERSION
+
     conn = sqlite3.connect(str(path), isolation_level=None)
     bootstrap_gpkg_project(conn)
     cols = {
@@ -264,5 +270,5 @@ def test_bootstrap_upgrades_v1_gpkg_in_place(tmp_path: Path) -> None:
     sv = conn.execute(
         "SELECT value FROM _gispulse_kv WHERE key='schema_version'"
     ).fetchone()
-    assert sv[0] == "2"
+    assert sv[0] == str(SCHEMA_VERSION)
     conn.close()
