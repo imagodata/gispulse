@@ -859,7 +859,9 @@ def evaluate_trigger(
 # ---------------------------------------------------------------------------
 
 from pydantic import BaseModel, Field
-from typing import Any
+
+# ``Any`` is already imported at module top — local re-import would
+# be dead code (ruff F811).
 
 
 class TriggerOperationIn(BaseModel):
