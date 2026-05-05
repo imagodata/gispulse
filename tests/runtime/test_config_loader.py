@@ -303,7 +303,9 @@ def test_module_does_not_call_unsafe_yaml_load() -> None:
 def test_empty_yaml_rejected(tmp_path: Path) -> None:
     empty = tmp_path / "empty.yaml"
     empty.write_text("", encoding="utf-8")
-    with pytest.raises(ConfigError, match="empty config file"):
+    # Wording was generalised to ``empty config: <source>`` after #94
+    # extracted ``parse_config_text`` (covers both file and inline).
+    with pytest.raises(ConfigError, match="empty config"):
         load_config(empty)
 
 

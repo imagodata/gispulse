@@ -335,27 +335,85 @@ def load_config(
     # SECURITY: never use yaml.load — only safe_load. This is the single
     # most important guard in this module.
     text = cfg_path.read_text(encoding="utf-8")
+    return parse_config_text(
+        text,
+        gpkg_override=gpkg_override,
+        source=str(cfg_path),
+    )
+
+
+def parse_config_text(
+    text: str,
+    *,
+    gpkg_override: str | os.PathLike[str] | None = None,
+    source: str = "<inline>",
+    resolve_gpkg: bool = True,
+) -> GISPulseConfig:
+    """Parse + validate a YAML config from an in-memory string.
+
+    Issue #94: the HTTP ``POST /triggers/import`` endpoint receives the
+    YAML over the wire (multipart upload or raw body), so :func:`load_config`
+    delegates here once the file has been read. This function performs no
+    I/O on the YAML itself — only the optional GPKG path resolution
+    (``resolve_gpkg=True``) which the importer can disable when it already
+    binds the import to a tenant ``dataset_id``.
+
+    Args:
+        text:          The YAML document as a UTF-8 string.
+        gpkg_override: Optional ``--gpkg`` value that wins over the
+                       ``gpkg:`` key in *text*. Subject to the same
+                       path-traversal guard as :func:`load_config`.
+        source:        Human-readable origin used in error messages
+                       (file path or ``"<inline>"`` / ``"<upload>"``).
+        resolve_gpkg:  When ``True`` (default), the ``gpkg:`` path is
+                       required and resolved through
+                       :func:`_resolve_safe`. When ``False`` the field is
+                       still parsed (kept verbatim) but path resolution
+                       and on-disk existence checks are skipped — used
+                       by the HTTP importer in dry-run mode where the
+                       caller binds the YAML to an existing tenant
+                       dataset rather than to a path on the server's
+                       filesystem.
+
+    Returns:
+        A validated :class:`GISPulseConfig`.
+
+    Raises:
+        ConfigError:        Path traversal, missing ``gpkg`` key, or
+                            schema violation.
+    """
     try:
         raw = yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        raise ConfigError(f"invalid YAML in {cfg_path}: {exc}") from exc
+        raise ConfigError(f"invalid YAML in {source}: {exc}") from exc
 
     if raw is None:
-        raise ConfigError(f"empty config file: {cfg_path}")
+        raise ConfigError(f"empty config: {source}")
     if not isinstance(raw, dict):
         raise ConfigError(
             f"config root must be a mapping, got {type(raw).__name__}"
         )
 
-    # Resolve the GPKG path (override wins). We do this *before*
-    # pydantic validation so the schema sees an absolute path string.
-    gpkg_raw = gpkg_override if gpkg_override is not None else raw.get("gpkg")
-    if not gpkg_raw:
-        raise ConfigError("missing 'gpkg' key (no --gpkg override either)")
-    gpkg_resolved = _resolve_safe(gpkg_raw, anchors=anchors, must_exist=True)
-    raw["gpkg"] = str(gpkg_resolved)
+    if resolve_gpkg:
+        anchors = _safe_anchors()
+        gpkg_raw = (
+            gpkg_override if gpkg_override is not None else raw.get("gpkg")
+        )
+        if not gpkg_raw:
+            raise ConfigError("missing 'gpkg' key (no --gpkg override either)")
+        gpkg_resolved = _resolve_safe(gpkg_raw, anchors=anchors, must_exist=True)
+        raw["gpkg"] = str(gpkg_resolved)
+    else:
+        # Importer mode: keep whatever's in the YAML so the preview can
+        # report it, but tolerate missing / non-existent paths since the
+        # caller is responsible for binding to a tenant dataset.
+        if gpkg_override is not None:
+            raw["gpkg"] = str(gpkg_override)
+        elif "gpkg" not in raw or not raw.get("gpkg"):
+            # ``GISPulseConfig`` requires a string here; fall back to a
+            # placeholder so pydantic validates the rest of the doc.
+            raw["gpkg"] = "<unbound>"
 
-    # Pydantic validation (strict, extra=forbid).
     try:
         config = GISPulseConfig.model_validate(raw)
     except Exception as exc:  # ValidationError or others
