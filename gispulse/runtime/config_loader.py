@@ -52,7 +52,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Literal
 
 import yaml  # type: ignore[import-untyped]
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 if TYPE_CHECKING:  # pragma: no cover
     from core.graph import ActionDef
@@ -75,7 +75,39 @@ _SUPPORTED_ACTION_TYPES: tuple[str, ...] = (
 )
 
 # DML operations the watcher emits.
-_SUPPORTED_DML_OPS: tuple[str, ...] = ("INSERT", "UPDATE", "DELETE")
+_SUPPORTED_DML_OPS: tuple[str, ...] = (
+    "INSERT",
+    "UPDATE",
+    "UPDATE_GEOM",
+    "UPDATE_ATTR",
+    "DELETE",
+    "BULK",
+)
+
+
+def _expand_when_to_events(when: list[str]) -> list[str]:
+    """Map the user-facing ``when`` list to the internal ``events`` set.
+
+    The granular verbs (``UPDATE_GEOM``/``UPDATE_ATTR``) are passed through
+    unchanged. The coarse ``UPDATE`` is expanded so a v1.5.x config keeps
+    catching every UPDATE event the watcher resolves to a granular variant.
+    Order is preserved and duplicates are removed; the watcher resolves a
+    raw row's operation to ``UPDATE_GEOM`` or ``UPDATE_ATTR`` based on the
+    ``geom_changed`` change-log column before evaluation.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for verb in when:
+        if verb == "UPDATE":
+            for v in ("UPDATE", "UPDATE_GEOM", "UPDATE_ATTR"):
+                if v not in seen:
+                    seen.add(v)
+                    out.append(v)
+        else:
+            if verb not in seen:
+                seen.add(verb)
+                out.append(verb)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +125,14 @@ class ActionConfigModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    type: Literal["webhook", "set_field", "run_sql", "log_event", "notify"]
+    type: Literal[
+        "webhook",
+        "set_field",
+        "run_sql",
+        "log_event",
+        "notify",
+        "tag_field",
+    ]
     # webhook
     url: str | None = None
     # set_field
@@ -104,6 +143,12 @@ class ActionConfigModel(BaseModel):
     # notify
     channel: str | None = None
     payload_template: dict[str, Any] | str | None = None
+    # tag_field (#123) — write a validation status onto the row.
+    # ``column`` / ``message_column`` are SQL identifiers, validated
+    # by the engine when the action runs.
+    column: str | None = None
+    message_column: str | None = None
+    message: str | None = None
 
     @field_validator("url")
     @classmethod
@@ -125,8 +170,35 @@ class TriggerConfigModel(BaseModel):
 
     name: str = Field(min_length=1, max_length=120)
     table: str = Field(min_length=1, max_length=120)
+    # ESRI Attribute Rules vocabulary aliases (#125):
+    # ``constraint`` ≡ ``validation`` (rule rejects/tags the row),
+    # ``calculation`` ≡ ``trigger`` (rule writes derived attributes),
+    # ``validation``  is the GISPulse-native name. ``trigger`` (default)
+    # is kept as a no-op label so v1.5.x configs without a ``kind:`` line
+    # keep loading. The runtime ignores the value today — it is exposed
+    # solely to ease ESRI migration; full semantic wiring is tracked in
+    # docs-site/guide/migration-from-esri.md.
+    kind: Literal[
+        "trigger",
+        "validation",
+        "constraint",
+        "calculation",
+    ] = "trigger"
     pk_col: str = Field(default="fid", min_length=1, max_length=64)
-    when: list[Literal["INSERT", "UPDATE", "DELETE"]] = Field(
+    when: list[
+        Literal[
+            "INSERT",
+            "UPDATE",
+            "UPDATE_GEOM",
+            "UPDATE_ATTR",
+            "DELETE",
+            "BULK",
+        ]
+    ] = Field(
+        # ``UPDATE`` is a backward-compatible alias kept for v1.5.x configs;
+        # config_loader expands it to ``UPDATE_GEOM + UPDATE_ATTR`` when
+        # building Trigger.conditions["events"] so dispatch stays granular
+        # under the hood (see ``to_triggers`` below).
         # mypy can't widen ``list[str]`` into the Literal[...] union mode
         # the BaseModel field expects; the runtime values are perfectly
         # fine because pydantic re-validates them at construction time.
@@ -144,7 +216,10 @@ class TriggerConfigModel(BaseModel):
     @classmethod
     def _no_empty_when(cls, v: list[str]) -> list[str]:
         if not v:
-            raise ValueError("when must list at least one of INSERT/UPDATE/DELETE")
+            raise ValueError(
+                "when must list at least one of INSERT/UPDATE/UPDATE_GEOM/"
+                "UPDATE_ATTR/DELETE/BULK"
+            )
         # Deduplicate while preserving order.
         seen: list[str] = []
         for op in v:
@@ -185,6 +260,59 @@ class SecurityConfigModel(BaseModel):
     webhook_allowlist: list[str] = Field(default_factory=list)
 
 
+class ValidateRuleConfigModel(BaseModel):
+    """One declarative validation rule under the ``validate:`` top-level key.
+
+    Validation rules fire on every INSERT and UPDATE event in the dataset
+    (granular ``when`` will be added later). ``mode: warn`` logs the
+    failure and broadcasts ``validation.failed`` over the event hub;
+    ``mode: tag`` writes the failure onto the row via a ``tag_field``
+    action so external consumers (QGIS, portal map) can render the
+    validation status.
+
+    The ``rule`` is compiled the same way as a ``set_field`` expression
+    (see :mod:`gispulse.dsl`) — the value at evaluation time must be a
+    boolean (``geom_is_valid()``, ``geom_area_m2() >= 50``…).
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    id: str = Field(min_length=1, max_length=120)
+    rule: str = Field(min_length=1, max_length=4096)
+    mode: Literal["warn", "tag"] = "warn"
+    tag_field: str | None = None
+    message: str | None = None
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def _validate_tag_field_required_for_tag_mode(self) -> "ValidateRuleConfigModel":
+        if self.mode == "tag" and not self.tag_field:
+            raise ValueError(
+                "validate rule with mode='tag' requires a tag_field column name"
+            )
+        return self
+
+    @field_validator("rule")
+    @classmethod
+    def _validate_rule_syntax(cls, v: str) -> str:
+        """Compile the rule at config-load time to surface syntax errors early.
+
+        We use a placeholder ``EPSG:4326`` source so CRS-aware fcts compile
+        cleanly without forcing operators to repeat the dataset CRS in every
+        rule. The real CRS is injected at runtime from the engine's
+        :class:`gispulse.dsl.CompilationContext`.
+        """
+        from gispulse.dsl import CompilationContext, compile_expression
+
+        try:
+            compile_expression(
+                v, CompilationContext(source_epsg="EPSG:4326"), mode="boolean"
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"validate rule failed to compile: {exc}") from exc
+        return v
+
+
 class RuntimeConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
     poll_interval_ms: int = Field(default=1000, ge=10, le=60_000)
@@ -198,9 +326,38 @@ class GISPulseConfig(BaseModel):
 
     version: Literal[1] = 1
     gpkg: str
+    engine: str | None = Field(
+        default=None,
+        description=(
+            "Optional explicit engine override. If unset, GISPulse infers "
+            "the engine from the dataset URI (`*.gpkg` → gpkg, "
+            "`postgresql://...` → postgis, etc). See "
+            "docs-site/guide/engines.md for the full mapping."
+        ),
+    )
     triggers: list[TriggerConfigModel] = Field(default_factory=list)
+    validate_rules: list[ValidateRuleConfigModel] = Field(
+        default_factory=list,
+        alias="validate",
+        description=(
+            "Declarative validation rules — see "
+            "docs-site/guide/dsl-validation.md."
+        ),
+    )
     security: SecurityConfigModel = Field(default_factory=SecurityConfigModel)
     runtime: RuntimeConfigModel = Field(default_factory=RuntimeConfigModel)
+
+    def resolved_engine(self) -> str:
+        """Return the engine that will actually run this config.
+
+        Wraps :func:`gispulse.runtime.engine_inference.resolve_engine` so
+        callers get a single source of truth. Raises
+        :class:`gispulse.runtime.engine_inference.EngineInferenceError` on
+        conflict between the URI and an explicit override.
+        """
+        from gispulse.runtime.engine_inference import resolve_engine
+
+        return resolve_engine(self.gpkg, self.engine)
 
 
 # ---------------------------------------------------------------------------
@@ -483,12 +640,16 @@ def to_triggers(config: GISPulseConfig) -> list["Trigger"]:
             )
 
         # Stash the user-friendly metadata on the trigger so log lines
-        # and validate output can reference the YAML name.
+        # and validate output can reference the YAML name. ``events`` is
+        # the expanded form consumed by ``DMLConditions.events`` (see #119)
+        # so a config with ``when: [UPDATE]`` keeps matching the watcher's
+        # granular ``UPDATE_GEOM`` / ``UPDATE_ATTR`` outputs.
         conditions: dict[str, Any] = {
             "yaml_name": entry.name,
             "table": entry.table,
             "pk_col": entry.pk_col,
             "when": list(entry.when),
+            "events": _expand_when_to_events(list(entry.when)),
         }
         if entry.predicate:
             conditions["predicate"] = entry.predicate

@@ -241,3 +241,69 @@ gispulse run ... --verbose
 ```
 
 Les logs structurés (JSON) indiquent pour chaque capability quelle stratégie a été sélectionnée.
+
+## v1.6.0 — DuckDB Spatial Inside
+
+À partir de la v1.6.0, GISPulse traite **DuckDB Spatial** comme moteur compute
+universel sous-jacent à tous les engines vecteur. Le DSL `triggers.yaml`
+appelle des fonctions géométriques (`geom_area_m2`, `geom_within`, …)
+qui se compilent en SQL DuckDB push-down ; les write-back continuent de
+passer par l'adapter natif (pyogrio pour les fichiers, asyncpg pour PostGIS).
+
+### Lazy install de l'extension spatial
+
+L'extension `duckdb-spatial` n'est plus chargée au démarrage. Le premier appel
+à une fonction geom du DSL déclenche `INSTALL spatial; LOAD spatial;` (≈10 s
+sur réseau standard, puis cached). Le résultat est mis en cache pour la durée
+du processus.
+
+Pour pré-installer explicitement (CI, environnements air-gapped) :
+
+```bash
+gispulse doctor --install-spatial
+```
+
+La commande probe également quelques EPSG critiques (4326, 3857, 2154, 27572)
+et flague les transformations qui dévient au-delà de la tolérance —
+indicateur classique d'une grille de datum-shift manquante (NTF→RGF93 par ex.).
+
+### Inférence du moteur depuis l'URI
+
+En v1.6+, vous pouvez omettre `engine:` et laisser GISPulse inférer depuis l'URI :
+
+| URI | Engine inféré |
+|---|---|
+| `*.gpkg` | `gpkg` |
+| `*.sqlite`, `*.db` | `spatialite` |
+| `postgresql://…`, `postgres://…`, `postgis://…` | `postgis` |
+| `*.shp`, `*.geojson`, `*.fgb`, `*.kml`, `*.tab`, `*.csv` | `duckdb_diff` (file-blob CDC, v1.6.1+) |
+
+Override possible via `engine:` dans le YAML — la combinaison URI / override est
+validée à la lecture du config et lève une erreur si elle est incompatible
+(ex. `engine: postgis` sur un fichier `.gpkg`).
+
+### Verbes DML granulaires
+
+Les triggers acceptent maintenant `UPDATE_GEOM` et `UPDATE_ATTR` en plus de
+`UPDATE` (qui reste un alias catch-all). Le watcher résout chaque ligne du
+change log en variant fin via le flag `geom_changed` capturé au moment de
+l'AFTER UPDATE trigger SQLite. Voir
+[Migrating from ESRI](./migration-from-esri.md#triggering-events-granular-update).
+
+### Bench R1 — write-back DuckDB vs pyogrio
+
+Mesuré 2026-05-06 sur 1 M polygones EPSG:2154 :
+
+| Scénario | pyogrio (s) | DuckDB COPY (s) | Ratio | RSS pyogrio | RSS DuckDB |
+|---|---:|---:|---:|---:|---:|
+| Append +100k | 8.19 | **3.63** | 2.26× | 950 MB | **273 MB** |
+| Update attr | 6.94 | **2.75** | 2.52× | 839 MB | **255 MB** |
+| Update geom | 8.87 | **2.47** | 3.59× | 843 MB | **275 MB** |
+
+DuckDB `COPY (FORMAT GDAL, DRIVER 'GPKG', SRS 'EPSG:2154')` est **plus rapide
+que pyogrio sur les bulk writes ≤ 5 M lignes**. La doctrine "pyogrio-only
+write-back" v1.5.x est officiellement sub-optimale ; l'engine GPKG bascule
+sur DuckDB COPY pour les bulk imports en v1.6+, avec fallback pyogrio
+forcé sur les datasets >5 M lignes ou les GPKG portant des triggers / vues
+custom (write GDAL ne préserve pas tout).
+
