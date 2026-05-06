@@ -55,21 +55,23 @@ when a downstream pipeline filters on a status column. The column is
 auto-created on first use; subsequent failures of the same rule
 overwrite the value.
 
-> **Note (v1.6.0 scope):** the validation runner that picks up
-> `validate:` rules at runtime ships with v1.6.0 — every INSERT and
-> UPDATE event triggers a per-rule evaluation against the row, and
-> failures land in the log + a `validation.failed` broadcast over the
-> event hub.
+> **Note (v1.6.0 scope):** the validation runner ships end-to-end —
+> every INSERT and UPDATE event triggers a per-rule evaluation, every
+> failure logs and broadcasts `validation.failed` over the event hub,
+> and a `mode: tag` failure dispatches a synthetic `TAG_FIELD` action
+> through the regular `ActionDispatcher`. The dispatcher auto-creates
+> the target column on first use (PRAGMA + ALTER TABLE) and writes
+> `failed:<rule.id>` onto the row.
 >
-> The `mode: tag` dispatch (column auto-create + `tag_field` action
-> emit) is wired in two places independently: the schema accepts it
-> and the `tag_field` action dispatcher knows how to write it. The
-> bridge that connects a failing `mode: tag` rule to an automatic
-> `tag_field` action emit is the last mile and tracked as a follow-up.
-> Until it lands, `mode: tag` configs degrade to `mode: warn`
-> semantics — log + WS event, no row mutation. Track
-> [#123](https://github.com/imagodata/gispulse/issues/123) and the
-> validation-runner-in-watcher follow-up for status.
+> Wiring the validation runner from `GISPulseConfig.validate_rules`
+> at `build_runtime` time is a separate piece — the runtime accepts
+> a runner injection today, the auto-instantiation step is tracked
+> as a follow-up because it needs a product decision on how rules
+> map to tables when multiple triggers are configured.
+>
+> Without an `action_dispatcher` injected into the runner,
+> `mode: tag` configs degrade to `mode: warn` semantics (log + WS
+> event, no row mutation).
 
 ## Cross-source validation (preview)
 
