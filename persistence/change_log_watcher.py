@@ -41,6 +41,7 @@ Security:
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import threading
 import time
@@ -672,17 +673,42 @@ class ChangeLogWatcher:
             # match against real values. Opt-in per trigger — triggers
             # without predicates never pay the SELECT cost.
             new_values: dict[str, Any] = {}
+            old_values: dict[str, Any] = {}
+            has_predicate = any(
+                (getattr(t, "conditions", None) or {}).get("predicate_ast")
+                is not None
+                for t in active_triggers
+            )
             if (
                 op != "DELETE"
                 and fid is not None
                 and table
-                and any(
-                    (getattr(t, "conditions", None) or {}).get("predicate_ast")
-                    is not None
-                    for t in active_triggers
-                )
+                and has_predicate
             ):
                 new_values = self._load_row_values(table, fid) or {}
+            # v1.6.0 (#120 B-08): DELETE events expose the row attributes
+            # captured at trigger time via ``old_values`` JSON. The
+            # column is populated by the AFTER DELETE SQLite trigger
+            # since v1 — we just hydrate ``ChangeRecord.old_values`` so
+            # the existing predicate evaluator can filter on the row's
+            # last-known state. Falling back silently when the column
+            # is missing or unparseable keeps legacy / out-of-sync
+            # GPKGs alive.
+            if op == "DELETE" and has_predicate:
+                raw = row.get("old_values")
+                if isinstance(raw, (str, bytes)) and raw:
+                    try:
+                        decoded = json.loads(raw)
+                    except (ValueError, TypeError):
+                        decoded = None
+                    if isinstance(decoded, dict):
+                        old_values = decoded
+                        # The evaluator's attribute predicates inspect
+                        # ``new_values``; for DELETE we mirror the old
+                        # row so ``predicate: status == 'active'`` keeps
+                        # the same surface as on INSERT/UPDATE.
+                        if not new_values:
+                            new_values = dict(decoded)
 
             record = ChangeRecord(
                 session_id="",
@@ -690,6 +716,7 @@ class ChangeLogWatcher:
                 feature_id=fid,
                 operation=operation,
                 new_values=new_values,
+                old_values=old_values,
             )
 
             try:
