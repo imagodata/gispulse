@@ -67,7 +67,7 @@ Source de vérité : YAML triggers + `_gispulse_change_log` table. API : [`trigg
 
 ## 3. Tracking — Change-log SQLite
 
-Source de vérité : `_gispulse_change_log` table dans le GPKG. Code CLI : [`cli_track.py`](https://github.com/imagodata/gispulse/blob/main/gispulse/cli_track.py). API : `datasets_router.py` (`enable_tracking` / `disable_tracking` / `tracking_status`).
+Source de vérité : `_gispulse_change_log` table dans le GPKG. Code CLI : [`cli_track.py`](https://github.com/imagodata/gispulse/blob/main/gispulse/cli_track.py). API : `datasets_router.py` (`enable_tracking` / `disable_tracking` / `tracking_status`) + `watchers_router.py` (dashboard).
 
 | Capability | CLI | Portail | Statut |
 |---|---|---|---|
@@ -75,6 +75,8 @@ Source de vérité : `_gispulse_change_log` table dans le GPKG. Code CLI : [`cli
 | Installer sur toutes les layers | `gispulse track install <gpkg> --all-layers` | POST `/datasets/{id}/enable_tracking` (pas de toggle "all") | ⚠️ |
 | Désinstaller le tracking | `gispulse track uninstall <gpkg> --layer <name>` | POST `/datasets/{id}/disable_tracking` — bouton dans `DatasetContextMenu` | ✅ |
 | Lister layers tracked | `gispulse track list <gpkg>` (triggers + pending counts) | GET `/datasets/{id}/tracking_status` — affiché dans `DatasetCard` | ✅ |
+| Lister watchers actifs (dashboard) | `gispulse watch --status` (à shipper v1.6+) | GET `/watchers` — `/runtime` page (#95) | ✅ portail |
+| Détail d'un watcher (counters runtime) | _N/A_ | GET `/watchers/{dataset_id}` — counters tick/fire/error + last_*_at | ✅ portail |
 | Tail des changements pending | `gispulse track tail <gpkg> --limit 50` | _N/A_ — `ActivityTimeline` consomme les events post-dispatch, pas le raw change-log | ⚠️ |
 | Diagnostic + auto-fix | `gispulse track doctor <gpkg> [--auto-fix]` | _N/A_ | ⚠️ |
 | Diagnostic global env | `gispulse doctor` | _N/A_ — surface "ops" CLI-only volontaire | 🔧 |
@@ -83,6 +85,7 @@ Source de vérité : `_gispulse_change_log` table dans le GPKG. Code CLI : [`cli
 - ⚠️ **all-layers UI** : le bouton enable_tracking traite une seule layer à la fois. → suggérer issue `feat(portal): bulk enable tracking from DatasetCard` (v1.6+).
 - ⚠️ **tail change-log** : utile en debug, pas de panel UI. → suggérer issue `feat(portal): raw change-log inspector panel` (v1.6+, déférable).
 - ⚠️ **track doctor UI** : healthcheck triggers + auto-fix à exposer dans `DatasetCard`. → suggérer issue `feat(portal): tracking health badge + repair action` (v1.6+).
+- ⚠️ **CLI watcher status** : `GET /watchers` shippé côté portail (#95) ; le complément CLI `gispulse watch --status` (afficher les watchers actifs lus depuis la base/registry partagé) reste à drafter v1.6+.
 
 ---
 

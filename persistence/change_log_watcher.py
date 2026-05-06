@@ -251,6 +251,22 @@ class ChangeLogWatcher:
         # Backoff window when get_pending_changes raises.
         self._error_backoff = 1.0
 
+        # #95 (P0-3 dashboard): observability counters surfaced through
+        # ``get_stats()`` and the ``GET /watchers/{id}`` endpoint. Single
+        # producer (the polling thread) → no lock needed; integer
+        # increments are atomic in CPython. Timestamps are wall-clock
+        # ``time.time()`` floats — easy to render in the portal without
+        # an additional dep, easy to subtract for "ran for X seconds".
+        self._started_at: float | None = None
+        self._tick_count = 0
+        self._rows_processed = 0
+        self._fire_count = 0
+        self._error_count = 0
+        self._last_tick_at: float | None = None
+        self._last_fire_at: float | None = None
+        self._last_error_at: float | None = None
+        self._last_error_msg: str | None = None
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -260,6 +276,7 @@ class ChangeLogWatcher:
         if self._running:
             return
         self._running = True
+        self._started_at = time.time()
         # Re-arm in case the watcher is being restarted after a stop().
         self._stop_event.clear()
         self._thread = threading.Thread(
@@ -297,6 +314,47 @@ class ChangeLogWatcher:
         """Return True when the polling thread is active."""
         return self._running and self._thread is not None and self._thread.is_alive()
 
+    # ------------------------------------------------------------------
+    # Observability — #95 (P0-3 dashboard)
+    # ------------------------------------------------------------------
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return a snapshot of the watcher's runtime counters.
+
+        Surfaced through :meth:`WatcherRegistry.get_stats` and the
+        ``GET /watchers/{dataset_id}`` endpoint. Single producer (the
+        polling thread) → no lock taken; reads of integer / float fields
+        are atomic in CPython, and the consumer treats the snapshot as
+        eventually-consistent (a tick happening between two field reads
+        is acceptable).
+
+        Returns:
+            ``{"running": bool, "started_at": float|None,
+              "tick_count": int, "rows_processed": int, "fire_count": int,
+              "error_count": int, "last_tick_at": float|None,
+              "last_fire_at": float|None, "last_error_at": float|None,
+              "last_error_msg": str|None, "dataset_id": str,
+              "poll_interval": float, "batch_limit": int,
+              "bulk_threshold": int, "bulk_eval": str}``.
+        """
+        return {
+            "dataset_id": self._dataset_id,
+            "running": self.is_running(),
+            "started_at": self._started_at,
+            "tick_count": self._tick_count,
+            "rows_processed": self._rows_processed,
+            "fire_count": self._fire_count,
+            "error_count": self._error_count,
+            "last_tick_at": self._last_tick_at,
+            "last_fire_at": self._last_fire_at,
+            "last_error_at": self._last_error_at,
+            "last_error_msg": self._last_error_msg,
+            "poll_interval": self._poll_interval,
+            "batch_limit": self._batch_limit,
+            "bulk_threshold": self._bulk_threshold,
+            "bulk_eval": self._bulk_eval,
+        }
+
     @property
     def stop_event(self) -> threading.Event:
         """Expose the cancel event so external loops (CLI ``--watch``)
@@ -329,8 +387,15 @@ class ChangeLogWatcher:
             if not self._running:
                 break
             try:
-                self._tick()
+                rows_processed = self._tick() or 0
+                self._tick_count += 1
+                self._last_tick_at = time.time()
+                if rows_processed:
+                    self._rows_processed += rows_processed
             except Exception as exc:  # pragma: no cover — defensive
+                self._error_count += 1
+                self._last_error_at = time.time()
+                self._last_error_msg = f"{type(exc).__name__}: {exc}"
                 logger.exception("change_log_watcher_tick_failed: %s", exc)
                 # Use the same cancellable wait so error backoff also
                 # respects stop().
@@ -624,6 +689,14 @@ class ChangeLogWatcher:
                 matched = bool(getattr(ft, "matched", False))
                 if not matched:
                     continue
+                # #95: counter / timestamp tracked by every matched fire,
+                # whether the broadcast or dispatch later succeed. This
+                # is what the dashboard surfaces — keeping it in sync
+                # with the on-the-wire ``trigger.fired`` count would
+                # require a finally block, which is more noise than
+                # signal for the operator view.
+                self._fire_count += 1
+                self._last_fire_at = time.time()
                 trigger_id = getattr(ft, "trigger_id", None)
                 try:
                     self._hub.broadcast(

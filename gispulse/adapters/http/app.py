@@ -42,6 +42,7 @@ from gispulse.adapters.http.routers.sessions_router import router as sessions_ro
 from gispulse.adapters.http.routers.schedules_router import router as schedules_router
 from gispulse.adapters.http.routers.system_router import router as system_router
 from gispulse.adapters.http.routers.triggers_router import router as triggers_router
+from gispulse.adapters.http.routers.watchers_router import router as watchers_router
 from gispulse.adapters.http.routers.relations_router import router as relations_router
 from gispulse.adapters.http.routers.marketplace_router import router as marketplace_router
 from gispulse.adapters.http.routers.pipelines_router import router as pipelines_router
@@ -231,6 +232,17 @@ def create_app(
         if is_portal:
             log.info("portal_startup", data_dir=str(_data_path))
             app.state.layer_cache = BoundedLayerCache(maxsize=50)
+            # #95 (P0-3 dashboard): the WatcherRegistry must exist in
+            # portal mode too so ``GET /watchers`` returns an empty list
+            # (200) rather than 503 on a fresh install. The registry is
+            # inert until something calls register() on it — full-mode
+            # paths handle that elsewhere; portal mode just needs the
+            # dashboard surface to be reachable.
+            from persistence.watcher_registry import WatcherRegistry
+
+            app.state.watcher_registry = WatcherRegistry(
+                event_hub=app.state.event_hub
+            )
         else:
             spatial_engine = create_spatial_engine(backend=cfg.engine.backend)
             spatial_engine.open()
@@ -728,6 +740,7 @@ def create_app(
         app.include_router(schedules_router)
         app.include_router(pipelines_router)
         app.include_router(system_router)
+        app.include_router(watchers_router)
         try:
             app.include_router(catalog_router)
         except Exception:
@@ -766,6 +779,7 @@ def create_app(
         app.include_router(schedules_router, **write_protected)
         app.include_router(pipelines_router, **write_protected)
         app.include_router(system_router, **protected)
+        app.include_router(watchers_router, **read_protected)
 
         # Marketplace (read endpoints open, install/uninstall admin-gated internally)
         app.include_router(marketplace_router)

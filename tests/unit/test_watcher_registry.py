@@ -227,3 +227,130 @@ class TestGetEngine:
         hub = _RecordingHub()
         reg = WatcherRegistry(event_hub=hub)
         assert reg.get_engine("ds-missing") is None
+
+
+# ---------------------------------------------------------------------------
+# #95 (P0-3 dashboard) — observability counters
+# ---------------------------------------------------------------------------
+
+
+class TestStatsSnapshot:
+    """Cover the ``get_stats`` / ``list_with_stats`` paths added for #95."""
+
+    def test_get_stats_unknown_returns_none(self) -> None:
+        hub = _RecordingHub()
+        reg = WatcherRegistry(event_hub=hub)
+        assert reg.get_stats("ds-missing") is None
+
+    def test_get_stats_initial_snapshot(self, tmp_path: Path) -> None:
+        """Right after register(), counters are zero, ``running`` is True."""
+        path = tmp_path / "a.gpkg"
+        _make_gpkg(path)
+        hub = _RecordingHub()
+        reg = WatcherRegistry(event_hub=hub)
+        try:
+            reg.register("ds-1", path, layers=["parcels"])
+            stats = reg.get_stats("ds-1")
+            assert stats is not None
+            assert stats["dataset_id"] == "ds-1"
+            assert stats["running"] is True
+            assert stats["tick_count"] == 0
+            assert stats["fire_count"] == 0
+            assert stats["error_count"] == 0
+            assert stats["last_error_msg"] is None
+            assert stats["layers"] == ["parcels"]
+            # Engine path round-trips through the registry.
+            assert stats["gpkg_path"] == str(path)
+            # Config knobs surface correctly (defaults from register()).
+            assert stats["poll_interval"] == 0.2
+            assert stats["batch_limit"] == 100
+            assert stats["bulk_threshold"] == 0
+            assert stats["bulk_eval"] == "skip"
+            assert stats["started_at"] is not None
+        finally:
+            reg.shutdown_all()
+
+    def test_tick_count_increments(self, tmp_path: Path) -> None:
+        """The polling thread bumps ``tick_count`` even with no rows."""
+        path = tmp_path / "a.gpkg"
+        _make_gpkg(path)
+        hub = _RecordingHub()
+        reg = WatcherRegistry(event_hub=hub)
+        try:
+            # Short poll interval so we observe ticks quickly.
+            reg.register("ds-1", path, poll_interval=0.05)
+            assert _wait_until(
+                lambda: (reg.get_stats("ds-1") or {}).get("tick_count", 0) >= 2,
+                timeout=2.0,
+            )
+            stats = reg.get_stats("ds-1")
+            assert stats is not None
+            assert stats["tick_count"] >= 2
+            # No rows touched the change log → rows_processed is still 0.
+            assert stats["rows_processed"] == 0
+            assert stats["last_tick_at"] is not None
+        finally:
+            reg.shutdown_all()
+
+    def test_rows_processed_after_insert(self, tmp_path: Path) -> None:
+        """A real INSERT bumps ``rows_processed`` once the watcher drains."""
+        from persistence.gpkg_schema import install_change_tracking
+
+        path = tmp_path / "a.gpkg"
+        _make_gpkg(path)
+        conn = sqlite3.connect(str(path))
+        try:
+            install_change_tracking(conn, "parcels")
+        finally:
+            conn.close()
+
+        hub = _RecordingHub()
+        reg = WatcherRegistry(event_hub=hub)
+        try:
+            reg.register("ds-1", path, poll_interval=0.05)
+
+            ext = sqlite3.connect(str(path))
+            try:
+                ext.execute('INSERT INTO "parcels"(name) VALUES (?)', ("x",))
+                ext.commit()
+            finally:
+                ext.close()
+
+            assert _wait_until(
+                lambda: (reg.get_stats("ds-1") or {}).get("rows_processed", 0) >= 1,
+                timeout=3.0,
+            )
+            stats = reg.get_stats("ds-1")
+            assert stats is not None
+            assert stats["rows_processed"] >= 1
+            # No triggers wired → fire_count remains 0.
+            assert stats["fire_count"] == 0
+        finally:
+            reg.shutdown_all()
+
+    def test_list_with_stats_returns_one_entry_per_dataset(
+        self, tmp_path: Path
+    ) -> None:
+        paths = [tmp_path / f"ds{i}.gpkg" for i in range(3)]
+        for p in paths:
+            _make_gpkg(p)
+        hub = _RecordingHub()
+        reg = WatcherRegistry(event_hub=hub)
+        try:
+            for i, p in enumerate(paths):
+                reg.register(f"ds-{i}", p, layers=[f"layer-{i}"])
+            items = reg.list_with_stats()
+            assert len(items) == 3
+            ids = sorted(it["dataset_id"] for it in items)
+            assert ids == ["ds-0", "ds-1", "ds-2"]
+            # Layers snapshot folds in correctly per dataset.
+            for it in items:
+                idx = it["dataset_id"].rsplit("-", 1)[-1]
+                assert it["layers"] == [f"layer-{idx}"]
+        finally:
+            reg.shutdown_all()
+
+    def test_list_with_stats_empty_when_no_registrations(self) -> None:
+        hub = _RecordingHub()
+        reg = WatcherRegistry(event_hub=hub)
+        assert reg.list_with_stats() == []

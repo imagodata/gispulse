@@ -217,6 +217,53 @@ class WatcherRegistry:
             entry = self._entries.get(dataset_id)
             return list(entry[2]) if entry else []
 
+    # ------------------------------------------------------------------
+    # Observability — #95 (P0-3 dashboard)
+    # ------------------------------------------------------------------
+
+    def get_stats(self, dataset_id: str) -> dict[str, Any] | None:
+        """Return runtime counters for a single watcher.
+
+        Wraps :meth:`ChangeLogWatcher.get_stats` and folds in the cached
+        ``layers`` snapshot so the dashboard endpoint can render the
+        full operational picture without a second registry call.
+
+        Returns ``None`` if no watcher is registered for *dataset_id*.
+        """
+        with self._lock:
+            entry = self._entries.get(dataset_id)
+            if entry is None:
+                return None
+            engine, watcher, layers = entry
+        stats = watcher.get_stats()
+        stats["layers"] = list(layers)
+        path = getattr(engine, "path", None)
+        stats["gpkg_path"] = str(path) if path is not None else None
+        return stats
+
+    def list_with_stats(self) -> list[dict[str, Any]]:
+        """Return one stats dict per registered watcher.
+
+        Snapshot semantics: the lock is released before each watcher's
+        ``get_stats`` is called so a long-running poll cannot freeze the
+        registry. The returned list reflects the registry contents at
+        the moment of the call — entries added/removed concurrently
+        will appear (or not) on the next call.
+        """
+        with self._lock:
+            entries = [
+                (dataset_id, engine, watcher, list(layers))
+                for dataset_id, (engine, watcher, layers) in self._entries.items()
+            ]
+        out: list[dict[str, Any]] = []
+        for dataset_id, engine, watcher, layers in entries:
+            stats = watcher.get_stats()
+            stats["layers"] = layers
+            path = getattr(engine, "path", None)
+            stats["gpkg_path"] = str(path) if path is not None else None
+            out.append(stats)
+        return out
+
     def shutdown_all(self) -> None:
         """Stop every watcher and close every engine. Called from the
         FastAPI lifespan on shutdown. Best-effort: errors are logged
