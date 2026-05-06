@@ -1,6 +1,8 @@
 # Spec — 5 endpoints P0 pour fermer la dette CLI ↔ Portal
 
 > **Errata 2026-05-03** — vérification post-audit : P0-1 (enable/disable tracking) **est déjà shippé** depuis v1.5.x via `POST /datasets/{id}/enable_tracking,disable_tracking` + auto-register `WatcherRegistry`. Sa section ci-dessous (#P0-1) est **caduque**. P0-3 watcher endpoint a aussi été redimensionné : le watcher démarre automatiquement à l'activation du tracking, donc seul un dashboard d'observabilité (`GET /watchers`) reste à livrer. Sprint réduit à 3 P0 réels (P0-2, P0-3 dashboard, P0-5) ≈ 5-7 jours.
+>
+> **Update 2026-05-06** — P0-3 dashboard livré (issue #95) : `GET /watchers` + `GET /watchers/{dataset_id}` exposent les counters runtime (`tick_count`, `rows_processed`, `fire_count`, `error_count`, `last_*_at`, `last_error_msg`) + le snapshot config (poll_interval, batch_limit, bulk_threshold, bulk_eval, layers, gpkg_path). `WatcherRegistry` désormais initialisé en portal mode aussi pour que le dashboard renvoie 200 sur instance fraîche. EPIC #90 fermé.
 
 **Contexte** : voir [`CLI_PORTAL_PARITY_AUDIT.md`](CLI_PORTAL_PARITY_AUDIT.md). Cinq endpoints HTTP qui HTTP-isent du code Python déjà existant (réutilisation, pas réimplémentation).
 
