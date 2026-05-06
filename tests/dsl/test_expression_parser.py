@@ -29,6 +29,7 @@ from gispulse.dsl import (
 class TestGeomFunctionRegistry:
     EXPECTED_T1 = {"geom_area_m2", "geom_perimeter_m", "geom_length_m"}
     EXPECTED_T2 = {"geom_centroid_x", "geom_centroid_y", "geom_npoints", "geom_is_valid"}
+    EXPECTED_SUBQUERY = {"geom_within", "geom_overlaps_any"}
 
     def test_t1_present(self) -> None:
         assert self.EXPECTED_T1 <= set(GEOM_FUNCTIONS)
@@ -36,12 +37,18 @@ class TestGeomFunctionRegistry:
     def test_t2_present(self) -> None:
         assert self.EXPECTED_T2 <= set(GEOM_FUNCTIONS)
 
-    def test_seven_total(self) -> None:
+    def test_subquery_present(self) -> None:
+        assert self.EXPECTED_SUBQUERY <= set(GEOM_FUNCTIONS)
+
+    def test_full_v160_surface(self) -> None:
         # Locks the v1.6.0 surface — adding a new fct must update tests/docs.
-        assert set(GEOM_FUNCTIONS) == self.EXPECTED_T1 | self.EXPECTED_T2
+        assert set(GEOM_FUNCTIONS) == (
+            self.EXPECTED_T1 | self.EXPECTED_T2 | self.EXPECTED_SUBQUERY
+        )
 
     def test_is_geom_function(self) -> None:
         assert is_geom_function("geom_area_m2")
+        assert is_geom_function("geom_within")
         assert not is_geom_function("eval")
         assert not is_geom_function("ST_Area")  # SQL name, not DSL name
 
