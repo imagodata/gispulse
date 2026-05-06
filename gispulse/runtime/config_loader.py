@@ -615,6 +615,7 @@ def to_triggers(config: GISPulseConfig) -> list["Trigger"]:
         "run_sql": ActionType.RUN_SQL,
         "log_event": ActionType.LOG_EVENT,
         "notify": ActionType.NOTIFY,
+        "tag_field": ActionType.TAG_FIELD,
     }
 
     triggers: list[Trigger] = []
@@ -633,6 +634,13 @@ def to_triggers(config: GISPulseConfig) -> list["Trigger"]:
                 cfg["channel"] = ac.channel or "gispulse_events"
                 if ac.payload_template is not None:
                     cfg["payload_template"] = ac.payload_template
+            elif ac.type == "tag_field":
+                cfg["column"] = ac.column or ""
+                cfg["value"] = ac.value
+                if ac.message_column:
+                    cfg["message_column"] = ac.message_column
+                if ac.message is not None:
+                    cfg["message"] = ac.message
             # log_event takes no required config
 
             actions.append(
