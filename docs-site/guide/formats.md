@@ -52,7 +52,9 @@ L'engine `duckdb_diff` apporte la détection DML aux formats sans triggers natif
 
 **Mécanisme** : `mtime` watch + DuckDB `ST_Read` snapshot diff. Au premier poll chaque feature emerge en `INSERT`. À chaque édition (QGIS, vim, script tiers), le moteur compare le hash (`md5(WKB || properties)`) de chaque ligne contre le snapshot persistant en sidecar `.gispulse-snapshot.duckdb` à côté du fichier.
 
-**Multi-file formats** : Shapefile (`.shp`) ne touche pas toujours `.shp` lors d'un edit (un changement attributaire ne touche que `.dbf`). Le détecteur watche donc `max(mtime)` sur les 5 companions `.shp`/`.dbf`/`.shx`/`.prj`/`.cpg` pour ne pas manquer ce cas. Single-file formats (GeoJSON/FGB/KML/CSV) restent en single-file mtime.
+**Multi-file formats** : Shapefile (`.shp`) ne touche pas toujours `.shp` lors d'un edit (un changement attributaire ne touche que `.dbf`). Le détecteur watche donc `max(mtime)` sur les 5 companions `.shp`/`.dbf`/`.shx`/`.prj`/`.cpg` pour ne pas manquer ce cas. Idem MapInfo TAB (`.tab` + `.dat` + `.map` + `.id` + `.ind`). Single-file formats (GeoJSON/FGB/KML/CSV) restent en single-file mtime.
+
+**MapInfo TAB read** : la build DuckDB GDAL bundlée n'inclut pas le driver MapInfo. Le détecteur route donc `.tab` via un **fallback pyogrio** (`geopandas.read_file`) — même contrat de hash que la fast path DuckDB, donc identité d'événements préservée si une future build DuckDB ramène le driver.
 
 **Limitations connues v1.6.1** :
 - `UPDATE` est **indétectable** (pas de PK stable dans le format) — un edit produit `DELETE` (vieux hash) + `INSERT` (nouveau hash). Déclarer `when: [INSERT, DELETE]` dans le trigger pour réagir aux deux côtés.

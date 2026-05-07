@@ -159,14 +159,15 @@ class TestMapInfoTAB:
         # .id is also produced by OGR for MapInfo TAB
         assert "places.id" in names
 
-    @pytest.mark.skip(
-        reason="DuckDB GDAL build does not include the MapInfo driver "
-        "in the wheel ST_Read('places.tab') hangs. Companion resolution "
-        "(test above) is independent and locks in the multi-file watch."
-    )
-    def test_first_poll_emits_inserts(
+    def test_first_poll_emits_inserts_via_pyogrio_fallback(
         self, tmp_path: Path, sample_gdf: gpd.GeoDataFrame
-    ) -> None:  # pragma: no cover — gated by environment
+    ) -> None:
+        # MapInfo TAB is routed through the pyogrio fallback path in
+        # ``FileBlobChangeDetector._read_via_pyogrio`` because DuckDB's
+        # bundled GDAL wheel does not include the MapInfo driver.
+        # Hash semantics match the DuckDB path so events have the same
+        # identity (a future DuckDB build that ships the driver
+        # produces the same hashes — no event flap).
         path = tmp_path / "places.tab"
         sample_gdf.to_file(str(path), driver="MapInfo File")
 
@@ -177,6 +178,46 @@ class TestMapInfoTAB:
             det.close()
         assert len(records) == 3
         assert all(r.operation == ChangeOperation.INSERT for r in records)
+        # Property values from the source GDF survived the round-trip.
+        names = {r.new_values.get("name") for r in records}
+        assert names == {"A", "B", "C"}
+
+    def test_attribute_only_edit_via_pyogrio_fallback(
+        self, tmp_path: Path, sample_gdf: gpd.GeoDataFrame
+    ) -> None:
+        # Killer regression: companion-watching surfaces an attribute-
+        # only edit (``.dat`` mtime bump), AND the pyogrio fallback
+        # re-reads the new values, AND the diff produces a DELETE+
+        # INSERT pair (set semantics, no stable PK).
+        path = tmp_path / "places.tab"
+        sample_gdf.to_file(str(path), driver="MapInfo File")
+
+        det = FileBlobChangeDetector(path)
+        try:
+            det.poll()  # baseline
+
+            # MapInfo "edit" means rewriting the whole file set via
+            # pyogrio. Pyogrio's ``MapInfo File`` driver refuses to
+            # ``mode="w"`` over an existing TAB set ("Unable to create
+            # new layers in this single file dataset"), so we delete
+            # the companions first and recreate from the in-memory GDF.
+            edited = gpd.read_file(str(path))
+            edited.loc[edited["name"] == "A", "category"] = 999
+            for ext in (".tab", ".dat", ".map", ".id", ".ind"):
+                companion = path.with_suffix(ext)
+                if companion.exists():
+                    companion.unlink()
+            edited.to_file(str(path), driver="MapInfo File")
+            for ext in (".tab", ".dat", ".map", ".id", ".ind"):
+                companion = path.with_suffix(ext)
+                if companion.exists():
+                    _bump_mtime(companion)
+
+            records = det.poll()
+        finally:
+            det.close()
+        ops = sorted(r.operation.value for r in records)
+        assert ops == [ChangeOperation.DELETE.value, ChangeOperation.INSERT.value]
 
     def test_dat_only_mtime_change_does_not_crash(
         self, tmp_path: Path, sample_gdf: gpd.GeoDataFrame

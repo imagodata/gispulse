@@ -261,17 +261,36 @@ class FileBlobChangeDetector:
     # assigns on read; it shifts when a feature is inserted in the
     # middle of a GeoJSON, which would cause every later feature to
     # surface as DELETE+INSERT and pollute the diff.
-    _SYNTHETIC_PROP_COLS: frozenset[str] = frozenset({"OGC_FID", "geom"})
+    _SYNTHETIC_PROP_COLS: frozenset[str] = frozenset({"OGC_FID", "geom", "geometry"})
+
+    # File suffixes for which DuckDB's bundled GDAL build does not ship
+    # the OGR driver (``ST_Read('places.tab')`` hangs or errors). For
+    # these we route the read through pyogrio (which uses the system
+    # GDAL/OGR via geopandas) and hash in Python so the contract
+    # matches. Adding a format here is the cheapest path to T2 coverage
+    # when DuckDB's wheel lags behind the user's system GDAL.
+    _PYOGRIO_FALLBACK_SUFFIXES: frozenset[str] = frozenset({".tab"})
 
     def _read_current_snapshot(self) -> dict[str, FileBlobSnapshot]:
-        """Read every row of the file blob via DuckDB ``ST_Read`` and
-        produce a ``{row_hash: FileBlobSnapshot}`` map.
+        """Read every row of the file blob and produce a ``{row_hash:
+        FileBlobSnapshot}`` map.
 
-        The hash is ``md5(ST_AsWKB(geom) || json_object(props))`` — see
-        module docstring for rationale. ``ST_AsText`` is used for the
-        in-memory ``geom_wkt`` so the ChangeRecord stays JSON-friendly
-        without a binary blob.
+        Two read paths share the same hash semantics
+        (``md5(WKB || json_object(props))`` excluding synthetic
+        ``OGC_FID`` / ``geom`` / ``geometry``):
+
+        1. **DuckDB ``ST_Read``** (fast path). One SQL statement
+           covers GeoJSON / FlatGeobuf / Shapefile / KML / CSV+WKT
+           and returns ``(geom_wkb, geom_wkt, props_json)`` per row.
+        2. **pyogrio fallback** (slow path) — used when the file
+           suffix is in :attr:`_PYOGRIO_FALLBACK_SUFFIXES` (today
+           MapInfo ``.tab``, because DuckDB's bundled GDAL doesn't
+           ship the MapInfo driver). Reads through
+           ``geopandas.read_file`` and hashes in Python.
         """
+        if self._path.suffix.lower() in self._PYOGRIO_FALLBACK_SUFFIXES:
+            return self._read_via_pyogrio()
+
         conn = self._get_duckdb()
 
         # Introspect column names; ``ST_Read`` exposes geometry as
@@ -312,6 +331,76 @@ class FileBlobChangeDetector:
                 props = json.loads(props_text) if props_text else {}
             except json.JSONDecodeError:
                 props = {}
+            snapshot[digest] = FileBlobSnapshot(
+                row_hash=digest,
+                geom_wkt=geom_wkt,
+                properties=props,
+            )
+        return snapshot
+
+    def _read_via_pyogrio(self) -> dict[str, FileBlobSnapshot]:
+        """Pyogrio-backed fallback for formats DuckDB GDAL can't read.
+
+        Used today only for MapInfo ``.tab`` (cf.
+        :attr:`_PYOGRIO_FALLBACK_SUFFIXES`). Hash semantics match the
+        DuckDB path so a future DuckDB-spatial release that ships the
+        missing driver can flip a format from this code path back to
+        the fast path with no observable change in event identity.
+
+        Errors from pyogrio surface as warnings + an empty snapshot —
+        callers see this as "every row vanished", which matches the
+        defensive behaviour the rest of the watcher loop already
+        handles (DELETE flood is logged but not fatal).
+        """
+        try:
+            import geopandas as gpd
+        except ImportError:  # pragma: no cover — geopandas is a hard dep
+            logger.warning("file_blob_pyogrio_fallback_unavailable: geopandas missing")
+            return {}
+
+        try:
+            gdf = gpd.read_file(str(self._path))
+        except Exception as exc:
+            logger.warning(
+                "file_blob_pyogrio_read_failed path=%s err=%s",
+                self._path,
+                exc,
+            )
+            return {}
+
+        snapshot: dict[str, FileBlobSnapshot] = {}
+        # Property columns: every column except the geometry column +
+        # the synthetic exclusion list. ``gdf.geometry.name`` is the
+        # canonical geom column (``geometry`` for geopandas, may be
+        # ``geom`` if the file uses that convention).
+        geom_col = gdf.geometry.name if hasattr(gdf, "geometry") else "geometry"
+        prop_cols = [
+            c
+            for c in gdf.columns
+            if c != geom_col and c not in self._SYNTHETIC_PROP_COLS
+        ]
+
+        for _, row in gdf.iterrows():
+            geom = row[geom_col]
+            geom_blob = geom.wkb if geom is not None and not geom.is_empty else b""
+            geom_wkt = geom.wkt if geom is not None and not geom.is_empty else None
+
+            props: dict[str, Any] = {}
+            for c in prop_cols:
+                v = row[c]
+                # Pandas NA / numpy NaN → None for JSON safety.
+                try:
+                    if v is None or (isinstance(v, float) and v != v):
+                        props[c] = None
+                    else:
+                        props[c] = v
+                except Exception:
+                    props[c] = str(v)
+
+            props_text = json.dumps(props, sort_keys=True, default=str)
+            digest = hashlib.md5(
+                bytes(geom_blob) + props_text.encode("utf-8")
+            ).hexdigest()
             snapshot[digest] = FileBlobSnapshot(
                 row_hash=digest,
                 geom_wkt=geom_wkt,
