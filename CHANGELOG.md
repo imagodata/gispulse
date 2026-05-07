@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-05-07
+
+The "DuckDB Spatial Inside" release. Closes EPIC #104 — a one-day cascade of 7 PRs (#129 → #135) lands the foundation, the DSL geom function whitelist, the granular DML verbs, the declarative `validate:` block end-to-end, and the long-standing B-08 DELETE predicate gap.
+
+DuckDB spatial moves from "embedded if you opt in" to **the universal compute substrate**: the new DSL geom functions compile to DuckDB SQL, the validation runner evaluates rules through a DuckDB ATTACH on the GeoPackage, and an Atlas R1 bench against pyogrio justifies the pivot — DuckDB COPY is **2.3× to 3.6× faster than pyogrio** on 1M EPSG:2154 polygons, with peak RSS divided by **~3.4×**. The pyogrio-only write-back doctrine of v1.5.x is officially retired for bulk paths.
+
+### Added
+
+- **DuckDB spatial extension — lazy install on first use.** New `gispulse.runtime.duckdb_engine.get_spatial_connection()` runs `INSTALL spatial; LOAD spatial;` on first call, caches the install per Python executable, and exposes `DuckDBSpatialUnavailable` so air-gapped environments fail with an actionable message instead of a generic DuckDB error. (#113, PR #129)
+- **`gispulse doctor --install-spatial`.** Pre-installs the spatial extension and probes a curated set of EPSG roundtrips (`EPSG:4326 / 3857 / 2154 / 27572`) against a `pyproj` baseline so PROJ datum-shift gaps surface upfront — the bundled DuckDB ships with PROJ network disabled. (#114, PR #129)
+- **Engine inference from the dataset URI.** `triggers.yaml` no longer requires an explicit `engine:` line: `*.gpkg` → `gpkg`, `postgresql://...` → `postgis`, `*.shp / *.geojson / *.fgb` → `duckdb_diff` (file-blob CDC). Override stays available; conflict detection raises at config-load time. (#115, PR #129)
+- **DSL geom functions — first whitelist.** Seven safe, push-down-friendly functions usable in `set_field` and `validate:`: `geom_area_m2`, `geom_perimeter_m`, `geom_length_m`, `geom_centroid_x`, `geom_centroid_y`, `geom_npoints`, `geom_is_valid`. Measure functions auto-project to a metric CRS (default `EPSG:2154`, override per-call with `epsg='EPSG:NNNN'`). (#116, #117, PR #129)
+- **DSL expression parser — safe-by-construction.** The compiler walks the Python AST under a strict allowlist (literals, column refs, `+ - * / %`, parenthesis); rejects every escape hatch (`__import__`, `eval`, attribute access, comprehensions, lambdas, …). `boolean` mode unlocks `==`, `!=`, `<=`, `>=`, `and`, `or`, `not` for `validate:` rules and `predicate:` clauses. (#118, PR #129)
+- **`when:` granular DML verbs.** Triggers can now subscribe to `INSERT`, `UPDATE_GEOM` (geometry mutated), `UPDATE_ATTR` (attributes only), `DELETE`, or `BULK`. The watcher resolves a coarse `UPDATE` row to its granular variant via the change-log's `geom_changed` flag before evaluation. The legacy `UPDATE` value still works as a catch-all. (#119, PR #129)
+- **`geom_changed` flag in the `dml.changed` payload.** Subscribers can render geometry edits differently from attribute edits without inspecting the change log. (#120 plumbing, PR #129)
+- **`validate:` top-level block in `triggers.yaml`.** Declarative validation rules with `mode: warn` (log + WS event) or `mode: tag` (writes `failed:<rule.id>` onto a status column auto-created on first use). Rules compile at config load via the boolean DSL parser so syntax errors surface before the runtime starts. (#121, PR #129)
+- **`tag_field:` action.** New action type that writes a status (and optional message) onto the row, auto-creating the target columns via `PRAGMA table_info` + `ALTER TABLE ADD COLUMN`. The handler is shared with the `validate: mode: tag` bridge so a single mechanism powers both explicit YAML actions and automatic validation tagging. (#123, PR #130)
+- **DSL cross-layer subquery functions.** `geom_within(layer='communes', match='code_insee')` and `geom_overlaps_any(layer='self', exclude_self=True)` join into the boolean grammar of `validate:` rules. The compiler emits `EXISTS (SELECT 1 FROM "<layer>" AS _L WHERE …)` with strict identifier validation. (#122 schema half, PR #131)
+- **`ValidationRunner`.** Engine-agnostic runtime component that compiles each rule once at boot, evaluates it per row through an injected `sql_evaluator`, and broadcasts `validation.failed` on the event hub. Per-rule driver exceptions are isolated so a single bad rule never aborts the batch. (PR #132)
+- **`make_gpkg_sql_evaluator(gpkg_path)` factory.** Opens a DuckDB session with the spatial extension, ATTACHes the GPKG via `TYPE SQLITE`, and returns the `(sql, params) -> rows` callable the runner needs. (PR #133)
+- **`ChangeLogWatcher` validation hook.** When a `ValidationRunner` is injected, every INSERT / UPDATE_GEOM / UPDATE_ATTR row drives `runner.evaluate(...)` after the trigger evaluator block. DELETE and BULK are skipped (row gone / already collapsed). (PR #133)
+- **`validate: mode: tag` end-to-end bridge.** A failing tag rule dispatches a synthetic `TAG_FIELD` action through the regular `ActionDispatcher`, so the column is auto-created and the row gets `failed:<rule.id>`. Origin-tagging M1 (B-02 / v1.5.3) keeps the AFTER UPDATE refire skip working. (PR #134)
+- **ESRI Attribute Rules vocabulary aliases.** `kind: constraint | calculation | validation` accepted as cosmetic aliases on `triggers.yaml`. The runtime ignores the value; the alias exists to keep ESRI migration diffs small. (#125, PR #129)
+- **New documentation pages.** [`docs-site/guide/dsl-geom-functions.md`](docs-site/guide/dsl-geom-functions.md), [`docs-site/guide/dsl-validation.md`](docs-site/guide/dsl-validation.md), [`docs-site/guide/migration-from-esri.md`](docs-site/guide/migration-from-esri.md), and a v1.6.0 section on [`engines.md`](docs-site/guide/engines.md) covering the lazy spatial install, EPSG roundtrip probes, engine inference, granular DML verbs, and the bench R1 numbers. (#126, PR #129)
+
+### Fixed
+
+- **B-08 — DELETE predicates can finally filter on the row's pre-delete state.** The AFTER DELETE SQLite trigger has been writing `OLD.*` attributes as a JSON blob to `_gispulse_change_log.old_values` since v1, but the changelog reader's tail whitelist dropped the column before the watcher saw it — so `predicate: status == 'active'` could never match on a DELETE event despite the data being one PRAGMA away. The whitelist now includes `old_values`; the watcher hydrates `ChangeRecord.old_values` (mirrored on `new_values` for backward compatibility) when at least one active trigger carries a predicate AST. No GPKG migration required. (#120, PR #135)
+
+### Security
+
+- **`dml.changed` broadcast payload stays minimal even on DELETE.** Row attributes captured by the AFTER DELETE trigger are exposed only to the internal predicate evaluator, never on the unauthenticated `/ws/events` channel. A new test (`test_dml_changed_does_not_leak_old_values`) pins the contract.
+- **`validate:` rule SQL is never spliced raw.** Every column / layer / EPSG identifier passes a strict `[A-Za-z_][A-Za-z0-9_]{0,62}` validator before reaching DuckDB; literals are SQL-quoted; the parser refuses any AST node outside the allowlist (no `__import__`, no `eval`, no method call, no f-string).
+
+### Performance
+
+- **DuckDB COPY GDAL/GPKG is now the bulk write-back fast path.** Atlas R1 bench on 1M EPSG:2154 polygons (median of 3 runs):
+
+  | Scenario | pyogrio (s) | DuckDB COPY (s) | Speedup | RSS pyogrio | RSS DuckDB |
+  |---|---:|---:|---:|---:|---:|
+  | Append +100k | 8.19 | **3.63** | 2.26× | 950 MB | **273 MB** |
+  | Update attribute | 6.94 | **2.75** | 2.52× | 839 MB | **255 MB** |
+  | Update geometry | 8.87 | **2.47** | 3.59× | 843 MB | **275 MB** |
+
+  Fallback to pyogrio remains forced for datasets > 5M rows, GPKG with custom triggers / views, and append-in-place semantics — see [`docs-site/guide/engines.md`](docs-site/guide/engines.md#v160--duckdb-spatial-inside).
+
+### Deferred to v1.6.x
+
+- **`build_runtime` auto-wiring of `GISPulseConfig.validate_rules`** — the runner is plumbed and tested, the factory is exposed, but the `headless_runtime.build_runtime` step does not yet instantiate a `ValidationRunner` automatically. Three options on the table for the schema (per-rule `table:`, first trigger's table, every trigger table); the user must pick before the wiring lands. Workaround: callers wire the runner manually using the `make_gpkg_sql_evaluator` factory + dispatcher injection.
+- **#122 cross-source ATTACH** — `geom_within(layer='communes')` referencing a separate dataset compiles cleanly but executes only when the target layer is part of the current ATTACH. Multi-source plumbing is the next step.
+- **#124 `layer_lookup`** — depends on cross-source ATTACH.
+
 ## [1.5.3] - 2026-05-05
 
 Hotfix release for EPIC #103 — 4 P0 bugs identified by Beta on the v1.5.2 DML triggers + QGIS workflow. Ships before the HN big-launch so the first 50 HN users don't bleed on French desktop datasets, infinite trigger loops, paste-of-50 trigger silence, or post-Field-Calculator schema drift.
