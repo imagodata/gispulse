@@ -31,7 +31,7 @@ validate:
 | Field | Required | Notes |
 |---|---|---|
 | `id` | yes | Stable identifier used in log lines and tag values. |
-| `rule` | yes | Boolean DSL expression — see [DSL geom functions](./dsl-geom-functions.md). |
+| `rule` | yes | Boolean DSL expression — see [DSL geom functions](./dsl-geom-functions.md) and the [SQL dialect contract](./dsl-sql-dialect.md). |
 | `mode` | no (default `warn`) | `warn` logs and broadcasts. `tag` writes the failure on the row. |
 | `tag_field` | only when `mode: tag` | Column receiving `failed:<id>` on failure. |
 | `message` | no | Human-readable detail attached to the log / WS event. |

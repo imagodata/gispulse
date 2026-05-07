@@ -7,6 +7,8 @@ description: Comprendre les trois modes d'exécution GISPulse — Python/DuckDB 
 
 GISPulse supporte trois modes d'exécution. Le moteur se configure par variable d'environnement, par ligne de commande ou par règle.
 
+> **À lire avant** : [Contrat de dialecte SQL](./dsl-sql-dialect.md). Le DSL `triggers.yaml` est écrit en dialecte DuckDB-spatial par défaut. Les règles `run_sql` et les fonctions `geom_*()` ne sont pas portables sur PostGIS sans déclarer explicitement `engine:`.
+
 ## Vue d'ensemble
 
 | Moteur | Tier | Usage | Volumes |
