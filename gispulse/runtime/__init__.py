@@ -57,9 +57,20 @@ from gispulse.runtime.sqlite_retry import (
     RetryingSqlExecutor,
     is_busy_error,
 )
+from gispulse.runtime.validation_runner import (
+    CompiledValidateRule,
+    CompileError,
+    CompileResult,
+    ValidationFailure,
+    ValidationRunner,
+    compile_validate_rules,
+)
 
 __all__ = [
     "ALL_ENGINES",
+    "CompileError",
+    "CompileResult",
+    "CompiledValidateRule",
     "ConfigError",
     "DEFAULT_BACKOFF_SCHEDULE",
     "DEFAULT_JITTER_PCT",
@@ -75,8 +86,11 @@ __all__ = [
     "PredicateNode",
     "PredicateSyntaxError",
     "RetryingSqlExecutor",
+    "ValidationFailure",
+    "ValidationRunner",
     "build_runtime",
     "build_update_payload",
+    "compile_validate_rules",
     "evaluate_predicate",
     "get_spatial_connection",
     "infer_engine",

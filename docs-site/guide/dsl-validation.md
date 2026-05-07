@@ -55,12 +55,21 @@ when a downstream pipeline filters on a status column. The column is
 auto-created on first use; subsequent failures of the same rule
 overwrite the value.
 
-> **Note (v1.6.0 scope):** the runtime wiring for `mode: tag` (column
-> auto-create + dispatch to a SET_FIELD action) is being delivered
-> incrementally. Until it lands end-to-end, configs with `mode: tag`
-> still parse cleanly but the action is a no-op — the runtime logs a
-> warning and falls back to `mode: warn`. Track [#123]
-> (https://github.com/imagodata/gispulse/issues/123) for status.
+> **Note (v1.6.0 scope):** the validation runner that picks up
+> `validate:` rules at runtime ships with v1.6.0 — every INSERT and
+> UPDATE event triggers a per-rule evaluation against the row, and
+> failures land in the log + a `validation.failed` broadcast over the
+> event hub.
+>
+> The `mode: tag` dispatch (column auto-create + `tag_field` action
+> emit) is wired in two places independently: the schema accepts it
+> and the `tag_field` action dispatcher knows how to write it. The
+> bridge that connects a failing `mode: tag` rule to an automatic
+> `tag_field` action emit is the last mile and tracked as a follow-up.
+> Until it lands, `mode: tag` configs degrade to `mode: warn`
+> semantics — log + WS event, no row mutation. Track
+> [#123](https://github.com/imagodata/gispulse/issues/123) and the
+> validation-runner-in-watcher follow-up for status.
 
 ## Cross-source validation (preview)
 
