@@ -212,11 +212,18 @@ class ValidationRunner:
         *,
         hub: _EventHubProtocol | None = None,
         dataset_id: str = "",
+        action_dispatcher: Any | None = None,
     ) -> None:
         self._rules = rules
         self._sql_evaluator = sql_evaluator
         self._hub = hub
         self._dataset_id = dataset_id
+        # v1.6.0 — when set, ``mode: tag`` failures dispatch a synthetic
+        # ``ActionType.TAG_FIELD`` action through the dispatcher so the
+        # row receives ``failed:<rule.id>`` on the configured column.
+        # Without a dispatcher, tag failures degrade to warn (log + WS
+        # broadcast) per the dsl-validation.md docs.
+        self._action_dispatcher = action_dispatcher
 
     @property
     def rule_count(self) -> int:
@@ -255,7 +262,62 @@ class ValidationRunner:
             )
             failures.append(failure)
             self._broadcast(failure)
+            if rule.mode == "tag":
+                self._dispatch_tag(rule, row_id)
         return failures
+
+    def _dispatch_tag(
+        self, rule: CompiledValidateRule, row_id: Any
+    ) -> None:
+        """Emit a synthetic ``TAG_FIELD`` action for a ``mode: tag`` failure.
+
+        Builds a one-off :class:`Trigger` + :class:`TriggerContext` so the
+        existing :class:`ActionDispatcher._tag_field` handler — already
+        battle-tested via #123 — can write the row without a special
+        code path. The synthetic trigger's ``id`` is logged as
+        ``trigger:<uuid>`` by the dispatcher for the origin-tagging
+        guard, so the AFTER UPDATE refire skip works exactly like a
+        regular tag_field action.
+
+        No-op when ``action_dispatcher`` is unset (degraded mode warn,
+        cf dsl-validation.md) or when ``rule.tag_field`` is missing
+        (the schema validator already enforces this; the runtime guard
+        is defence-in-depth).
+        """
+        if self._action_dispatcher is None or not rule.tag_field:
+            return
+        try:
+            from core.graph import ActionDef, ActionType, EvalResult
+            from core.models import Trigger
+            from gispulse.core.dispatcher import TriggerContext
+
+            synthetic = Trigger(
+                name=f"validate:{rule.id}",
+                description=f"Synthetic trigger for validate rule {rule.id!r}",
+            )
+            action = ActionDef(
+                action_type=ActionType.TAG_FIELD,
+                config={
+                    "column": rule.tag_field,
+                    "value": f"failed:{rule.id}",
+                    "message": rule.message,
+                },
+            )
+            ctx = TriggerContext(
+                trigger=synthetic,
+                eval_result=EvalResult(matched=True),
+                table=rule.table,
+                row_id=str(row_id),
+                operation="VALIDATE",
+            )
+            self._action_dispatcher.dispatch(action, ctx)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "validation_tag_dispatch_failed rule=%s row=%s err=%s",
+                rule.id,
+                row_id,
+                exc,
+            )
 
     def _evaluate_rule(self, rule: CompiledValidateRule, row_id: Any) -> bool:
         """Return True when the rule failed for ``row_id``.
