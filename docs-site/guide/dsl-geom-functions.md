@@ -15,6 +15,11 @@ parsed via Python's `ast` module and rejected unless every node fits
 the strict allowlist. See [DSL design notes](./dsl-design.md) for the
 gory details.
 
+> **Dialecte SQL** : ces fonctions compilent vers DuckDB-spatial par
+> construction (4-arg `ST_Transform`). Voir [Contrat de dialecte
+> SQL](./dsl-sql-dialect.md) pour les détails sur la portabilité
+> PostGIS / SpatiaLite et le mécanisme d'override `engine:`.
+
 ## Quick reference
 
 | Function | Returns | CRS-aware | Default `epsg=` | DuckDB call |
