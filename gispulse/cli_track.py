@@ -45,17 +45,17 @@ track_app = typer.Typer(
 def _open_gpkg(path: Path) -> sqlite3.Connection:
     """Open a GPKG with the same pragmas the engine uses (WAL + busy timeout).
 
-    We avoid instantiating ``GeoPackageEngine`` here because it pulls the full
-    pyogrio stack; for plain DDL we only need raw ``sqlite3``.
+    Delegates to :func:`persistence.gpkg_connection.connect_gpkg` so every
+    code path that touches a GeoPackage applies identical concurrency
+    pragmas. The CLI wrapper only adds the user-friendly "file not found"
+    exit before opening.
     """
     if not path.exists():
         _human(f"GPKG not found: {path}", err=True, style="red")
         raise typer.Exit(code=2)
-    conn = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA busy_timeout = 5000")
-    return conn
+    from persistence.gpkg_connection import connect_gpkg
+
+    return connect_gpkg(path, row_factory=sqlite3.Row)
 
 
 def _list_spatial_layers(conn: sqlite3.Connection) -> list[str]:
