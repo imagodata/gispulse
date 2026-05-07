@@ -34,7 +34,11 @@ class ChangelogReaderError(RuntimeError):
 
 # Column whitelist that mirrors the v2 (#7) + v3 (#103 B-02) schema —
 # anything else is dropped at the SQL level so a future column rename
-# never leaks raw rows over HTTP.
+# never leaks raw rows over HTTP. v1.6.0 (#120 B-08) adds ``old_values``
+# so the watcher can hydrate ``ChangeRecord.old_values`` for DELETE
+# events, unblocking ``predicate:`` filters on rows that no longer
+# exist in the underlying table. The column has been populated by the
+# AFTER DELETE trigger since v1; only the read path was missing.
 _TAIL_COLUMNS = (
     "id",
     "table_name",
@@ -42,6 +46,7 @@ _TAIL_COLUMNS = (
     "row_pk",
     "changed_at",
     "geom_changed",
+    "old_values",
 )
 
 
