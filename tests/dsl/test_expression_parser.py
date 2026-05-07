@@ -29,7 +29,7 @@ from gispulse.dsl import (
 class TestGeomFunctionRegistry:
     EXPECTED_T1 = {"geom_area_m2", "geom_perimeter_m", "geom_length_m"}
     EXPECTED_T2 = {"geom_centroid_x", "geom_centroid_y", "geom_npoints", "geom_is_valid"}
-    EXPECTED_SUBQUERY = {"geom_within", "geom_overlaps_any"}
+    EXPECTED_SUBQUERY = {"geom_within", "geom_overlaps_any", "layer_lookup"}
 
     def test_t1_present(self) -> None:
         assert self.EXPECTED_T1 <= set(GEOM_FUNCTIONS)

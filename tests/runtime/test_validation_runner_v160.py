@@ -22,7 +22,6 @@ import pytest
 from gispulse.runtime.validation_runner import (
     CompileError,
     CompiledValidateRule,
-    ValidationFailure,
     ValidationRunner,
     compile_validate_rules,
 )

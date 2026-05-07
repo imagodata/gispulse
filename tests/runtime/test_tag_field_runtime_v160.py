@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import sqlite3
 from typing import Any
-from uuid import UUID, uuid4
 
 import pytest
 

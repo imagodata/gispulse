@@ -116,6 +116,7 @@ def compile_validate_rules(
     source_epsg: str | None,
     pk_col: str = "id",
     geom_column: str = "geom",
+    table_resolver: Callable[[Any], str] | None = None,
 ) -> CompileResult:
     """Compile a list of :class:`ValidateRuleConfigModel` to runner-ready form.
 
@@ -125,11 +126,13 @@ def compile_validate_rules(
         Iterable of ``ValidateRuleConfigModel`` instances (typically
         ``GISPulseConfig.validate_rules``). The runner only reads
         ``id``, ``rule``, ``mode``, ``tag_field``, ``message``,
-        ``enabled``.
+        ``enabled``, and (v1.6.x) ``table`` for per-rule overrides.
     table:
-        Default table the rules are scoped to. Rules are evaluated
-        against a single table at a time (one runner per ``(dataset,
-        table)`` pair). Cross-table validation is out of scope.
+        Default table when no ``table_resolver`` is provided and the
+        rule has no ``rule.table`` override. v1.6.0 callers used to pin
+        a single table here; v1.6.x callers are encouraged to pass
+        ``table_resolver`` instead so each rule can target its own
+        table on multi-layer GPKGs.
     source_epsg:
         Source CRS of the dataset's geometry column. Forwarded to
         :class:`CompilationContext` so CRS-aware fcts (``geom_area_m2``)
@@ -139,18 +142,30 @@ def compile_validate_rules(
         guards. Defaults to ``"id"``.
     geom_column:
         Geometry column name. Defaults to ``"geom"``.
+    table_resolver:
+        Optional callable mapping ``rule -> table_name``. When provided,
+        it overrides both ``table`` and ``rule.table``. Useful for the
+        multi-layer auto-wire path in :func:`build_runtime`.
     """
-    ctx = CompilationContext(
-        geom_column=geom_column,
-        source_epsg=source_epsg,
-        current_table=table,
-        pk_col=pk_col,
-    )
     out: list[CompiledValidateRule] = []
     errors: list[CompileError] = []
     for rule in rules:
         if not getattr(rule, "enabled", True):
             continue
+        # v1.6.x — per-rule table resolution, in priority order:
+        #   1. caller-provided resolver (build_runtime auto-wire)
+        #   2. ``rule.table`` (operator pin in YAML)
+        #   3. ``table`` (legacy single-table call site)
+        if table_resolver is not None:
+            rule_table = table_resolver(rule)
+        else:
+            rule_table = getattr(rule, "table", None) or table
+        ctx = CompilationContext(
+            geom_column=geom_column,
+            source_epsg=source_epsg,
+            current_table=rule_table,
+            pk_col=pk_col,
+        )
         try:
             sql = compile_expression(rule.rule, ctx, mode="boolean")
         except DSLValidationError as exc:
@@ -159,7 +174,7 @@ def compile_validate_rules(
         out.append(
             CompiledValidateRule(
                 id=rule.id,
-                table=table,
+                table=rule_table,
                 pk_col=pk_col,
                 rule_sql=sql,
                 mode=rule.mode,
