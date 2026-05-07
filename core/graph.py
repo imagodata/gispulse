@@ -71,6 +71,10 @@ class ActionType(str, Enum):
     FLAG_FEATURE     = "flag_feature"
     BLOCK_COMMIT     = "block_commit"
     RUN_SQL          = "run_sql"
+    # v1.6.0 (#123): write a validation status onto the row, with
+    # auto-create of the target columns on first use. Distinct from
+    # SET_FIELD because the dispatcher manages the schema migration.
+    TAG_FIELD        = "tag_field"
 
 
 @dataclass

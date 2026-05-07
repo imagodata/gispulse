@@ -8,6 +8,7 @@ run_job, run_graph, webhook, enqueue, log_event).
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any, Callable
 from uuid import UUID
 
@@ -57,6 +58,12 @@ class ActionDispatcher(BaseDispatcher):
         self._event_hub = event_hub
         self._sql_executor = sql_executor
         self._webhook_client = webhook_client
+        # v1.6.0 (#123) — per-(table) set of columns we've already
+        # confirmed exist for tag_field auto-create. The lock guards
+        # the cache, not the schema migration itself (SQLite handles
+        # ALTER TABLE serialisation natively).
+        self._tag_field_known_columns: dict[str, set[str]] = {}
+        self._tag_field_lock = threading.Lock()
 
     def dispatch(self, action: ActionDef, context: TriggerContext) -> None:
         """Route an action to the appropriate handler."""
@@ -153,6 +160,125 @@ class ActionDispatcher(BaseDispatcher):
                 f'UPDATE "{ctx.table}" SET "{target_field}" = %s WHERE id = %s',
                 [value, ctx.row_id],
             )
+
+    def _tag_field(self, action: ActionDef, ctx: TriggerContext) -> None:
+        """Write a validation status onto the row, auto-creating the column.
+
+        v1.6.0 (#123) — wires the ``validate: mode: tag`` rules and
+        explicit ``tag_field:`` actions defined in ``triggers.yaml``.
+        Differs from :meth:`_set_field` in two ways:
+
+        - The target column (``column``, optional ``message_column``) is
+          auto-created with ``ALTER TABLE ADD COLUMN`` on first use. We
+          look at SQLite's ``PRAGMA table_info`` to decide; the result
+          is cached per ``(table, column)`` to avoid re-checking on
+          every event. The cache is process-local — across-process
+          contention is fine because ``ALTER TABLE ADD COLUMN`` on a
+          non-existing column races safely (SQLite raises ``duplicate
+          column name`` which we catch and treat as success).
+        - The write-back is multi-column: ``column`` and (optionally)
+          ``message_column`` updated in a single statement so the row
+          stays consistent for QGIS / portal observers.
+        """
+        column = action.config.get("column", "")
+        value = action.config.get("value")
+        message_column = action.config.get("message_column")
+        message = action.config.get("message")
+        if not column or not self._sql_executor:
+            return
+        _validate_identifier(ctx.table, "table")
+        _validate_identifier(column, "column")
+        if message_column:
+            _validate_identifier(message_column, "message_column")
+
+        wanted: list[str] = [column]
+        if message_column:
+            wanted.append(message_column)
+        self._ensure_columns(ctx.table, wanted)
+
+        # Origin-tagging M1 (B-02 / v1.5.3) — same guard as _set_field so
+        # tag_field writes do not loop through the AFTER UPDATE trigger.
+        trigger_marker = (
+            f"trigger:{ctx.trigger.id}"
+            if getattr(ctx, "trigger", None) is not None
+            and getattr(ctx.trigger, "id", None) is not None
+            else None
+        )
+        if message_column:
+            set_clause = (
+                f'"{column}" = %s, "{message_column}" = %s'
+            )
+            params: list[Any] = [value, message]
+        else:
+            set_clause = f'"{column}" = %s'
+            params = [value]
+
+        if trigger_marker is not None:
+            set_clause += ', "_gispulse_origin" = %s'
+            params.append(trigger_marker)
+        params.append(ctx.row_id)
+
+        self._sql_executor(
+            f'UPDATE "{ctx.table}" SET {set_clause} WHERE id = %s',
+            params,
+        )
+        if trigger_marker is not None:
+            self._sql_executor(
+                f'UPDATE "{ctx.table}" SET "_gispulse_origin" = NULL WHERE id = %s',
+                [ctx.row_id],
+            )
+
+    def _ensure_columns(self, table: str, columns: list[str]) -> None:
+        """Add ``columns`` to ``table`` if any are missing.
+
+        Each column is created as ``TEXT`` since the v1.6.0 surface only
+        writes status strings. Uses the per-instance cache to avoid
+        running ``PRAGMA table_info`` on every dispatch — the lock
+        protects the cache, not the SQL itself (SQLite serialises ALTER
+        TABLE writers on its own).
+        """
+        if not self._sql_executor:
+            return
+        cache = self._tag_field_known_columns
+        with self._tag_field_lock:
+            known = cache.setdefault(table, set())
+            missing = [c for c in columns if c not in known]
+        if not missing:
+            return
+        try:
+            existing = {
+                row[1] if not isinstance(row, dict) else row.get("name")
+                for row in self._sql_executor(
+                    f'PRAGMA table_info("{table}")', []
+                )
+                or []
+            }
+        except Exception as exc:  # noqa: BLE001 — driver-specific
+            log.warning("tag_field_pragma_failed", table=table, error=str(exc))
+            existing = set()
+
+        for col in missing:
+            if col in existing:
+                continue
+            try:
+                self._sql_executor(
+                    f'ALTER TABLE "{table}" ADD COLUMN "{col}" TEXT', []
+                )
+            except Exception as exc:  # noqa: BLE001
+                # SQLite raises ``duplicate column name`` when two
+                # workers race; treat as success.
+                if "duplicate column" in str(exc).lower():
+                    pass
+                else:
+                    log.warning(
+                        "tag_field_alter_failed",
+                        table=table,
+                        column=col,
+                        error=str(exc),
+                    )
+                    continue
+        with self._tag_field_lock:
+            cache.setdefault(table, set()).update(columns)
 
     def _update_aggregate(self, action: ActionDef, ctx: TriggerContext) -> None:
         target_table = action.config.get("target_table", "")
@@ -323,6 +449,7 @@ class ActionDispatcher(BaseDispatcher):
     _handlers: dict[ActionType, Callable] = {
         ActionType.NOTIFY:           _notify,
         ActionType.SET_FIELD:        _set_field,
+        ActionType.TAG_FIELD:        _tag_field,
         ActionType.UPDATE_AGGREGATE: _update_aggregate,
         ActionType.RUN_JOB:          _run_job,
         ActionType.RUN_GRAPH:        _run_graph,
