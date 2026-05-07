@@ -72,6 +72,7 @@ class WatcherRegistry:
         dataset_id: str,
         gpkg_path: Path,
         *,
+        engine_kind: str = "gpkg",
         triggers_provider: Callable[[], list] | None = None,
         poll_interval: float = 0.2,
         batch_limit: int = 100,
@@ -130,11 +131,25 @@ class WatcherRegistry:
                 # running watcher in WAL mode.
                 return False
 
-            # Lazy import to keep the persistence layer free of a hard
-            # GeoPackageEngine import at module load time.
-            from persistence.gpkg_engine import GeoPackageEngine
+            # Lazy imports — avoid pulling format-specific engines into
+            # the persistence package's load path.
+            if engine_kind == "gpkg":
+                from persistence.gpkg_engine import GeoPackageEngine
 
-            engine = GeoPackageEngine(gpkg_path)
+                engine = GeoPackageEngine(gpkg_path)
+            elif engine_kind == "spatialite":
+                from persistence.spatialite_engine import SpatiaLiteEngine
+
+                engine = SpatiaLiteEngine(gpkg_path)
+            elif engine_kind == "duckdb_diff":
+                from persistence.duckdb_diff_engine import DuckDBDiffEngine
+
+                engine = DuckDBDiffEngine(gpkg_path)
+            else:
+                raise ValueError(
+                    f"watcher_registry: unsupported engine_kind {engine_kind!r}; "
+                    f"expected one of 'gpkg', 'spatialite', 'duckdb_diff'"
+                )
             engine.open()
             watcher = ChangeLogWatcher(
                 engine=engine,
