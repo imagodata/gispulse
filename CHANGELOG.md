@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The "Format Frontier" release — DuckDB Spatial as the universal CDC substrate. Adds two new engines (`spatialite`, `duckdb_diff`), brings DML detection to formats that have no native trigger surface (GeoJSON, FlatGeobuf, Shapefile), and closes EPIC #139 (DML semantics ADRs + WAL connection safety).
+
+### Added
+
+- **SpatiaLite engine.** New `persistence.spatialite_engine.SpatiaLiteEngine` shares the SQLite trigger DDL of GPKG but writes through pyogrio's `SQLite + SPATIALITE=YES` driver and queries `geometry_columns` instead of `gpkg_contents`. Auto-routed for `*.sqlite` / `*.db` URIs. No `mod_spatialite` Python extension required at runtime — pyogrio's OGR linkage handles the catalog. (EPIC #105 slice 1, PR #151)
+- **`is_spatialite_file(path)` detection helper.** Narrow rule: file must have `geometry_columns` AND must NOT have `gpkg_contents`. Used by future auto-routing code; the URI inference layer maps the suffixes ahead of file inspection. (PR #151)
+- **`bootstrap_spatialite_project(conn)`.** Sibling to `bootstrap_gpkg_project`; installs the same `_gispulse_*` internal tables WITHOUT setting the GPKG `application_id` or creating `gpkg_*` catalog rows (those would corrupt SpatiaLite identity). Refactor extracts a shared `_bootstrap_gispulse_internals(conn)` helper used by both bootstraps. (PR #151)
+- **`FileBlobChangeDetector`.** Reusable mtime + DuckDB `ST_Read` snapshot diff CDC. Hash is `md5(ST_AsWKB(geom) || json_object(props))` excluding OGR's synthetic `OGC_FID` so reordering features in the source file does not produce false DELETE+INSERT noise. Snapshot persisted as a DuckDB sidecar `<blob>.gispulse-snapshot.duckdb`. Set-diff semantics: emits INSERT and DELETE only — UPDATE is undetectable without a stable PK in the file format. (EPIC #105 slice 2, PR #152)
+- **Companion-file watching.** Multi-file formats (Shapefile = `.shp / .dbf / .shx / .prj / .cpg`) are watched via `max(mtime)` across every existing companion so attribute-only edits (which only touch `.dbf`) surface correctly. Single-file formats (GeoJSON, FlatGeobuf, KML, CSV) keep single-file mtime semantics. New `_COMPANION_EXTENSIONS` map is extensible. (EPIC #105 slice 4, PR #152)
+- **`DuckDBDiffEngine`.** `SpatialEngine` implementation backed by the file-blob detector. Supports GeoJSON, FlatGeobuf, Shapefile (and zero-code-change-ready for KML / CSV+WKT — those land in v1.6.2). I/O via pyogrio. `get_pending_changes` shape matches `GeoPackageEngine` (`id` int, `changed_at` ISO 8601, `geom_changed` 0/1) so `ChangeLogWatcher` iterates uniformly across engines. `mark_changes_processed` is a no-op (poll is destructive). `execute_sql` raises `NotImplementedError` — this engine is a CDC adapter, not a query engine; for ad-hoc SQL run `gispulse run` with the standalone DuckDB engine. (EPIC #105 slices 3+5, PR #152)
+- **Engine factory entries.** `_spatialite_factory` and `_duckdb_diff_factory` registered as built-ins. URI inference (already shipped in v1.6.0 via `gispulse.runtime.engine_inference`) maps `.sqlite` / `.db` to `spatialite` and `.geojson` / `.fgb` / `.shp` / `.kml` / `.csv` / `.tab` / `.dxf` to `duckdb_diff` automatically — no extra wiring required to consume the new engines. (PRs #151, #152)
+- **`persistence.gpkg_connection.connect_gpkg(path, …)`.** Single entry point that applies WAL + `busy_timeout=5000` on every GeoPackage `sqlite3.connect`. Migrated 8 scattered call sites (CLI track / triggers / runtime, HTTP datasets routers, `project_io`) so concurrent QGIS edits + watcher polls never raise `SQLITE_BUSY`. Documents the historical `test_p02` flake's root cause. (#141, PR #145)
+- **ADR 0001 — DuckDB-spatial as the contract SQL dialect.** Records the de-facto rule that v1.6.0 already enforces: the DSL geom-fct templates and `run_sql` strings are written in DuckDB-spatial dialect by default. The `engine:` top-level key remains the documented escape hatch for users running exclusively against PostGIS or SpatiaLite. (#140, PR #147)
+- **ADR 0002 — Trigger cascade is bounded fixed-point with origin-tagging.** Documents the existing two-layer cascade design: SQLite `WHEN` clauses block self-loops at the file format level (B-02, v1.5.3), and `evaluate_cascade` runs a fixed-point loop with `MAX_CASCADE_DEPTH = 3` raising `CascadeDepthExceeded` beyond. Community tier capped at depth 1, Pro up to 3. (#142, PR #148)
+- **ADR 0003 — `_gispulse_change_log` is a poll log, not an event store.** Promotes the current `id AUTOINCREMENT` + `changed_at` invariants to documented contract; defers replay / sub-second timestamps / row hashing to a future v1.7+ extension table. (#143, PR #150)
+- **ADR 0004 — DDL hooks out of scope; passive schema-drift detection ships.** Records that ALTER TABLE / DROP TABLE / CREATE INDEX hooks are intentionally absent. The B-13 schema-drift watchdog (#103, v1.5.3) covers ALTER TABLE ADD COLUMN passively — the runtime rebuilds triggers within one watchdog tick and surfaces the new column in subsequent `new_values` payloads. (#144, PR #150)
+
+### Changed
+
+- **`bootstrap_gpkg_project` extracts a shared internal helper.** New `_bootstrap_gispulse_internals(conn)` runs migrations + creates `_gispulse_*` tables without GPKG-specific identity work. `bootstrap_gpkg_project` and the new `bootstrap_spatialite_project` both layer their format-specific setup on top. Behaviour for existing GPKG callers is identical — regression test asserts the GPKG path still produces a valid GeoPackage with `application_id = 0x47504B47` and `gpkg_contents`. (PR #151)
+
+### Documentation
+
+- **`docs/adr/0001-dsl-sql-dialect.md` through `docs/adr/0004-ddl-hooks-out-of-scope.md`.** Four ADRs introducing a `docs/adr/` directory; cross-linked from `docs-site/guide/architecture.md` under a new "Décisions de scope (ADRs)" sub-section.
+- **`docs-site/guide/dsl-sql-dialect.md`.** User-facing reference of the DSL SQL dialect contract, with the portable `ST_*` surface, `ST_Transform` arity gotcha, and `engine:` override. Cross-linked from `engines.md`, `dsl-geom-functions.md`, `dsl-validation.md`. (PR #147)
+- **`docs-site/guide/rules.md`.** Cascade tip block expanded into a proper "Cascade behaviour of triggers" sub-section with the tier table, the two-layer explanation, a JSON example showing `cascade_depth: 2`, and a link to ADR 0002. (PR #148)
+- **`docs-site/guide/formats.md`.** SpatiaLite, GeoJSON, FlatGeobuf and Shapefile rows bumped with their CDC support note. New "CDC file-blob (v1.6.1)" section explains the mechanism, formats covered, multi-file companion-watching rule, and known limitations (set-diff = INSERT/DELETE only, polling not inotify, single-layer per file). (PRs #151, #152)
+
+### Decision log
+
+- **EPIC #139 (DML semantics) closed same-day.** Five sub-issues actioned in five PRs (#145 WAL fix code; #147/#148/#150 four ADRs). Out-of-scope topics — replay event sourcing (#143), DDL hooks (#144), `run_sql` PostGIS-only construct scanner (#146 follow-up) — are documented rather than implemented so v1.6.x ships without scope creep. The investigation surfaced one important course correction: the cascade design that ships is **bounded fixed-point**, not single-pass as the issue body initially proposed.
+- **EPIC #105 (Format Frontier T1) closed same-day in five slices.** SpatiaLite (PR #151) + GeoJSON / FlatGeobuf / Shapefile / watcher-wiring (PR #152) all delivered before v1.6.2 release prep. KML and CSV+WKT are zero-code-change-ready through the existing `DuckDBDiffEngine` and will be promoted to T2 (#106) with test-only PRs.
+
 ## [1.6.1] - 2026-05-07
 
 Same-day follow-up to v1.6.0. Closes the 3 deferred items from the v1.6.0 sprint kickoff in a single PR (#138) so the v1.6.x line ships its full promised surface — cross-source push-down, scalar lookup, and zero-config validate auto-wire — instead of trickling them across point releases.
