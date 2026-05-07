@@ -275,3 +275,112 @@ class TestSnapshotResilience:
         finally:
             det.close()
         assert custom.exists()
+
+
+# ---------------------------------------------------------------------------
+# Multi-file formats — Shapefile companions (slice 4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def initial_shapefile(tmp_path: Path) -> Path:
+    path = tmp_path / "places.shp"
+    gdf = gpd.GeoDataFrame(
+        {
+            "name": ["Paris", "Lyon", "Marseille"],
+            "population": [2_140_000, 513_000, 868_000],
+            "geometry": [
+                Point(2.35, 48.85),
+                Point(4.83, 45.75),
+                Point(5.37, 43.30),
+            ],
+        },
+        crs="EPSG:4326",
+    )
+    gdf.to_file(str(path), driver="ESRI Shapefile")
+    return path
+
+
+class TestShapefileCompanions:
+    def test_baseline_three_inserts(self, initial_shapefile: Path) -> None:
+        det = FileBlobChangeDetector(initial_shapefile)
+        try:
+            records = det.poll()
+        finally:
+            det.close()
+        assert len(records) == 3
+        assert all(r.operation == ChangeOperation.INSERT for r in records)
+
+    def test_attribute_only_edit_detected(
+        self, initial_shapefile: Path
+    ) -> None:
+        # The killer regression: a Shapefile attribute-only edit only
+        # touches ``.dbf``. If the detector watched only the ``.shp``
+        # file's mtime, the diff would never run and the change
+        # would be silently dropped.
+        det = FileBlobChangeDetector(initial_shapefile)
+        try:
+            det.poll()  # baseline
+
+            # Edit only attributes (geometry untouched). Bump every
+            # companion's mtime to be belt-and-braces.
+            edited = gpd.read_file(str(initial_shapefile))
+            edited.loc[edited["name"] == "Lyon", "population"] = 999_000
+            edited.to_file(str(initial_shapefile), driver="ESRI Shapefile")
+            for ext in (".shp", ".dbf", ".shx", ".prj", ".cpg"):
+                companion = initial_shapefile.with_suffix(ext)
+                if companion.exists():
+                    _bump_mtime(companion)
+
+            records = det.poll()
+        finally:
+            det.close()
+        ops = sorted(r.operation.value for r in records)
+        assert ops == [ChangeOperation.DELETE.value, ChangeOperation.INSERT.value]
+
+    def test_dbf_only_mtime_change_triggers_poll(
+        self, initial_shapefile: Path
+    ) -> None:
+        # Direct test of ``has_pending_changes``: bumping ONLY the
+        # ``.dbf`` companion mtime must surface as pending — the
+        # ``.shp`` mtime is intentionally left alone.
+        det = FileBlobChangeDetector(initial_shapefile)
+        try:
+            det.poll()  # baseline ack
+            # Confirm no pending immediately after a successful poll
+            assert det.has_pending_changes() is False
+
+            dbf = initial_shapefile.with_suffix(".dbf")
+            assert dbf.exists()
+            _bump_mtime(dbf)
+
+            assert det.has_pending_changes() is True
+        finally:
+            det.close()
+
+
+class TestFlatGeobufZeroCodeChange:
+    def test_fgb_works_through_existing_detector(
+        self, tmp_path: Path
+    ) -> None:
+        # FGB needs no special handling because pyogrio's writer
+        # mirrors the GeoJSON pattern (single file, atomic mtime).
+        # We assert this contract explicitly so a future regression
+        # would fail loudly.
+        path = tmp_path / "places.fgb"
+        gdf = gpd.GeoDataFrame(
+            {
+                "name": ["A", "B"],
+                "geometry": [Point(0, 0), Point(1, 1)],
+            },
+            crs="EPSG:4326",
+        )
+        gdf.to_file(str(path), driver="FlatGeobuf")
+
+        det = FileBlobChangeDetector(path)
+        try:
+            records = det.poll()
+        finally:
+            det.close()
+        assert len(records) == 2
+        assert all(r.operation == ChangeOperation.INSERT for r in records)

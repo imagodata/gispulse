@@ -61,6 +61,49 @@ logger = logging.getLogger(__name__)
 SNAPSHOT_SUFFIX = ".gispulse-snapshot.duckdb"
 
 
+# Map of "primary" file extension → companion extensions that share an
+# atomic edit unit. Editing one without the other(s) breaks the format
+# (Shapefile attribute edit only touches ``.dbf``; geometry edit
+# touches ``.shp`` and ``.shx``). The detector watches ``max(mtime)``
+# across all existing companions so attribute-only edits surface.
+#
+# Single-file formats (``.geojson``, ``.fgb``, ``.kml``, ``.csv``,
+# ``.tab``, ``.dxf``) do not appear here — the default branch in
+# :func:`_resolve_companion_paths` returns just the primary file.
+_COMPANION_EXTENSIONS: dict[str, tuple[str, ...]] = {
+    ".shp": (".shp", ".dbf", ".shx", ".prj", ".cpg"),
+    # ``.tab`` (MapInfo) ships with ``.dat``, ``.id``, ``.map``, ``.ind``.
+    # Reserved for slice 4-bis if a customer asks; the current detector
+    # still produces correct events when only ``.tab`` mtime changes
+    # because pyogrio rewrites every companion on edit.
+}
+
+
+def _resolve_companion_paths(primary: Path) -> list[Path]:
+    """Return the list of companion files we must mtime-watch.
+
+    Always includes ``primary`` itself. For Shapefile this returns the
+    five-file set ``(.shp, .dbf, .shx, .prj, .cpg)`` filtered to those
+    that actually exist on disk. The order is deterministic
+    (``primary`` first, then companions in canonical order) so debug
+    logs are stable.
+    """
+    suffix = primary.suffix.lower()
+    extensions = _COMPANION_EXTENSIONS.get(suffix)
+    if extensions is None:
+        return [primary]
+    base = primary.with_suffix("")
+    paths: list[Path] = []
+    for ext in extensions:
+        candidate = base.with_suffix(ext)
+        # Always include the primary even if it happens to be missing
+        # so callers can still distinguish "file gone" from "no
+        # companion present".
+        if candidate == primary or candidate.exists():
+            paths.append(candidate)
+    return paths
+
+
 @dataclass
 class FileBlobSnapshot:
     """In-memory representation of one snapshot row.
@@ -149,11 +192,27 @@ class FileBlobChangeDetector:
     def table_name(self) -> str:
         return self._table_name
 
+    def _max_companion_mtime(self) -> float | None:
+        """Return ``max(mtime)`` across all existing companion files,
+        or ``None`` when none exist (file deleted / never created).
+
+        For single-file formats this is just ``os.stat(primary).st_mtime``.
+        For Shapefile it spans ``.shp / .dbf / .shx / .prj / .cpg`` so an
+        attribute-only edit (which only touches ``.dbf``) is not missed.
+        """
+        mtimes: list[float] = []
+        for path in _resolve_companion_paths(self._path):
+            try:
+                mtimes.append(os.stat(path).st_mtime)
+            except FileNotFoundError:
+                continue
+        return max(mtimes) if mtimes else None
+
     def has_pending_changes(self) -> bool:
         """Cheap mtime probe — True iff a poll would do work."""
-        if not self._path.exists():
+        current = self._max_companion_mtime()
+        if current is None:
             return False
-        current = os.stat(self._path).st_mtime
         return self._last_mtime is None or current > self._last_mtime
 
     def poll(self) -> list[ChangeRecord]:
@@ -168,10 +227,19 @@ class FileBlobChangeDetector:
         First poll on a fresh detector treats every row as INSERT
         (the snapshot was empty).
         """
-        if not self._path.exists():
+        current_mtime = self._max_companion_mtime()
+        if current_mtime is None:
             return []
-        current_mtime = os.stat(self._path).st_mtime
         if self._last_mtime is not None and current_mtime <= self._last_mtime:
+            return []
+        if not self._path.exists():
+            # A companion still exists but the primary is gone — the
+            # file format is broken; log defensively and treat as
+            # missing rather than crashing the watcher.
+            logger.warning(
+                "file_blob_primary_missing: companions present but %s not — skipping poll",
+                self._path,
+            )
             return []
 
         new_snapshot = self._read_current_snapshot()

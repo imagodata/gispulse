@@ -22,13 +22,14 @@ gispulse formats
 | `.fgb` | FlatGeobuf | oui | oui | Ultra-rapide pour gros volumes, indexé spatialement |
 | `.parquet` | GeoParquet | oui | oui | Optimal pour données tabulaires larges, natif DuckDB |
 | `.geojson` | GeoJSON | oui | oui | Standard web, interopérable. **CDC v1.6.1** : engine `duckdb_diff` détecte INSERT/DELETE par mtime + DuckDB snapshot diff (UPDATE non détectable, voir notes ci-dessous). |
+| `.fgb` | FlatGeobuf | oui | oui | Ultra-rapide, indexé spatialement. **CDC v1.6.1** : engine `duckdb_diff` (zero-code-change vs GeoJSON, single-file mtime). |
 | `.geojsonl` | GeoJSON Lines | oui | oui | Streaming, gros volumes |
 
 ### Formats courants
 
 | Extension | Format | Lecture | Écriture | Notes |
 |-----------|--------|:-------:|:--------:|-------|
-| `.shp` | ESRI Shapefile | oui | oui | Héritage — préférer GPKG |
+| `.shp` | ESRI Shapefile | oui | oui | Héritage — préférer GPKG. **CDC v1.6.1** : engine `duckdb_diff` watche les 5 companions (`.shp`/`.dbf`/`.shx`/`.prj`/`.cpg`) en `max(mtime)` — un edit attributaire-seulement (qui ne touche que `.dbf`) est détecté. |
 | `.csv` | CSV (lat/lon ou WKT) | oui | oui | Détection auto colonnes géométrie |
 | `.dxf` | AutoCAD DXF | oui | oui | CAD |
 | `.kml` | KML / KMZ | oui | non | Google Earth |
@@ -50,6 +51,8 @@ gispulse formats
 L'engine `duckdb_diff` apporte la détection DML aux formats sans triggers natifs. Activé automatiquement pour `.geojson` (et progressivement `.fgb`, `.shp`, `.kml`, `.csv`, `.tab`, `.dxf`) — auto-routing depuis l'URI dans `triggers.yaml`.
 
 **Mécanisme** : `mtime` watch + DuckDB `ST_Read` snapshot diff. Au premier poll chaque feature emerge en `INSERT`. À chaque édition (QGIS, vim, script tiers), le moteur compare le hash (`md5(WKB || properties)`) de chaque ligne contre le snapshot persistant en sidecar `.gispulse-snapshot.duckdb` à côté du fichier.
+
+**Multi-file formats** : Shapefile (`.shp`) ne touche pas toujours `.shp` lors d'un edit (un changement attributaire ne touche que `.dbf`). Le détecteur watche donc `max(mtime)` sur les 5 companions `.shp`/`.dbf`/`.shx`/`.prj`/`.cpg` pour ne pas manquer ce cas. Single-file formats (GeoJSON/FGB/KML/CSV) restent en single-file mtime.
 
 **Limitations connues v1.6.1** :
 - `UPDATE` est **indétectable** (pas de PK stable dans le format) — un edit produit `DELETE` (vieux hash) + `INSERT` (nouveau hash). Déclarer `when: [INSERT, DELETE]` dans le trigger pour réagir aux deux côtés.
