@@ -67,6 +67,13 @@ class DuckDBDiffEngine(SpatialEngine):
         self._snapshot_path = (
             Path(snapshot_path) if snapshot_path is not None else None
         )
+        # Sequential change_id counter — emulates the
+        # ``_gispulse_change_log.id`` AUTOINCREMENT contract that the
+        # GPKG/SpatiaLite engines provide. The watcher's
+        # ``mark_changes_processed(max_id)`` call expects monotonic
+        # integer ids, so we cannot reuse the FileBlobSnapshot row hash
+        # (which is a hex digest, not int-castable).
+        self._next_change_id: int = 1
 
     @property
     def path(self) -> Path:
@@ -208,15 +215,29 @@ class DuckDBDiffEngine(SpatialEngine):
     def get_pending_changes(self, limit: int = 100) -> list[dict[str, Any]]:
         """Return pending DML changes since the last poll.
 
-        Mirrors the shape of ``GeoPackageEngine.get_pending_changes``
-        so callers (watcher loop, action dispatcher) can iterate the
-        same way regardless of the underlying engine. Each emitted
-        dict has at minimum: ``id``, ``table_name``, ``operation``,
-        ``row_pk``, ``new_values`` / ``old_values``.
+        Shape matches ``GeoPackageEngine.get_pending_changes`` so the
+        watcher (``persistence.change_log_watcher.ChangeLogWatcher``)
+        iterates uniformly across engines. Each dict carries:
 
-        The ``limit`` parameter is honoured — extra records stay in
-        the next poll. Polling is destructive (snapshot is updated
-        after the diff), so the watcher should consume what it gets.
+        - ``id``           — monotonic int (synthetic counter,
+          per-engine instance) for ``mark_changes_processed`` ack
+        - ``table_name``   — the layer / file stem
+        - ``operation``    — ``"INSERT"`` or ``"DELETE"`` (set diff)
+        - ``row_pk``       — the row hash (also stable across polls
+          when the row content is unchanged)
+        - ``new_values`` / ``old_values`` — properties dict
+        - ``changed_at``   — ISO 8601 UTC timestamp of the poll
+        - ``geom_changed`` — ``0`` for INSERT/DELETE; an UPDATE here
+          would need a stable PK, which file-blob CDC does not have
+          (cf. module docstring)
+        - ``new_geom_wkt`` / ``old_geom_wkt`` — extra (not consumed
+          by the watcher, exposed for future fine-grained payloads)
+
+        Polling is destructive (the FileBlobChangeDetector updates
+        its sidecar snapshot before returning). The watcher's
+        ``mark_changes_processed`` is therefore a no-op for this
+        engine — the changes are already consumed once the snapshot
+        is rolled forward.
         """
         if self._detector is None:
             return []
@@ -225,7 +246,7 @@ class DuckDBDiffEngine(SpatialEngine):
         for rec in records[:limit]:
             out.append(
                 {
-                    "id": str(rec.id),
+                    "id": self._next_change_id,
                     "table_name": rec.table_name,
                     "operation": rec.operation.value
                     if hasattr(rec.operation, "value")
@@ -233,8 +254,30 @@ class DuckDBDiffEngine(SpatialEngine):
                     "row_pk": rec.feature_id,
                     "new_values": rec.new_values,
                     "old_values": rec.old_values,
+                    "changed_at": rec.recorded_at.isoformat(),
+                    # geom_changed flag drives the watcher's
+                    # UPDATE → UPDATE_GEOM/UPDATE_ATTR resolution. We
+                    # only emit INSERT/DELETE so the flag is unused
+                    # in practice; we set it conservatively from the
+                    # presence of a new geometry on the record.
+                    "geom_changed": int(rec.new_geom_wkt is not None
+                                        or rec.old_geom_wkt is not None),
                     "new_geom_wkt": rec.new_geom_wkt,
                     "old_geom_wkt": rec.old_geom_wkt,
                 }
             )
+            self._next_change_id += 1
         return out
+
+    def mark_changes_processed(self, up_to_id: int) -> int:
+        """No-op — file-blob CDC is destructive on poll.
+
+        The watcher contract requires this method but the
+        ``FileBlobChangeDetector`` already consumed the events when
+        it rolled the snapshot forward. Returns the count of synthetic
+        ids that have been ack'd so the watcher's stats line up with
+        the SQLite engines.
+        """
+        # The synthetic counter has already advanced past every emitted
+        # row; ``up_to_id`` is informational only.
+        return 0

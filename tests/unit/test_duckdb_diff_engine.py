@@ -180,9 +180,9 @@ class TestPendingChanges:
     def test_pending_dict_shape_matches_gpkg_engine(
         self, tmp_path: Path, sample_gdf: gpd.GeoDataFrame
     ) -> None:
-        # Watcher loop expects: id, table_name, operation, row_pk,
-        # new_values / old_values keys to match GeoPackageEngine's
-        # ``get_pending_changes`` shape so it can iterate uniformly.
+        # ChangeLogWatcher._process_row casts ``id`` to int, reads
+        # ``table_name``, ``operation``, ``row_pk``, ``changed_at``
+        # and ``geom_changed``. The shape must match across engines.
         path = tmp_path / "x.geojson"
         sample_gdf.to_file(str(path), driver="GeoJSON")
 
@@ -190,7 +190,52 @@ class TestPendingChanges:
         with engine:
             pending = engine.get_pending_changes()
         rec = pending[0]
-        assert {"id", "table_name", "operation", "row_pk", "new_values", "old_values"}.issubset(rec.keys())
+        required = {
+            "id",
+            "table_name",
+            "operation",
+            "row_pk",
+            "new_values",
+            "old_values",
+            "changed_at",
+            "geom_changed",
+        }
+        assert required.issubset(rec.keys())
+        # ``id`` must be int-castable — the watcher does ``int(row["id"])``.
+        assert isinstance(rec["id"], int)
+        # ``geom_changed`` must be int-typed (0/1) so the watcher's
+        # ``bool(row.get("geom_changed"))`` works.
+        assert isinstance(rec["geom_changed"], int)
+
+    def test_ids_are_monotonic(
+        self, tmp_path: Path, sample_gdf: gpd.GeoDataFrame
+    ) -> None:
+        # The watcher's ``mark_changes_processed(max_id)`` ack relies
+        # on ids being monotonic across polls.
+        path = tmp_path / "x.geojson"
+        sample_gdf.to_file(str(path), driver="GeoJSON")
+
+        engine = DuckDBDiffEngine(path)
+        with engine:
+            pending = engine.get_pending_changes()
+        ids = [r["id"] for r in pending]
+        assert ids == sorted(ids)
+        assert ids == list(range(1, len(pending) + 1))
+
+    def test_mark_changes_processed_is_noop(
+        self, tmp_path: Path, sample_gdf: gpd.GeoDataFrame
+    ) -> None:
+        # File-blob CDC is destructive on poll — mark_changes_processed
+        # exists for protocol compatibility but does no work.
+        path = tmp_path / "x.geojson"
+        sample_gdf.to_file(str(path), driver="GeoJSON")
+        engine = DuckDBDiffEngine(path)
+        with engine:
+            pending = engine.get_pending_changes()
+            max_id = max(r["id"] for r in pending)
+            # No exception, returns 0 (no rows were "marked" — the
+            # snapshot has already advanced).
+            assert engine.mark_changes_processed(max_id) == 0
 
     def test_limit_applied(
         self, tmp_path: Path, sample_gdf: gpd.GeoDataFrame
