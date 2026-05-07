@@ -334,8 +334,48 @@ def delete_dataset(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_dataset_local_path(ds: Dataset) -> Path:
+    """Return the absolute local path to the dataset's source file.
+
+    Format-agnostic: validates only that the source is local
+    (not ``s3://``) and exists on disk. The caller decides whether
+    the format is appropriate for the operation it wants to perform
+    — see :func:`_resolve_gpkg_path` for the GPKG-only variant kept
+    for the SQL DDL teardown path in ``disable_tracking``.
+
+    Raises:
+        HTTPException(400): If the dataset has no source / is remote-only.
+        HTTPException(500): If the path is missing on disk.
+    """
+    src = ds.source_path or ""
+    if not src or src.startswith("s3://"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "tracking_remote_not_supported",
+                    "message": (
+                        "Cannot enable tracking on a remote-only dataset. "
+                        "Tracking requires direct local access."
+                    ),
+                }
+            },
+        )
+    p = Path(src)
+    if not p.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Dataset source file not found on disk: {src}",
+        )
+    return p
+
+
 def _resolve_gpkg_path(ds: Dataset) -> Path:
     """Return the absolute path to the dataset's GPKG file.
+
+    Format-restricted variant of :func:`_resolve_dataset_local_path`
+    used by the SQL DDL teardown path in ``disable_tracking`` (which
+    still requires a SQLite handle).
 
     Raises:
         HTTPException(400): If the dataset is not a local GPKG.
@@ -349,34 +389,56 @@ def _resolve_gpkg_path(ds: Dataset) -> Path:
                     "code": "tracking_unsupported_format",
                     "format": ds.format,
                     "message": (
-                        "Change tracking is only supported for local GPKG "
-                        "datasets. PostGIS uses pg_notify (Pro tier) and "
-                        "DuckDB tracking ships in Lot 3."
+                        "This operation requires a local GPKG. PostGIS "
+                        "uses pg_notify (Pro tier) and non-SQLite formats "
+                        "use the duckdb_diff engine."
                     ),
                 }
             },
         )
-    src = ds.source_path or ""
-    if not src or src.startswith("s3://"):
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "code": "tracking_remote_not_supported",
-                    "message": (
-                        "Cannot enable tracking on a remote-only GPKG. "
-                        "Tracking requires direct SQLite access."
-                    ),
-                }
-            },
-        )
-    p = Path(src)
-    if not p.exists():
-        raise HTTPException(
-            status_code=500,
-            detail=f"Dataset source file not found on disk: {src}",
-        )
-    return p
+    return _resolve_dataset_local_path(ds)
+
+
+def _resolve_engine_kind_for_tracking(ds: Dataset, path: Path) -> str:
+    """Pick the engine kind for a tracking-enable operation.
+
+    Routes by file URI suffix via
+    :func:`gispulse.runtime.engine_inference.infer_engine`. PostGIS
+    URIs are rejected here because the HTTP enable_tracking path
+    relies on SQLite triggers or file-blob CDC — pg_notify
+    integration is a Pro/v1.7+ feature surfaced via a different
+    endpoint.
+
+    Returns one of ``"gpkg"``, ``"spatialite"``, ``"duckdb_diff"``.
+    Raises HTTPException(400) for unsupported routes.
+    """
+    from gispulse.runtime.engine_inference import infer_engine
+
+    fmt = (ds.format or "").lower()
+    # Trust the dataset.format hint for GPKG (the upload path stamps
+    # this from pyogrio inspection — more reliable than URI suffix on
+    # demos where files may be renamed).
+    if fmt == "gpkg":
+        return "gpkg"
+    inferred = infer_engine(str(path))
+    if inferred in ("gpkg", "spatialite", "duckdb_diff"):
+        return inferred
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "error": {
+                "code": "tracking_unsupported_format",
+                "format": ds.format,
+                "path_suffix": path.suffix,
+                "message": (
+                    "Change tracking via this endpoint requires a "
+                    "GPKG, SpatiaLite, or a file-blob format readable "
+                    "by DuckDB-spatial (GeoJSON, FlatGeobuf, "
+                    "Shapefile, KML, CSV+WKT, MapInfo TAB)."
+                ),
+            }
+        },
+    )
 
 
 def _layers_in_gpkg(path: Path) -> list[str]:
@@ -449,14 +511,15 @@ def enable_tracking(
     except TierError as exc:
         raise HTTPException(status_code=402, detail=str(exc))
 
-    gpkg_path = _resolve_gpkg_path(ds)
+    dataset_path = _resolve_dataset_local_path(ds)
+    engine_kind = _resolve_engine_kind_for_tracking(ds, dataset_path)
 
     # Idempotency short-circuit: if the registry already holds a watcher
-    # for this dataset, opening another engine on the same GPKG (and a
+    # for this dataset, opening another engine on the same file (and a
     # pyogrio handle for layer listing) collides with the watcher's
-    # SQLite connection in WAL mode and surfaces as "disk I/O error".
-    # Return the cached layer snapshot from the registry instead — no
-    # filesystem touch, no second handle.
+    # connection — see ``test_app_state_holds_only_one_change_log_watcher``
+    # and the WAL "disk I/O error" symptom on SQLite-family engines.
+    # Return the cached layer snapshot from the registry instead.
     registry = getattr(request.app.state, "watcher_registry", None)
     if registry is not None and registry.is_registered(str(dataset_id)):
         return {
@@ -465,50 +528,72 @@ def enable_tracking(
             "layers_tracked": registry.get_layers(str(dataset_id)),
         }
 
-    layers = _layers_in_gpkg(gpkg_path)
-    if not layers:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "code": "tracking_no_layers",
-                    "message": "GPKG file has no spatial layers to track.",
-                }
-            },
-        )
-
-    # Open a short-lived engine to install the triggers idempotently.
-    # The WatcherRegistry will open its own engine on register() — we
-    # cannot share this one without leaking it on the hot path.
-    from persistence.gpkg_engine import GeoPackageEngine
-
     tracked: list[str] = []
     invalid: list[str] = []
-    install_engine = GeoPackageEngine(gpkg_path)
-    install_engine.open()
-    try:
-        for layer in layers:
-            try:
-                install_engine.enable_change_tracking(layer)
-                tracked.append(layer)
-            except ValueError as exc:
-                # SQLi guard rejected an exotic identifier — surface to caller.
-                invalid.append(layer)
-                logger.warning(
-                    "enable_tracking_invalid_layer dataset_id=%s layer=%s err=%s",
-                    dataset_id,
-                    layer,
-                    exc,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "enable_tracking_install_failed dataset_id=%s layer=%s err=%s",
-                    dataset_id,
-                    layer,
-                    exc,
-                )
-    finally:
-        install_engine.close()
+
+    if engine_kind in ("gpkg", "spatialite"):
+        # SQLite-family engines: list spatial layers and install the
+        # AFTER INSERT/UPDATE/DELETE triggers idempotently. The
+        # ``_layers_in_gpkg`` helper also reads SpatiaLite catalog
+        # tables (``geometry_columns``) when the GPKG-specific
+        # ``gpkg_contents`` is absent.
+        layers = _layers_in_gpkg(dataset_path)
+        if not layers:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "tracking_no_layers",
+                        "message": (
+                            "File has no spatial layers to track. "
+                            "Add a layer via QGIS / pyogrio before enabling "
+                            "tracking."
+                        ),
+                    }
+                },
+            )
+
+        # Open a short-lived engine to install the triggers. The
+        # WatcherRegistry will open its own engine on register() — we
+        # cannot share this one without leaking it on the hot path.
+        if engine_kind == "spatialite":
+            from persistence.spatialite_engine import SpatiaLiteEngine
+
+            install_engine = SpatiaLiteEngine(dataset_path)
+        else:
+            from persistence.gpkg_engine import GeoPackageEngine
+
+            install_engine = GeoPackageEngine(dataset_path)
+        install_engine.open()
+        try:
+            for layer in layers:
+                try:
+                    install_engine.enable_change_tracking(layer)
+                    tracked.append(layer)
+                except ValueError as exc:
+                    # SQLi guard rejected an exotic identifier — surface to caller.
+                    invalid.append(layer)
+                    logger.warning(
+                        "enable_tracking_invalid_layer dataset_id=%s layer=%s err=%s",
+                        dataset_id,
+                        layer,
+                        exc,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "enable_tracking_install_failed dataset_id=%s layer=%s err=%s",
+                        dataset_id,
+                        layer,
+                        exc,
+                    )
+        finally:
+            install_engine.close()
+    else:
+        # ``duckdb_diff`` — file-blob CDC has no triggers to install.
+        # The detector creates its sidecar snapshot on first poll. The
+        # "tracked layer" name is the file stem (single-layer-per-file
+        # contract — multi-layer files belong to the SQLite path).
+        tracked = [dataset_path.stem]
 
     if invalid:
         raise HTTPException(
@@ -553,7 +638,8 @@ def enable_tracking(
 
     registry.register(
         str(dataset_id),
-        gpkg_path,
+        dataset_path,
+        engine_kind=engine_kind,
         triggers_provider=_active_triggers,
         layers=tracked,
     )
