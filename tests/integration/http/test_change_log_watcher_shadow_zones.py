@@ -242,11 +242,18 @@ class TestPayloadRedaction:
         )
         # Also assert allowed keys exactly. dataset_id added in Lot 2 v2 fix M1
         # to disambiguate multi-GPKG events; no leak risk since it's a UUID/
-        # known identifier, not a row value.
+        # known identifier, not a row value. v1.6.0 (#119/#120 plumbing) adds
+        # ``geom_changed`` — a metadata boolean, not a row attribute.
         data = payloads[0]["data"]
-        assert set(data.keys()) <= {"dataset_id", "table", "op", "fid", "change_id", "ts"}, (
-            f"Unexpected keys in dml.changed payload: {set(data.keys())}"
-        )
+        assert set(data.keys()) <= {
+            "dataset_id",
+            "table",
+            "op",
+            "fid",
+            "change_id",
+            "ts",
+            "geom_changed",
+        }, f"Unexpected keys in dml.changed payload: {set(data.keys())}"
 
     def test_no_include_values_query_param_unlocks_verbose_payload(
         self, gpkg_app

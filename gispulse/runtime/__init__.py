@@ -24,6 +24,18 @@ from gispulse.runtime.config_loader import (
     to_triggers,
     validate_against_gpkg,
 )
+from gispulse.runtime.duckdb_engine import (
+    DuckDBSpatialUnavailable,
+    get_spatial_connection,
+    is_spatial_loaded,
+)
+from gispulse.runtime.engine_inference import (
+    ALL_ENGINES,
+    EngineInferenceError,
+    EngineKind,
+    infer_engine,
+    resolve_engine,
+)
 from gispulse.runtime.headless_runtime import (
     HeadlessRuntime,
     NullEventHub,
@@ -47,9 +59,13 @@ from gispulse.runtime.sqlite_retry import (
 )
 
 __all__ = [
+    "ALL_ENGINES",
     "ConfigError",
     "DEFAULT_BACKOFF_SCHEDULE",
     "DEFAULT_JITTER_PCT",
+    "DuckDBSpatialUnavailable",
+    "EngineInferenceError",
+    "EngineKind",
     "GISPulseConfig",
     "HeadlessRuntime",
     "NullEventHub",
@@ -62,9 +78,13 @@ __all__ = [
     "build_runtime",
     "build_update_payload",
     "evaluate_predicate",
+    "get_spatial_connection",
+    "infer_engine",
     "is_busy_error",
+    "is_spatial_loaded",
     "load_config",
     "parse_predicate",
+    "resolve_engine",
     "to_triggers",
     "validate_against_gpkg",
 ]

@@ -82,13 +82,19 @@ def _check_duckdb() -> CheckResult:
     except ImportError:
         return CheckResult("duckdb", "error", "not installed (required)")
     detail = f"v{duckdb.__version__}"
+    from gispulse.runtime.duckdb_engine import (
+        DuckDBSpatialUnavailable,
+        get_spatial_connection,
+    )
     try:
-        conn = duckdb.connect(":memory:")
-        conn.execute("INSTALL spatial; LOAD spatial;")
+        conn = get_spatial_connection()
         conn.execute("SELECT ST_Point(0, 0);")
         conn.close()
         detail += " + spatial extension"
         return CheckResult("duckdb", "ok", detail)
+    except DuckDBSpatialUnavailable:
+        detail += " (spatial extension NOT available — `gispulse doctor --install-spatial`)"
+        return CheckResult("duckdb", "warning", detail)
     except Exception:
         detail += " (spatial extension NOT available)"
         return CheckResult("duckdb", "warning", detail)

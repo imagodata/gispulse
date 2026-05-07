@@ -491,12 +491,26 @@ def info(
 @app.command()
 def doctor(
     json_output: bool = typer.Option(False, "--json", help="Emit JSON instead of the rich table."),
+    install_spatial: bool = typer.Option(
+        False,
+        "--install-spatial",
+        help="Pre-install the DuckDB spatial extension and verify EPSG roundtrips.",
+    ),
 ) -> None:
     """Run system diagnostics and check environment health.
 
     Wraps :func:`gispulse.diagnostics.system.run_checks` so the CLI and the
     ``POST /system/doctor`` HTTP endpoint produce identical results.
+
+    Pass ``--install-spatial`` to force the DuckDB spatial extension install
+    (instead of waiting for the first DSL geom function to trigger it lazily)
+    and probe a few common EPSG transforms — useful in CI or air-gapped
+    environments where the lazy install path would surprise users at runtime.
     """
+    if install_spatial:
+        _doctor_install_spatial(json_output=json_output)
+        return
+
     from gispulse.diagnostics import run_checks
 
     result = run_checks()
@@ -508,6 +522,74 @@ def doctor(
         _doctor_render(result.checks)
 
     if result.has_critical:
+        raise typer.Exit(1)
+
+
+def _doctor_install_spatial(*, json_output: bool) -> None:
+    """Install the DuckDB spatial extension and probe EPSG roundtrips.
+
+    Exits 1 if install fails (network, sandboxed) or any default EPSG check
+    falls outside tolerance — the latter usually means PROJ is missing the
+    IGN datum-shift grid required for high-precision French CRS.
+    """
+    from dataclasses import asdict
+
+    from gispulse.runtime.duckdb_engine import (
+        DuckDBSpatialUnavailable,
+        get_spatial_connection,
+        verify_epsg_roundtrip,
+    )
+
+    payload: dict[str, object] = {"install": "ok", "epsg": []}
+    try:
+        conn = get_spatial_connection()
+    except DuckDBSpatialUnavailable as exc:
+        payload["install"] = "error"
+        payload["error"] = str(exc)
+        if json_output:
+            import json as _json
+
+            typer.echo(_json.dumps(payload))
+        else:
+            typer.echo(f"✗ DuckDB spatial install failed: {exc}", err=True)
+        raise typer.Exit(1)
+
+    try:
+        import duckdb
+
+        version = duckdb.__version__
+        spatial_version_row = conn.execute(
+            "SELECT extension_version FROM duckdb_extensions() WHERE extension_name='spatial'"
+        ).fetchone()
+        spatial_version = spatial_version_row[0] if spatial_version_row else "?"
+
+        checks = verify_epsg_roundtrip(conn)
+    finally:
+        conn.close()
+
+    payload["duckdb_version"] = version
+    payload["spatial_version"] = spatial_version
+    payload["epsg"] = [asdict(c) for c in checks]
+    has_failures = any(not c.ok for c in checks)
+
+    if json_output:
+        import json as _json
+
+        typer.echo(_json.dumps(payload, default=str))
+    else:
+        typer.echo("")
+        typer.echo("GISPulse Doctor — DuckDB Spatial")
+        typer.echo("=" * 60)
+        typer.echo(f"  duckdb         v{version}")
+        typer.echo(f"  spatial ext    v{spatial_version}")
+        typer.echo("")
+        typer.echo("EPSG roundtrip probes (WGS84 → target CRS):")
+        for c in checks:
+            icon = _STATUS_ICON["ok"] if c.ok else _STATUS_ICON["error"]
+            typer.echo(f"  {icon}  EPSG:{c.epsg:<6}  {c.detail}")
+        typer.echo("=" * 60)
+
+    if has_failures:
         raise typer.Exit(1)
 
 

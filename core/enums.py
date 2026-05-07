@@ -92,10 +92,21 @@ class TriggerType(str, Enum):
 
 
 class ChangeOperation(str, Enum):
-    """DML operation that produced a ChangeRecord."""
+    """DML operation that produced a ChangeRecord.
+
+    v1.6.0 (#119) introduced ``UPDATE_GEOM`` / ``UPDATE_ATTR`` / ``BULK`` as
+    granular variants. ``UPDATE`` remains accepted for backward compatibility
+    on the config surface — the watcher resolves a coarse ``UPDATE`` row from
+    the change log to the matching granular value via the row's
+    ``geom_changed`` flag before handing the :class:`ChangeRecord` to the
+    evaluator.
+    """
     INSERT = "INSERT"
     UPDATE = "UPDATE"
+    UPDATE_GEOM = "UPDATE_GEOM"
+    UPDATE_ATTR = "UPDATE_ATTR"
     DELETE = "DELETE"
+    BULK = "BULK"
 
 
 class RuleScope(str, Enum):

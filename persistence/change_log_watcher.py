@@ -613,6 +613,13 @@ class ChangeLogWatcher:
         fid_raw = row.get("row_pk")
         fid = str(fid_raw) if fid_raw is not None else None
         ts = row.get("changed_at")
+        # v1.6.0 #119/#120: resolve coarse UPDATE → granular UPDATE_GEOM /
+        # UPDATE_ATTR via the change_log's ``geom_changed`` column. The
+        # column is INTEGER DEFAULT 0 (cf gpkg_schema.py v2 migration), so
+        # a missing column on legacy GPKGs degrades to UPDATE_ATTR.
+        geom_changed = bool(row.get("geom_changed"))
+        if op == "UPDATE":
+            op = "UPDATE_GEOM" if geom_changed else "UPDATE_ATTR"
 
         if broadcast_dml:
             # Payload is intentionally minimal: no field values, no
@@ -631,6 +638,7 @@ class ChangeLogWatcher:
                         "fid": fid,
                         "change_id": change_id,
                         "ts": ts,
+                        "geom_changed": geom_changed,
                     },
                 )
             except Exception as exc:

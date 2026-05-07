@@ -60,6 +60,23 @@ class TestCliDoctor:
         assert result.exit_code == 0
         assert "python" in result.stdout.lower() or "geopandas" in result.stdout.lower()
 
+    def test_doctor_install_spatial(self) -> None:
+        result = runner.invoke(app, ["doctor", "--install-spatial"])
+        assert result.exit_code == 0, result.stdout
+        assert "DuckDB Spatial" in result.stdout
+        assert "EPSG:4326" in result.stdout
+        assert "EPSG:2154" in result.stdout
+
+    def test_doctor_install_spatial_json(self) -> None:
+        result = runner.invoke(app, ["doctor", "--install-spatial", "--json"])
+        assert result.exit_code == 0, result.stdout
+        # Skip the leading update-notifier banner if present.
+        json_line = result.stdout.strip().splitlines()[-1]
+        payload = json.loads(json_line)
+        assert payload["install"] == "ok"
+        assert {c["epsg"] for c in payload["epsg"]} >= {4326, 3857, 2154, 27572}
+        assert all(isinstance(c["ok"], bool) for c in payload["epsg"])
+
 
 class TestCliHelp:
     def test_help(self) -> None:
