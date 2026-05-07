@@ -305,3 +305,61 @@ class ValidationRunner:
                 failure.rule_id,
                 exc,
             )
+
+
+# ---------------------------------------------------------------------------
+# DuckDB sql_evaluator factory
+# ---------------------------------------------------------------------------
+
+
+def make_gpkg_sql_evaluator(
+    gpkg_path: str,
+    *,
+    alias: str = "gpkg",
+) -> Callable[[str, list[Any]], list[Any]]:
+    """Return a sql_evaluator that runs SQL against ``gpkg_path`` via DuckDB.
+
+    Opens a DuckDB connection with the spatial extension lazy-loaded
+    (cf :mod:`gispulse.runtime.duckdb_engine`) and ATTACHes the GPKG
+    as a SQLite catalog under ``alias``. Subsequent ``USE alias`` makes
+    bare-table references in the rule SQL resolve naturally — the
+    same ``"parcels"`` identifier compiled by
+    :func:`gispulse.dsl.compile_expression` works against the attached
+    GeoPackage without rewriting.
+
+    The connection is held by the closure for the evaluator's lifetime;
+    callers should treat the returned callable as owning the resource
+    and discard it (letting the conn close) when the runner stops.
+
+    Caveats:
+    - ATTACH on a SQLite database is read-only by default in DuckDB —
+      this is fine for validation. Concurrent SQLite writers (the GPKG
+      AFTER triggers populating ``_gispulse_change_log``) coexist with
+      this read connection because SQLite serialises around the WAL.
+    - Cross-source layers (``geom_within(layer='communes')`` referencing
+      a separate GPKG) require an additional ``ATTACH`` per layer —
+      handled by the cross-source plumbing in #122 follow-ups.
+    """
+    from gispulse.runtime.duckdb_engine import get_spatial_connection
+
+    if not gpkg_path or not isinstance(gpkg_path, str):
+        raise ValueError(f"gpkg_path must be a non-empty string, got {gpkg_path!r}")
+
+    conn = get_spatial_connection()
+    # Use parameter substitution where possible; the ATTACH form below
+    # has no SQL-parameter slot in DuckDB so we splice the path. We
+    # validate the alias as an identifier and reject paths containing
+    # single quotes that would break out of the literal.
+    if "'" in gpkg_path or "\x00" in gpkg_path:
+        raise ValueError(f"gpkg_path contains illegal characters: {gpkg_path!r}")
+    import re as _re
+
+    if not _re.match(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$", alias):
+        raise ValueError(f"invalid alias {alias!r}")
+    conn.execute(f"ATTACH '{gpkg_path}' AS {alias} (TYPE SQLITE)")
+    conn.execute(f"USE {alias}")
+
+    def evaluator(sql: str, params: list[Any]) -> list[Any]:
+        return conn.execute(sql, params).fetchall()
+
+    return evaluator

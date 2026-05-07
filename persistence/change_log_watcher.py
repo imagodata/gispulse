@@ -170,6 +170,7 @@ class ChangeLogWatcher:
         bulk_threshold: int = 0,
         bulk_eval: str = "skip",
         schema_drift_check_interval_s: float = 5.0,
+        validation_runner: Any | None = None,
     ) -> None:
         if poll_interval <= 0:
             raise ValueError("poll_interval must be > 0")
@@ -236,6 +237,14 @@ class ChangeLogWatcher:
         self._evaluator = trigger_evaluator
         self._triggers_provider = triggers_provider
         self._action_dispatcher = action_dispatcher
+        # v1.6.0 — optional ValidationRunner that evaluates ``validate:``
+        # rules per row. The watcher calls ``evaluate(table, row_id)``
+        # after the trigger evaluator block on INSERT / UPDATE_GEOM /
+        # UPDATE_ATTR events. Failures broadcast on the event hub via
+        # the runner's own hub binding (we don't double-broadcast here).
+        # Typed as ``Any`` to avoid a circular import on the runtime
+        # package; the runner protocol is just ``evaluate(table, row_id)``.
+        self._validation_runner = validation_runner
         # Cache active triggers indexed by id within a tick so the
         # dispatcher can recover the full Trigger (with .actions) from
         # the FiredTrigger summary, without re-querying the repo.
@@ -747,6 +756,28 @@ class ChangeLogWatcher:
                         change_id=change_id,
                         ts=ts,
                     )
+
+        # v1.6.0 — declarative validate: rules. Runs *after* the trigger
+        # evaluator block so a tag_field action emitted by a future
+        # mode=tag bridge sees the post-trigger row state. DELETE is
+        # skipped because the row no longer exists; ditto for BULK
+        # which the watcher already collapses into a single summary
+        # event before this point. Any exception in the runner is
+        # contained so the tick keeps moving.
+        if (
+            self._validation_runner is not None
+            and fid is not None
+            and table
+            and op in ("INSERT", "UPDATE", "UPDATE_GEOM", "UPDATE_ATTR")
+        ):
+            try:
+                self._validation_runner.evaluate(table, fid)
+            except Exception as exc:
+                logger.warning(
+                    "change_log_validation_runner_failed change_id=%d: %s",
+                    change_id,
+                    exc,
+                )
 
         return change_id
 

@@ -64,6 +64,7 @@ from gispulse.runtime.validation_runner import (
     ValidationFailure,
     ValidationRunner,
     compile_validate_rules,
+    make_gpkg_sql_evaluator,
 )
 
 __all__ = [
@@ -91,6 +92,7 @@ __all__ = [
     "build_runtime",
     "build_update_payload",
     "compile_validate_rules",
+    "make_gpkg_sql_evaluator",
     "evaluate_predicate",
     "get_spatial_connection",
     "infer_engine",
