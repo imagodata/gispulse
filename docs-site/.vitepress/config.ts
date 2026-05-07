@@ -261,6 +261,7 @@ const enSidebar = {
         { text: 'Parcels', link: '/en/guide/walkthroughs/parcels' },
         { text: 'Isochrone', link: '/en/guide/walkthroughs/isochrone' },
         { text: 'Audit', link: '/en/guide/walkthroughs/audit' },
+        { text: 'GeoJSON CDC', link: '/en/guide/walkthroughs/geojson-cdc' },
       ],
     },
   ],
