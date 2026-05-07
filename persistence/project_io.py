@@ -112,8 +112,9 @@ def export_project(
         else:
             format = "json"
 
-    conn = sqlite3.connect(str(gpkg_path))
-    conn.row_factory = sqlite3.Row
+    from persistence.gpkg_connection import connect_gpkg
+
+    conn = connect_gpkg(gpkg_path, row_factory=sqlite3.Row)
 
     project: dict[str, Any] = {
         "version": SCHEMA_VERSION,
@@ -211,8 +212,9 @@ def import_project(
     # Open/bootstrap GPKG
     from persistence.gpkg_schema import bootstrap_gpkg_project
 
-    conn = sqlite3.connect(str(gpkg_path))
-    conn.row_factory = sqlite3.Row
+    from persistence.gpkg_connection import connect_gpkg
+
+    conn = connect_gpkg(gpkg_path, row_factory=sqlite3.Row)
     bootstrap_gpkg_project(conn)
 
     stats: dict[str, int] = {}

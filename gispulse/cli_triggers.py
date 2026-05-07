@@ -363,8 +363,10 @@ def cmd_list(
     engine when ``enable_change_tracking()`` runs. Empty list = the GPKG
     is not yet tracked.
     """
+    from persistence.gpkg_connection import connect_gpkg
+
     try:
-        conn = sqlite3.connect(str(gpkg))
+        conn = connect_gpkg(gpkg)
         try:
             cur = conn.execute(
                 """

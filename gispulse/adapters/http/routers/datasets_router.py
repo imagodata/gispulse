@@ -394,8 +394,10 @@ def _layers_in_gpkg(path: Path) -> list[str]:
         # is layer name.
         names = [str(row[0]) for row in info]
     except Exception:
+        from persistence.gpkg_connection import connect_gpkg
+
         names = []
-        with sqlite3.connect(str(path)) as conn:
+        with connect_gpkg(path) as conn:
             try:
                 rows = conn.execute(
                     "SELECT table_name FROM gpkg_contents WHERE data_type='features'"
@@ -684,12 +686,13 @@ def _open_dataset_gpkg(ds: Dataset) -> sqlite3.Connection:
     """Open a SQLite connection on the dataset's GPKG with row factory.
 
     Mirrors the CLI's ``_open_gpkg`` (cli_track) so the HTTP path
-    keeps the same lifecycle. Caller owns the connection.
+    keeps the same lifecycle (WAL + busy_timeout). Caller owns the
+    connection.
     """
+    from persistence.gpkg_connection import connect_gpkg
+
     path = _resolve_gpkg_path(ds)
-    conn = sqlite3.connect(str(path), isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return connect_gpkg(path, row_factory=sqlite3.Row)
 
 
 @router.get("/{dataset_id}/changelog")

@@ -232,8 +232,10 @@ def _list_user_tables(gpkg_path: Path) -> list[str]:
     pyogrio's ``list_layers`` returns everything including the
     ``_gispulse_*`` tables, which would confuse the auto-detect path.
     """
+    from persistence.gpkg_connection import connect_gpkg
+
     try:
-        conn = sqlite3.connect(str(gpkg_path))
+        conn = connect_gpkg(gpkg_path)
         try:
             cur = conn.execute(
                 "SELECT table_name FROM gpkg_contents "

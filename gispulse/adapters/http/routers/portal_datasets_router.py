@@ -233,9 +233,9 @@ def _write_gpkg_styles(gpkg_path: str, styles: list[tuple[str, str, float, dict 
     Each entry: (layer_name, color, opacity, style_def_or_none, geom_type_or_none)
     If style_def is provided, uses the full style_converter for rich QML.
     """
-    import sqlite3
+    from persistence.gpkg_connection import connect_gpkg
 
-    conn = sqlite3.connect(gpkg_path)
+    conn = connect_gpkg(gpkg_path)
     try:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS layer_styles (
@@ -646,11 +646,10 @@ async def compute_breaks(
 
 def _upsert_layer_style(gpkg_path: str, layer_name: str, qml_xml: str) -> None:
     """DELETE existing styleQML for layer, then INSERT new one. Idempotent."""
-    import sqlite3
-
     from persistence.gpkg import _CREATE_LAYER_STYLES
+    from persistence.gpkg_connection import connect_gpkg
 
-    conn = sqlite3.connect(gpkg_path)
+    conn = connect_gpkg(gpkg_path)
     try:
         conn.execute(_CREATE_LAYER_STYLES)
         conn.execute(
