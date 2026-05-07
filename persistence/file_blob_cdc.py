@@ -72,10 +72,12 @@ SNAPSHOT_SUFFIX = ".gispulse-snapshot.duckdb"
 # :func:`_resolve_companion_paths` returns just the primary file.
 _COMPANION_EXTENSIONS: dict[str, tuple[str, ...]] = {
     ".shp": (".shp", ".dbf", ".shx", ".prj", ".cpg"),
-    # ``.tab`` (MapInfo) ships with ``.dat``, ``.id``, ``.map``, ``.ind``.
-    # Reserved for slice 4-bis if a customer asks; the current detector
-    # still produces correct events when only ``.tab`` mtime changes
-    # because pyogrio rewrites every companion on edit.
+    # MapInfo TAB ships as a 4-file set: the descriptor (``.tab``), the
+    # attribute table (``.dat``), the geometry index (``.map``), and the
+    # row index (``.id``). Some MapInfo writers also produce ``.ind`` for
+    # secondary indices — included defensively so it's watched if
+    # present. (#106 v1.6.2)
+    ".tab": (".tab", ".dat", ".map", ".id", ".ind"),
 }
 
 

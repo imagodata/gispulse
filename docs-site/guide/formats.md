@@ -30,9 +30,9 @@ gispulse formats
 | Extension | Format | Lecture | Écriture | Notes |
 |-----------|--------|:-------:|:--------:|-------|
 | `.shp` | ESRI Shapefile | oui | oui | Héritage — préférer GPKG. **CDC v1.6.1** : engine `duckdb_diff` watche les 5 companions (`.shp`/`.dbf`/`.shx`/`.prj`/`.cpg`) en `max(mtime)` — un edit attributaire-seulement (qui ne touche que `.dbf`) est détecté. |
-| `.csv` | CSV (lat/lon ou WKT) | oui | oui | Détection auto colonnes géométrie |
+| `.csv` | CSV (lat/lon ou WKT) | oui | oui | Détection auto colonnes géométrie. **CDC v1.6.2** : engine `duckdb_diff` zero-code-change (à écrire avec `GEOMETRY=AS_WKT` côté pyogrio pour préserver la géométrie). |
 | `.dxf` | AutoCAD DXF | oui | oui | CAD |
-| `.kml` | KML / KMZ | oui | non | Google Earth |
+| `.kml` | KML / KMZ | oui | oui (KML) | Google Earth. **CDC v1.6.2** : engine `duckdb_diff` zero-code-change (single-file mtime). |
 | `.gml` | GML | oui | oui | OGC standard |
 | `.gpx` | GPX | oui | non | GPS tracks |
 
