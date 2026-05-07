@@ -104,12 +104,23 @@ def _gpkg_factory(*, dsn: str | None = None, duckdb_path: str = ":memory:", gpkg
     return GeoPackageEngine(path=path)
 
 
+def _spatialite_factory(*, dsn: str | None = None, duckdb_path: str = ":memory:", spatialite_path: str | None = None, gpkg_path: str | None = None, **_kw: Any) -> SpatialEngine:
+    # Accept ``gpkg_path`` as an alias to keep call sites uniform with
+    # the GPKG factory — both engines are file-based SQLite, only the
+    # geometry encoding differs.
+    path = spatialite_path or gpkg_path or settings.database.gpkg_path
+    from persistence.spatialite_engine import SpatiaLiteEngine
+
+    return SpatiaLiteEngine(path=path)
+
+
 def _register_builtins() -> None:
-    """Register the four built-in engine backends."""
+    """Register the five built-in engine backends."""
     register_engine_backend("duckdb", _duckdb_factory)
     register_engine_backend("postgis", _postgis_factory)
     register_engine_backend("hybrid", _hybrid_factory)
     register_engine_backend("gpkg", _gpkg_factory)
+    register_engine_backend("spatialite", _spatialite_factory)
 
 
 # ---------------------------------------------------------------------------

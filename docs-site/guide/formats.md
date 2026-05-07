@@ -40,7 +40,7 @@ gispulse formats
 | Format | Lecture | Écriture | Notes |
 |--------|:-------:|:--------:|-------|
 | PostGIS | oui | oui | Via `GISPULSE_DSN` (Pro) |
-| SpatiaLite | oui | oui | Mode portable, sessions éphémères |
+| SpatiaLite (`.sqlite`, `.db`) | oui | oui | Engine `spatialite` v1.6.1 — DML triggers AFTER INSERT/UPDATE/DELETE comme GPKG, write-back via pyogrio (`SQLite + SPATIALITE=YES`). Auto-détection : `.sqlite`/`.db` route automatiquement vers cet engine ; un `.gpkg` reste route GPKG. |
 | GeoDatabase ESRI (.gdb) | oui | non | Read-only |
 | OGC WFS | oui | non | Via `OGCLayerLoader` (lazy loading) |
 | OGC API Features | oui | non | Standard OGC moderne |

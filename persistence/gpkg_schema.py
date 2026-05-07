@@ -442,6 +442,33 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection) -> int:
     return len(layer_names)
 
 
+def _bootstrap_gispulse_internals(conn: sqlite3.Connection) -> None:
+    """Create _gispulse_* internal tables + apply pending migrations.
+
+    Shared by ``bootstrap_gpkg_project`` (GPKG file) and
+    ``bootstrap_spatialite_project`` (SpatiaLite file). The two callers
+    differ only in whether they also touch GPKG-specific structures
+    (application_id, gpkg_spatial_ref_sys, gpkg_contents,
+    gpkg_extensions) — those are GPKG identity markers and would
+    corrupt a SpatiaLite file.
+
+    Safe to call multiple times.
+    """
+    _migrate_v1_to_v2(conn)
+    _migrate_v2_to_v3(conn)
+
+    for table_name, ddl in _TABLE_DDL.items():
+        conn.execute(ddl)
+
+    conn.execute(
+        "INSERT INTO _gispulse_kv (key, value, updated_at) "
+        "VALUES ('schema_version', ?, datetime('now')) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+        "updated_at=datetime('now')",
+        (str(SCHEMA_VERSION),),
+    )
+
+
 def bootstrap_gpkg_project(conn: sqlite3.Connection) -> None:
     """Create all _gispulse_* tables and register them in gpkg_extensions.
 
@@ -452,39 +479,38 @@ def bootstrap_gpkg_project(conn: sqlite3.Connection) -> None:
     Safe to call multiple times (all DDL is IF NOT EXISTS) and applies any
     pending schema migration so existing v1 GPKGs are upgraded in-place.
     """
-    # Ensure valid GPKG structure first
     _ensure_gpkg_core_tables(conn)
-
-    # Ensure gpkg_extensions exists
     _ensure_gpkg_extensions_table(conn)
-
-    # Apply v1 → v2 migration BEFORE the IF NOT EXISTS DDL, so the column
-    # is added to existing tables (the DDL would skip the table entirely
-    # because it already exists).
-    _migrate_v1_to_v2(conn)
-    # B-02 (#103): v2 → v3 rebuilds per-layer triggers + adds the
-    # ``_gispulse_origin`` sentinel column. Runs after the internal
-    # tables exist (the migration relies on
-    # :func:`install_change_tracking`, which logs through the schema).
-    _migrate_v2_to_v3(conn)
-
-    # Create internal tables
-    for table_name, ddl in _TABLE_DDL.items():
-        conn.execute(ddl)
+    _bootstrap_gispulse_internals(conn)
+    for table_name in _TABLE_DDL:
         _register_extension(conn, table_name)
-
-    # Schema versioning — refresh to current version (idempotent).
-    conn.execute(
-        "INSERT INTO _gispulse_kv (key, value, updated_at) "
-        "VALUES ('schema_version', ?, datetime('now')) "
-        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
-        "updated_at=datetime('now')",
-        (str(SCHEMA_VERSION),),
-    )
 
     conn.commit()
     logger.info(
         "gpkg_project_bootstrapped: %d internal tables (schema v%d)",
+        len(_TABLE_DDL),
+        SCHEMA_VERSION,
+    )
+
+
+def bootstrap_spatialite_project(conn: sqlite3.Connection) -> None:
+    """Create all _gispulse_* tables on a SpatiaLite database.
+
+    Unlike :func:`bootstrap_gpkg_project` this does NOT touch:
+
+    - ``PRAGMA application_id`` (would mark the file as GPKG and break
+      OGR / QGIS detection).
+    - ``gpkg_spatial_ref_sys`` / ``gpkg_contents`` / ``gpkg_extensions``
+      (SpatiaLite uses ``spatial_ref_sys`` / ``geometry_columns``).
+
+    The same ``_gispulse_*`` internal tables ship — change tracking
+    triggers, change_log, kv version, rules / triggers / scenarios.
+    Safe to call multiple times.
+    """
+    _bootstrap_gispulse_internals(conn)
+    conn.commit()
+    logger.info(
+        "spatialite_project_bootstrapped: %d internal tables (schema v%d)",
         len(_TABLE_DDL),
         SCHEMA_VERSION,
     )
