@@ -346,9 +346,52 @@ Les triggers réagissent aux événements sur les données et exécutent des act
 
 **Types d'actions** : `NOTIFY`, `SET_FIELD`, `UPDATE_AGGREGATE`, `RUN_JOB`, `RUN_GRAPH`, `WEBHOOK`, `ENQUEUE`, `LOG_EVENT`, `SEND_EMAIL`, `RUN_SQL`, etc.
 
-::: tip Cascade
-Les triggers peuvent déclencher d'autres triggers. La profondeur maximale de cascade est limitée à 3 niveaux pour éviter les boucles infinies.
-:::
+### Cascade behaviour of triggers
+
+Les triggers peuvent en déclencher d'autres : si la table `parcels` a un
+trigger `t_parcel_count_communes` qui fait un `UPDATE communes SET …`,
+puis qu'un trigger `t_recalc_density` est branché sur `communes`, alors
+`t_recalc_density` doit voir la modification. GISPulse gère ça en
+deux couches :
+
+1. **Couche fichier (SQLite trigger DDL)** — chaque AFTER UPDATE
+   trigger porte une clause `WHEN` qui suppresse les re-fires quand la
+   ligne vient juste d'être tagguée par un write-back de
+   l'`action_dispatcher` (cf. B-02, v1.5.3). Cela bloque les
+   self-loops sans option utilisateur.
+2. **Couche Python (`evaluate_cascade`)** — le runtime exécute une
+   boucle fixed-point bornée :
+   - À chaque profondeur, `evaluate_changeset_records()` produit la
+     liste des triggers qui fire.
+   - Tant que le passage produit de nouveaux changements, on
+     ré-évalue à profondeur + 1.
+   - Au-delà de `MAX_CASCADE_DEPTH = 3`, le runtime lève
+     `CascadeDepthExceeded` au lieu de tronquer silencieusement.
+
+| Tier | `cascade_depth` autorisé | Comportement |
+|---|---|---|
+| Community | 1 | single-pass effectif (les triggers en cascade ne fire pas dans le même cycle) |
+| Pro | jusqu'à 3 | fixed-point complet avec fail-fast au-delà |
+
+`Trigger.cascade_depth` vaut `1` par défaut — l'expérience hors-boîte
+correspond donc au comportement Community. Pour activer la cascade,
+mets explicitement `cascade_depth: 2` ou `3` sur le trigger qui doit
+réagir à un write-back.
+
+```json
+{
+  "name": "recalc_density",
+  "event": "DATA_CHANGED",
+  "trigger_type": "DML",
+  "cascade_depth": 2,
+  "actions": [
+    { "action_type": "RUN_JOB", "config": { "job_name": "density_per_commune" } }
+  ]
+}
+```
+
+Détails complets : [ADR 0002 — Trigger cascade is bounded fixed-point
+with origin-tagging](https://github.com/imagodata/gispulse/blob/main/docs/adr/0002-trigger-cascade-semantics.md).
 
 ### Webhook actions (Zapier, ArcGIS GeoEvent, Make, n8n, …)
 
