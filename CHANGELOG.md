@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The "Format Frontier" release — DuckDB Spatial as the universal CDC substrate. Adds two new engines (`spatialite`, `duckdb_diff`), brings DML detection to formats that have no native trigger surface (GeoJSON, FlatGeobuf, Shapefile), and closes EPIC #139 (DML semantics ADRs + WAL connection safety).
+## [1.6.2] - 2026-05-07
+
+The "Format Frontier" release — DuckDB Spatial as the universal CDC substrate. Adds two new engines (`spatialite`, `duckdb_diff`), brings DML detection to seven file formats (GPKG, SpatiaLite, GeoJSON, FlatGeobuf, Shapefile, KML, CSV+WKT) — five of which had no native trigger surface — and closes EPIC #139 (DML semantics ADRs + WAL connection safety).
 
 ### Added
 
@@ -23,6 +25,9 @@ The "Format Frontier" release — DuckDB Spatial as the universal CDC substrate.
 - **ADR 0002 — Trigger cascade is bounded fixed-point with origin-tagging.** Documents the existing two-layer cascade design: SQLite `WHEN` clauses block self-loops at the file format level (B-02, v1.5.3), and `evaluate_cascade` runs a fixed-point loop with `MAX_CASCADE_DEPTH = 3` raising `CascadeDepthExceeded` beyond. Community tier capped at depth 1, Pro up to 3. (#142, PR #148)
 - **ADR 0003 — `_gispulse_change_log` is a poll log, not an event store.** Promotes the current `id AUTOINCREMENT` + `changed_at` invariants to documented contract; defers replay / sub-second timestamps / row hashing to a future v1.7+ extension table. (#143, PR #150)
 - **ADR 0004 — DDL hooks out of scope; passive schema-drift detection ships.** Records that ALTER TABLE / DROP TABLE / CREATE INDEX hooks are intentionally absent. The B-13 schema-drift watchdog (#103, v1.5.3) covers ALTER TABLE ADD COLUMN passively — the runtime rebuilds triggers within one watchdog tick and surfaces the new column in subsequent `new_values` payloads. (#144, PR #150)
+- **KML CDC.** Auto-routed for `*.kml` files. Single-file mtime watch + DuckDB `ST_Read` snapshot diff — zero-code-change pass-through of the `DuckDBDiffEngine` shipped in #152. (EPIC #106 slice 1, PR #153)
+- **CSV+WKT CDC.** Auto-routed for `*.csv` files. Pyogrio writes the geometry as a WKT column when invoked with `GEOMETRY=AS_WKT`; DuckDB `ST_Read` decodes it transparently for the diff. (EPIC #106 slice 1, PR #153)
+- **MapInfo TAB companion files.** New `_COMPANION_EXTENSIONS[".tab"]` entry watches the four-file MapInfo set (`.tab / .dat / .map / .id`, plus `.ind` if present) so attribute-only edits (which only touch `.dat`) surface correctly. The full read+diff path is **gated** on the bundled DuckDB GDAL build including the MapInfo driver — currently it does not, so `ST_Read('places.tab')` hangs and the read tests are skipped with a pointed reason. A follow-up slice routing TAB through pyogrio for read would unblock. (EPIC #106 slice 1, PR #153)
 
 ### Changed
 
@@ -33,7 +38,7 @@ The "Format Frontier" release — DuckDB Spatial as the universal CDC substrate.
 - **`docs/adr/0001-dsl-sql-dialect.md` through `docs/adr/0004-ddl-hooks-out-of-scope.md`.** Four ADRs introducing a `docs/adr/` directory; cross-linked from `docs-site/guide/architecture.md` under a new "Décisions de scope (ADRs)" sub-section.
 - **`docs-site/guide/dsl-sql-dialect.md`.** User-facing reference of the DSL SQL dialect contract, with the portable `ST_*` surface, `ST_Transform` arity gotcha, and `engine:` override. Cross-linked from `engines.md`, `dsl-geom-functions.md`, `dsl-validation.md`. (PR #147)
 - **`docs-site/guide/rules.md`.** Cascade tip block expanded into a proper "Cascade behaviour of triggers" sub-section with the tier table, the two-layer explanation, a JSON example showing `cascade_depth: 2`, and a link to ADR 0002. (PR #148)
-- **`docs-site/guide/formats.md`.** SpatiaLite, GeoJSON, FlatGeobuf and Shapefile rows bumped with their CDC support note. New "CDC file-blob (v1.6.1)" section explains the mechanism, formats covered, multi-file companion-watching rule, and known limitations (set-diff = INSERT/DELETE only, polling not inotify, single-layer per file). (PRs #151, #152)
+- **`docs-site/guide/formats.md`.** SpatiaLite, GeoJSON, FlatGeobuf, Shapefile, KML and CSV rows bumped with their CDC support note. New "CDC file-blob" section explains the mechanism, formats covered, multi-file companion-watching rule, and known limitations (set-diff = INSERT/DELETE only, polling not inotify, single-layer per file). (PRs #151, #152, #153)
 
 ### Decision log
 
