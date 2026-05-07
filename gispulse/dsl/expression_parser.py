@@ -72,11 +72,25 @@ class CompilationContext:
         the user does not pass ``epsg=...``. Defaults to ``"EPSG:2154"``
         (Lambert 93) — appropriate for FR-centric datasets; override to
         ``"EPSG:3857"`` for global Web Mercator.
+    current_table:
+        Name of the table the rule is evaluated against. Required by
+        cross-layer fcts when the user writes ``layer='self'``.
+    pk_col:
+        Primary-key column of ``current_table``. Used by
+        ``geom_overlaps_any(exclude_self=True)`` to emit the self-row
+        guard. Defaults to ``"id"``.
+    default_layer_geom:
+        Default geometry column on the cross-source layer (``geom_within``
+        / ``geom_overlaps_any``). Override per-call with
+        ``layer_geom='other'``. Defaults to ``"geom"``.
     """
 
     geom_column: str = "geom"
     source_epsg: str | None = None
     default_metric_epsg: str = "EPSG:2154"
+    current_table: str | None = None
+    pk_col: str = "id"
+    default_layer_geom: str = "geom"
 
     def __post_init__(self) -> None:
         if not _IDENT_RE.match(self.geom_column):
@@ -91,6 +105,18 @@ class CompilationContext:
             raise DSLValidationError(
                 f"default_metric_epsg must look like 'EPSG:NNNN', got "
                 f"{self.default_metric_epsg!r}"
+            )
+        if self.current_table is not None and not _IDENT_RE.match(self.current_table):
+            raise DSLValidationError(
+                f"invalid current_table identifier {self.current_table!r}"
+            )
+        if not _IDENT_RE.match(self.pk_col):
+            raise DSLValidationError(
+                f"invalid pk_col identifier {self.pk_col!r}"
+            )
+        if not _IDENT_RE.match(self.default_layer_geom):
+            raise DSLValidationError(
+                f"invalid default_layer_geom identifier {self.default_layer_geom!r}"
             )
 
 
@@ -357,8 +383,11 @@ class _Compiler:
 
     def _collect_kwargs(
         self, node: ast.Call, spec: GeomFunctionSpec
-    ) -> dict[str, str]:
-        out: dict[str, str] = {}
+    ) -> dict[str, str | bool]:
+        # Subquery fcts (#122 — geom_within / geom_overlaps_any) accept a
+        # bool ``exclude_self`` flag in addition to string identifiers; the
+        # rest of the surface only takes strings.
+        out: dict[str, str | bool] = {}
         for kw in node.keywords:
             if kw.arg is None:
                 raise DSLValidationError(
@@ -372,25 +401,45 @@ class _Compiler:
                         f"{kw.arg!r}; allowed: {list(spec.accepted_kwargs)}",
                     )
                 )
-            if not isinstance(kw.value, ast.Constant) or not isinstance(
-                kw.value.value, str
-            ):
+            if not isinstance(kw.value, ast.Constant):
                 raise DSLValidationError(
                     self._explain(
                         node,
-                        f"{spec.name}({kw.arg}=...) requires a string literal",
+                        f"{spec.name}({kw.arg}=...) requires a literal",
                     )
                 )
-            out[kw.arg] = kw.value.value
+            v = kw.value.value
+            if isinstance(v, bool):
+                # bool is also int — guard before the int branch below
+                if kw.arg != "exclude_self":
+                    raise DSLValidationError(
+                        self._explain(
+                            node,
+                            f"{spec.name}({kw.arg}=...) does not accept a bool",
+                        )
+                    )
+                out[kw.arg] = v
+            elif isinstance(v, str):
+                out[kw.arg] = v
+            else:
+                raise DSLValidationError(
+                    self._explain(
+                        node,
+                        f"{spec.name}({kw.arg}=...) requires a string literal "
+                        f"(got {type(v).__name__})",
+                    )
+                )
         return out
 
     def _render_geom_call(
         self,
         spec: GeomFunctionSpec,
-        kwargs: dict[str, str],
+        kwargs: dict[str, str | bool],
         node: ast.AST,
     ) -> str:
-        epsg = kwargs.get("epsg", self.ctx.default_metric_epsg)
+        if spec.is_subquery:
+            return self._render_subquery_call(spec, kwargs, node)
+        epsg = str(kwargs.get("epsg", self.ctx.default_metric_epsg))
         if spec.crs_aware:
             if not _EPSG_RE.match(epsg):
                 raise DSLValidationError(
@@ -414,6 +463,85 @@ class _Compiler:
             }
         else:
             sub = {"geom": f'"{self.ctx.geom_column}"'}
+        return spec.sql_template.format(**sub)
+
+    def _render_subquery_call(
+        self,
+        spec: GeomFunctionSpec,
+        kwargs: dict[str, str | bool],
+        node: ast.AST,
+    ) -> str:
+        """Emit ``EXISTS (SELECT 1 FROM ... )`` for cross-layer fcts.
+
+        The ``layer`` kwarg is required. ``layer='self'`` resolves to the
+        current table from the compilation context. ``layer_geom`` defaults
+        to ``"geom"`` (override per-call). Each fct adds its own clause:
+
+        - :func:`geom_within` accepts ``match='col'`` to AND the layer
+          row's column with the current row's same-named column (SQL
+          self-reference).
+        - :func:`geom_overlaps_any` accepts ``exclude_self=True`` to skip
+          the row being evaluated using ``ctx.pk_col`` for the join key.
+        """
+        layer = kwargs.get("layer")
+        if not isinstance(layer, str):
+            raise DSLValidationError(
+                self._explain(node, f"{spec.name}() requires layer=<string>")
+            )
+        if layer == "self":
+            if self.ctx.current_table is None:
+                raise DSLValidationError(
+                    self._explain(
+                        node,
+                        f"{spec.name}(layer='self') needs current_table in "
+                        "CompilationContext",
+                    )
+                )
+            layer = self.ctx.current_table
+        if not _IDENT_RE.match(layer):
+            raise DSLValidationError(
+                self._explain(node, f"invalid layer name {layer!r}")
+            )
+
+        layer_geom = kwargs.get("layer_geom", self.ctx.default_layer_geom)
+        if not isinstance(layer_geom, str) or not _IDENT_RE.match(layer_geom):
+            raise DSLValidationError(
+                self._explain(node, f"invalid layer_geom {layer_geom!r}")
+            )
+
+        sub: dict[str, str] = {
+            "geom": f'"{self.ctx.geom_column}"',
+            "layer": layer,
+            "layer_geom": layer_geom,
+        }
+
+        if spec.name == "geom_within":
+            match = kwargs.get("match")
+            if match is not None:
+                if not isinstance(match, str) or not _IDENT_RE.match(match):
+                    raise DSLValidationError(
+                        self._explain(node, f"invalid match column {match!r}")
+                    )
+                sub["match_clause"] = f' AND _L."{match}" = "{match}"'
+            else:
+                sub["match_clause"] = ""
+        elif spec.name == "geom_overlaps_any":
+            exclude_self = kwargs.get("exclude_self", False)
+            if exclude_self is not False and not isinstance(exclude_self, bool):
+                raise DSLValidationError(
+                    self._explain(
+                        node,
+                        f"{spec.name}(exclude_self=...) requires a bool literal "
+                        f"(True / False)",
+                    )
+                )
+            if exclude_self:
+                sub["exclude_self_clause"] = (
+                    f' AND _L."{self.ctx.pk_col}" <> "{self.ctx.pk_col}"'
+                )
+            else:
+                sub["exclude_self_clause"] = ""
+
         return spec.sql_template.format(**sub)
 
     # -- error helpers --------------------------------------------------------
