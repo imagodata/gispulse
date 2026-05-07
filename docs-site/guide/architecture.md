@@ -169,6 +169,15 @@ class Trigger:
 
 **14 types d'actions** : `NOTIFY`, `SET_FIELD`, `UPDATE_AGGREGATE`, `RUN_JOB`, `RUN_GRAPH`, `WEBHOOK`, `ENQUEUE`, `LOG_EVENT`, `SEND_EMAIL`, `RUN_SQL`, etc.
 
+#### Décisions de scope (ADRs)
+
+GISPulse documente les semantics de triggers via les ADRs :
+
+- **[ADR 0001](https://github.com/imagodata/gispulse/blob/main/docs/adr/0001-dsl-sql-dialect.md)** — DuckDB-spatial est le dialecte contrat du DSL (`set_field`, `validate:`, `run_sql`). `engine:` override autorisé pour PostGIS / SpatiaLite.
+- **[ADR 0002](https://github.com/imagodata/gispulse/blob/main/docs/adr/0002-trigger-cascade-semantics.md)** — Cascade = bounded fixed-point (max 3) avec origin-tagging au niveau SQLite. Community capé à 1, Pro jusqu'à 3, fail-fast au-delà.
+- **[ADR 0003](https://github.com/imagodata/gispulse/blob/main/docs/adr/0003-changelog-replay-out-of-scope.md)** — `_gispulse_change_log` reste un poll log, pas un event store. Replay / time-travel / mirror reportés à v1.7+ via table d'extension.
+- **[ADR 0004](https://github.com/imagodata/gispulse/blob/main/docs/adr/0004-ddl-hooks-out-of-scope.md)** — Pas de hooks `on_alter_table` / `on_drop_table`. La détection schema-drift passive (B-13, watchdog) couvre le cas commun ALTER TABLE ADD COLUMN.
+
 ### Scenario
 
 Pipeline multi-jobs composable. Supporte l'exécution séquentielle, indépendante et le mode graphe (DAG).
