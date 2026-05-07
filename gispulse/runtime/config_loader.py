@@ -283,6 +283,10 @@ class ValidateRuleConfigModel(BaseModel):
     tag_field: str | None = None
     message: str | None = None
     enabled: bool = True
+    # v1.6.x — explicit per-rule table override. When unset, the runtime
+    # falls back to ``GISPulseConfig.default_table`` and finally to the
+    # single-table auto-detection (see :func:`build_runtime`).
+    table: str | None = Field(default=None, min_length=1, max_length=120)
 
     @model_validator(mode="after")
     def _validate_tag_field_required_for_tag_mode(self) -> "ValidateRuleConfigModel":
@@ -319,6 +323,24 @@ class RuntimeConfigModel(BaseModel):
     max_batch: int = Field(default=200, ge=1, le=10_000)
 
 
+class LayerSourceConfigModel(BaseModel):
+    """One entry under the top-level ``layers:`` key.
+
+    Declares a cross-source layer reference resolvable by the DSL fcts
+    :func:`geom_within`, :func:`geom_overlaps_any` and
+    :func:`layer_lookup`. The runtime translates each entry into a
+    DuckDB view at session boot (cf
+    :class:`gispulse.runtime.layer_registry.LayerRegistry`).
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=120)
+    uri: str = Field(min_length=1, max_length=2048)
+    table: str | None = Field(default=None, min_length=1, max_length=120)
+    schema_: str = Field(default="public", alias="schema", min_length=1, max_length=120)
+
+
 class GISPulseConfig(BaseModel):
     """Top-level config schema."""
 
@@ -335,6 +357,11 @@ class GISPulseConfig(BaseModel):
             "docs-site/guide/engines.md for the full mapping."
         ),
     )
+    # v1.6.x — fallback for ``validate:`` rules that do not pin a table.
+    # Useful on multi-layer GPKGs when most rules apply to the same
+    # canonical layer. Single-layer GPKGs auto-detect at build_runtime
+    # time and don't need this knob.
+    default_table: str | None = Field(default=None, min_length=1, max_length=120)
     triggers: list[TriggerConfigModel] = Field(default_factory=list)
     validate_rules: list[ValidateRuleConfigModel] = Field(
         default_factory=list,
@@ -344,8 +371,30 @@ class GISPulseConfig(BaseModel):
             "docs-site/guide/dsl-validation.md."
         ),
     )
+    # v1.6.x — cross-source layer registry (#122). Each entry creates a
+    # DuckDB view at runtime so DSL ``layer='communes'`` resolves
+    # against external GPKG / Parquet / PostGIS sources without SQL
+    # rewriting downstream.
+    layers: list[LayerSourceConfigModel] = Field(
+        default_factory=list,
+        description=(
+            "Cross-source layer declarations — see "
+            "docs-site/guide/layers.md."
+        ),
+    )
     security: SecurityConfigModel = Field(default_factory=SecurityConfigModel)
     runtime: RuntimeConfigModel = Field(default_factory=RuntimeConfigModel)
+
+    @model_validator(mode="after")
+    def _validate_layer_names_unique(self) -> "GISPulseConfig":
+        seen: set[str] = set()
+        for layer in self.layers:
+            if layer.name in seen:
+                raise ValueError(
+                    f"duplicate layer name {layer.name!r} in layers:"
+                )
+            seen.add(layer.name)
+        return self
 
     def resolved_engine(self) -> str:
         """Return the engine that will actually run this config.

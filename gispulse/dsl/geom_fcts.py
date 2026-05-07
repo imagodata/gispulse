@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-ReturnType = Literal["double", "integer", "boolean"]
+ReturnType = Literal["double", "integer", "boolean", "scalar"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,11 +44,13 @@ class GeomFunctionSpec:
     """True when ``epsg=`` keyword is meaningful (measure / centroid fns)."""
     accepted_kwargs: tuple[str, ...] = ()
     is_subquery: bool = False
-    """True for cross-layer fcts (``geom_within``, ``geom_overlaps_any``).
+    """True for cross-layer fcts (``geom_within``, ``geom_overlaps_any``,
+    ``layer_lookup``).
 
-    Subquery fcts emit ``EXISTS (SELECT 1 FROM ...)`` and need a richer
-    compilation context (``current_table``, ``pk_col``) to resolve
-    self-references (``layer='self'``, ``exclude_self=true``).
+    Subquery fcts emit either ``EXISTS (SELECT 1 FROM ...)`` (boolean) or
+    ``(SELECT ... FROM ... LIMIT 1)`` (scalar — :func:`layer_lookup`) and
+    need a richer compilation context (``current_table``, ``pk_col``) to
+    resolve self-references (``layer='self'``, ``exclude_self=true``).
     """
 
 
@@ -72,6 +74,18 @@ _TEMPLATE_GEOM_WITHIN = (
 _TEMPLATE_GEOM_OVERLAPS_ANY = (
     'EXISTS (SELECT 1 FROM "{layer}" AS _L '
     'WHERE ST_Overlaps({geom}, _L."{layer_geom}"){exclude_self_clause})'
+)
+
+# v1.6.x #124: scalar lookup of an attribute from a (cross-source) layer.
+# ``match_clause`` resolves to one of:
+#   - ST_Within({geom}, _L."{layer_geom}")          (match='spatial_within')
+#   - ST_Intersects({geom}, _L."{layer_geom}")      (match='spatial_intersects')
+#   - "{self_col}" = _L."{layer_col}"               (match='self.col=layer.col')
+# The compiler emits a deterministic ``LIMIT 1`` so multi-match cases pick the
+# first row rather than raising a cardinality error.
+_TEMPLATE_LAYER_LOOKUP = (
+    '(SELECT _L."{take}" FROM "{layer}" AS _L '
+    'WHERE {match_clause} LIMIT 1)'
 )
 
 
@@ -137,6 +151,14 @@ GEOM_FUNCTIONS: dict[str, GeomFunctionSpec] = {
         sql_template=_TEMPLATE_GEOM_OVERLAPS_ANY,
         crs_aware=False,
         accepted_kwargs=("layer", "exclude_self", "layer_geom"),
+        is_subquery=True,
+    ),
+    "layer_lookup": GeomFunctionSpec(
+        name="layer_lookup",
+        return_type="scalar",
+        sql_template=_TEMPLATE_LAYER_LOOKUP,
+        crs_aware=False,
+        accepted_kwargs=("layer", "match", "take", "layer_geom"),
         is_subquery=True,
     ),
 }

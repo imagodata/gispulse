@@ -541,6 +541,55 @@ class _Compiler:
                 )
             else:
                 sub["exclude_self_clause"] = ""
+        elif spec.name == "layer_lookup":
+            # v1.6.x #124: scalar attribute lookup. ``take`` is the column
+            # to read from the cross-source layer; ``match`` selects how
+            # rows are correlated:
+            #   - "spatial_within"      → ST_Within(self_geom, layer_geom)
+            #   - "spatial_intersects"  → ST_Intersects(self_geom, layer_geom)
+            #   - any other identifier  → attribute equality on that column
+            #     (self.<col> = layer.<col>) — same shorthand as
+            #     ``geom_within(match='code_insee')``.
+            take = kwargs.get("take")
+            if not isinstance(take, str) or not _IDENT_RE.match(take):
+                raise DSLValidationError(
+                    self._explain(
+                        node,
+                        f"layer_lookup() requires take=<identifier>, got "
+                        f"{take!r}",
+                    )
+                )
+            sub["take"] = take
+
+            match = kwargs.get("match", "spatial_within")
+            if not isinstance(match, str):
+                raise DSLValidationError(
+                    self._explain(
+                        node,
+                        "layer_lookup(match=...) requires a string literal",
+                    )
+                )
+            if match == "spatial_within":
+                sub["match_clause"] = (
+                    f'ST_Within({sub["geom"]}, _L."{layer_geom}")'
+                )
+            elif match == "spatial_intersects":
+                sub["match_clause"] = (
+                    f'ST_Intersects({sub["geom"]}, _L."{layer_geom}")'
+                )
+            elif _IDENT_RE.match(match):
+                # Attribute-equality shorthand: ``match='code_insee'`` →
+                # ``"code_insee" = _L."code_insee"``.
+                sub["match_clause"] = f'"{match}" = _L."{match}"'
+            else:
+                raise DSLValidationError(
+                    self._explain(
+                        node,
+                        f"layer_lookup(match=...) must be 'spatial_within', "
+                        f"'spatial_intersects', or a column identifier; "
+                        f"got {match!r}",
+                    )
+                )
 
         return spec.sql_template.format(**sub)
 

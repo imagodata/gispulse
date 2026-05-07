@@ -57,6 +57,24 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 log = get_logger(__name__)
 
 
+class ValidationTableResolutionError(ValueError):
+    """Raised when ``build_runtime`` cannot pick a table for ``validate:`` rules.
+
+    The runtime evaluates each rule against ``"<table>" WHERE "<pk>" = ?``
+    so each rule needs a concrete table at boot time. The auto-wire
+    falls back through three sources, and surfaces this error when none
+    answer:
+
+    1. ``rule.table`` (per-rule pin in YAML).
+    2. ``default_table`` argument (or top-level ``default_table:`` in
+       YAML).
+    3. The single user table on the GPKG when there is exactly one.
+
+    When the GPKG holds multiple tables and the operator pinned
+    nothing, we list the candidates so they can pick one.
+    """
+
+
 # ---------------------------------------------------------------------------
 # NullEventHub — no-op stand-in for adapters/http/event_hub.EventHub
 # ---------------------------------------------------------------------------
@@ -205,6 +223,77 @@ def _check_pragmas(engine: "GeoPackageEngine") -> None:
         )
 
 
+def _list_user_tables(gpkg_path: Path) -> list[str]:
+    """Return the user-facing layer names exposed by ``gpkg_path``.
+
+    Reads ``gpkg_contents`` directly so internal GISPulse bookkeeping
+    tables (``_gispulse_*``, ``gpkg_*``) are filtered out by virtue of
+    not being declared as ``features`` / ``attributes`` rows there.
+    pyogrio's ``list_layers`` returns everything including the
+    ``_gispulse_*`` tables, which would confuse the auto-detect path.
+    """
+    try:
+        conn = sqlite3.connect(str(gpkg_path))
+        try:
+            cur = conn.execute(
+                "SELECT table_name FROM gpkg_contents "
+                "WHERE data_type IN ('features', 'attributes') "
+                "ORDER BY table_name"
+            )
+            return [str(row[0]) for row in cur.fetchall()]
+        finally:
+            conn.close()
+    except sqlite3.Error:  # pragma: no cover — defensive
+        return []
+
+
+def resolve_validation_table(
+    rule: Any,
+    *,
+    gpkg_path: Path,
+    default_table: str | None,
+) -> str:
+    """Pick the table a ``validate:`` rule should run against.
+
+    Priority:
+      1. ``rule.table`` (operator pinned the rule explicitly).
+      2. ``default_table`` (top-level YAML / ``build_runtime`` arg).
+      3. Single user table on the GPKG → auto-select it.
+      4. Otherwise → :class:`ValidationTableResolutionError` with the
+         list of candidate tables, so the operator can pick one.
+
+    The resolver does not read the rule's SQL; it relies entirely on
+    the metadata pins. ``layer='self'`` references inside the rule
+    expression are resolved separately by the DSL compiler against
+    :class:`gispulse.dsl.CompilationContext.current_table` (which
+    receives whatever table this resolver returns).
+    """
+    explicit = getattr(rule, "table", None)
+    if explicit:
+        return str(explicit)
+    if default_table:
+        return default_table
+
+    layers = _list_user_tables(gpkg_path)
+    if len(layers) == 1:
+        return layers[0]
+
+    rule_id = getattr(rule, "id", "<unknown>")
+    if not layers:
+        raise ValidationTableResolutionError(
+            f"validate rule {rule_id!r}: cannot pick a target table — "
+            f"the GPKG at {gpkg_path} has no user tables. Set "
+            f"``rule.table`` or top-level ``default_table:`` in your "
+            f"triggers.yaml."
+        )
+    raise ValidationTableResolutionError(
+        f"validate rule {rule_id!r}: cannot pick a target table — "
+        f"the GPKG at {gpkg_path} has {len(layers)} user tables "
+        f"({sorted(layers)}). Set ``rule.table`` or top-level "
+        f"``default_table:`` in your triggers.yaml."
+    )
+
+
 def build_runtime(
     gpkg_path: str | Path,
     triggers: Sequence["Trigger"],
@@ -216,6 +305,10 @@ def build_runtime(
     dataset_id: str = "__cli__",
     sql_executor: Callable[..., Any] | None = None,
     webhook_client: Callable[[str, dict[str, Any]], None] | None = None,
+    validate_rules: Sequence[Any] | None = None,
+    default_table: str | None = None,
+    layer_sources: Sequence[Any] | None = None,
+    source_epsg: str | None = None,
 ) -> HeadlessRuntime:
     """Wire a headless trigger runtime over a single GPKG file.
 
@@ -248,6 +341,30 @@ def build_runtime(
         webhook_client:    Optional ``(url, payload) -> None`` callable
                            injected into the dispatcher. Defaults to
                            :class:`HttpWebhookClient`.
+        validate_rules:    Optional list of ``ValidateRuleConfigModel``
+                           (or any object exposing ``id`` / ``rule`` /
+                           ``mode`` / ``tag_field`` / ``message`` /
+                           ``enabled`` / ``table``). When non-empty the
+                           runtime spins up a :class:`ValidationRunner`,
+                           wires it onto the change-log watcher, and
+                           auto-picks a target table per rule (cf
+                           :func:`resolve_validation_table`).
+        default_table:     Fallback table for ``validate:`` rules that
+                           have no ``rule.table``. Single-table GPKGs
+                           don't need this knob.
+        layer_sources:     Optional list of
+                           :class:`gispulse.runtime.config_loader.LayerSourceConfigModel`
+                           (or duck-typed objects with ``name`` /
+                           ``uri`` / ``table`` / ``schema_``) used to
+                           build a :class:`LayerRegistry`. Cross-source
+                           DSL references (``layer='communes'``)
+                           resolve through these declarations at the
+                           validation runner's session ATTACH time.
+        source_epsg:       CRS of the dataset's geometry column
+                           (``"EPSG:2154"``…). Forwarded to
+                           :func:`compile_validate_rules`. Optional;
+                           only required when validate rules use
+                           CRS-aware geom fcts.
 
     Returns:
         A :class:`HeadlessRuntime` ready for ``run_once()`` or daemon
@@ -256,6 +373,8 @@ def build_runtime(
     Raises:
         ValueError:    Empty ``dataset_id`` or non-positive intervals.
         FileNotFoundError: ``gpkg_path`` does not exist.
+        ValidationTableResolutionError: when ``validate_rules`` is
+            non-empty and a rule's target table cannot be resolved.
     """
     # Lazy imports keep CLI startup snappy: we only need rules / esb
     # when the user actually runs ``triggers``.
@@ -353,6 +472,96 @@ def build_runtime(
         # pick up changes on the next tick (matches the API behaviour).
         return [t for t in trigger_list if getattr(t, "enabled", True)]
 
+    # ---- Optional ValidationRunner wiring (v1.6.x) -------------------
+    # The runner is engine-agnostic: it talks to a ``sql_evaluator``
+    # callable. We build a thin DuckDB session that ATTACHes the GPKG
+    # and any cross-source layers declared via ``layer_sources``, then
+    # routes ``ST_*`` calls through the spatial extension.
+    validation_runner = None
+    rules_seq = list(validate_rules) if validate_rules else []
+    if rules_seq:
+        from gispulse.runtime.layer_registry import LayerRegistry, LayerSource
+        from gispulse.runtime.validation_runner import (
+            ValidationRunner,
+            compile_validate_rules,
+        )
+
+        def _resolver(rule: Any) -> str:
+            return resolve_validation_table(
+                rule, gpkg_path=gpkg, default_table=default_table
+            )
+
+        compile_result = compile_validate_rules(
+            rules_seq,
+            table=default_table or "",
+            source_epsg=source_epsg,
+            table_resolver=_resolver,
+        )
+        if compile_result.errors:
+            # Surface compile errors loudly. ``triggers validate`` already
+            # catches DSL errors at config-load time, so reaching here
+            # means a rule that passed schema validation still fails to
+            # compile in the runtime CRS context — typically a missing
+            # ``source_epsg`` for CRS-aware fcts.
+            details = "; ".join(
+                f"{e.rule_id}: {e.error}" for e in compile_result.errors
+            )
+            raise ValueError(
+                f"validate rules failed to compile in build_runtime: {details}"
+            )
+
+        registry = LayerRegistry()
+        for src in layer_sources or ():
+            registry.register(
+                LayerSource(
+                    name=src.name,
+                    uri=src.uri,
+                    table=getattr(src, "table", None),
+                    schema=getattr(src, "schema_", "public") or "public",
+                )
+            )
+
+        from gispulse.runtime.duckdb_engine import get_spatial_connection
+
+        # The DuckDB session is held by the closure below for the
+        # evaluator's lifetime; it's torn down with ``runtime.close()``
+        # via the watcher's lifecycle (no leak — DuckDB connections are
+        # cleaned up on GC). We ATTACH the project GPKG read-only, then
+        # mirror each user table as a view in the in-memory catalog so
+        # bare-name references in the compiled rule SQL resolve without
+        # qualifying every identifier. Cross-source layers (#122) ride
+        # on the same in-memory catalog via :class:`LayerRegistry`.
+        _conn = get_spatial_connection()
+        if "'" in str(gpkg) or "\x00" in str(gpkg):
+            raise ValueError(
+                f"gpkg_path contains illegal characters: {gpkg!r}"
+            )
+        _conn.execute(
+            f"ATTACH '{gpkg}' AS __gispulse_gpkg (TYPE SQLITE, READ_ONLY)"
+        )
+        # Pre-create a view per project user table so bare-name SQL
+        # ``FROM "parcels"`` works without ``USE __gispulse_gpkg``
+        # (which would block the cross-source CREATE VIEW because the
+        # read-only ATTACH refuses DDL).
+        for tbl in _list_user_tables(gpkg):
+            _conn.execute(
+                f'CREATE OR REPLACE VIEW "{tbl}" AS '
+                f'SELECT * FROM __gispulse_gpkg."{tbl}"'
+            )
+        if len(registry) > 0:
+            registry.install(_conn)
+
+        def _sql_evaluator(sql: str, params: list[Any]) -> list[Any]:
+            return _conn.execute(sql, params).fetchall()
+
+        validation_runner = ValidationRunner(
+            compile_result.rules,
+            _sql_evaluator,
+            hub=hub,
+            dataset_id=dataset_id,
+            action_dispatcher=dispatcher,
+        )
+
     watcher = ChangeLogWatcher(
         engine=engine,
         event_hub=hub,
@@ -362,12 +571,15 @@ def build_runtime(
         bulk_threshold=bulk_threshold,
         triggers_provider=_triggers_provider,
         action_dispatcher=dispatcher,
+        validation_runner=validation_runner,
     )
 
     log.info(
         "headless_runtime_built",
         gpkg=str(gpkg),
         triggers=len(trigger_list),
+        validate_rules=len(rules_seq),
+        layer_sources=len(layer_sources or ()),
         webhook_allowlist=sorted(allowlist) if allowlist else None,
     )
 
@@ -382,4 +594,10 @@ def build_runtime(
     )
 
 
-__all__ = ["HeadlessRuntime", "NullEventHub", "build_runtime"]
+__all__ = [
+    "HeadlessRuntime",
+    "NullEventHub",
+    "ValidationTableResolutionError",
+    "build_runtime",
+    "resolve_validation_table",
+]

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-05-07
+
+Same-day follow-up to v1.6.0. Closes the 3 deferred items from the v1.6.0 sprint kickoff in a single PR (#138) so the v1.6.x line ships its full promised surface — cross-source push-down, scalar lookup, and zero-config validate auto-wire — instead of trickling them across point releases.
+
+### Added
+
+- **`layer_lookup(layer, match, take, layer_geom)` DSL fct.** Scalar attribute lookup against a (cross-source) layer with three match modes: `spatial_within` (default), `spatial_intersects`, or any column identifier as attribute-equality shorthand (consistent with `geom_within(match='code_insee')`). Compiles to `(SELECT _L."<take>" FROM "<layer>" AS _L WHERE <pred> LIMIT 1)`. (#124, PR #138)
+- **Cross-source layer registry.** New `gispulse.runtime.layer_registry.LayerRegistry` ATTACHes external GeoPackage / Parquet / PostgreSQL sources read-only and creates a DuckDB view per declared layer in the in-memory catalog. The DSL emits bare-name `FROM "communes"`; DuckDB's optimiser pushes spatial and attribute predicates down to the underlying scanner — no SQL rewriting downstream. (#122, PR #138)
+- **Top-level `layers:` block in `triggers.yaml`.** Declarative cross-source layer references via `LayerSourceConfigModel`. Duplicate-name guard at config-load time. (#122, PR #138)
+- **`build_runtime` validate auto-wire.** New `validate_rules`, `default_table`, `layer_sources`, `source_epsg` kwargs wire a `ValidationRunner` directly onto the change-log watcher. The DuckDB session ATTACHes the project GPKG read-only and mirrors each user table as a view in the in-memory catalog so bare-name SQL resolves while cross-source `CREATE VIEW` statements remain legal. (PR #138)
+- **Per-rule `table:` and top-level `default_table:`.** `ValidateRuleConfigModel.table` lets each `validate:` rule pin its target table; `GISPulseConfig.default_table` provides a config-level fallback. (PR #138)
+
+### Changed
+
+- **`compile_validate_rules` accepts a `table_resolver` callable.** The signature now supports per-rule resolution via a `rule -> table` callable. The legacy `table=` parameter is preserved for v1.6.0 callers (single-table use). (PR #138)
+
+### Decision log
+
+- **"Quelle table" question for `validate:` rules — closed.** `build_runtime` resolves the target table per rule in priority order: `rule.table` (operator pin) > `default_table` (config fallback) > GPKG single-table autodetect > `ValidationTableResolutionError` listing the candidate tables. Single-table GPKGs (the dominant case) get zero-config UX; multi-table GPKGs surface a clear actionable error. (PR #138)
+
 ## [1.6.0] - 2026-05-07
 
 The "DuckDB Spatial Inside" release. Closes EPIC #104 — a one-day cascade of 7 PRs (#129 → #135) lands the foundation, the DSL geom function whitelist, the granular DML verbs, the declarative `validate:` block end-to-end, and the long-standing B-08 DELETE predicate gap.
