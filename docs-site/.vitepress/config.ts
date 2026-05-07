@@ -125,6 +125,7 @@ const frSidebar = {
         { text: 'Parcelles', link: '/guide/walkthroughs/parcels' },
         { text: 'Isochrone', link: '/guide/walkthroughs/isochrone' },
         { text: 'Audit', link: '/guide/walkthroughs/audit' },
+        { text: 'GeoJSON CDC', link: '/guide/walkthroughs/geojson-cdc' },
       ],
     },
   ],
