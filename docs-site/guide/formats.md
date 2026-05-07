@@ -21,7 +21,7 @@ gispulse formats
 | `.gpkg` | GeoPackage | oui | oui | Recommandé — multi-layers, styles, performant |
 | `.fgb` | FlatGeobuf | oui | oui | Ultra-rapide pour gros volumes, indexé spatialement |
 | `.parquet` | GeoParquet | oui | oui | Optimal pour données tabulaires larges, natif DuckDB |
-| `.geojson` | GeoJSON | oui | oui | Standard web, interopérable |
+| `.geojson` | GeoJSON | oui | oui | Standard web, interopérable. **CDC v1.6.1** : engine `duckdb_diff` détecte INSERT/DELETE par mtime + DuckDB snapshot diff (UPDATE non détectable, voir notes ci-dessous). |
 | `.geojsonl` | GeoJSON Lines | oui | oui | Streaming, gros volumes |
 
 ### Formats courants
@@ -44,6 +44,18 @@ gispulse formats
 | GeoDatabase ESRI (.gdb) | oui | non | Read-only |
 | OGC WFS | oui | non | Via `OGCLayerLoader` (lazy loading) |
 | OGC API Features | oui | non | Standard OGC moderne |
+
+### CDC file-blob (v1.6.1)
+
+L'engine `duckdb_diff` apporte la détection DML aux formats sans triggers natifs. Activé automatiquement pour `.geojson` (et progressivement `.fgb`, `.shp`, `.kml`, `.csv`, `.tab`, `.dxf`) — auto-routing depuis l'URI dans `triggers.yaml`.
+
+**Mécanisme** : `mtime` watch + DuckDB `ST_Read` snapshot diff. Au premier poll chaque feature emerge en `INSERT`. À chaque édition (QGIS, vim, script tiers), le moteur compare le hash (`md5(WKB || properties)`) de chaque ligne contre le snapshot persistant en sidecar `.gispulse-snapshot.duckdb` à côté du fichier.
+
+**Limitations connues v1.6.1** :
+- `UPDATE` est **indétectable** (pas de PK stable dans le format) — un edit produit `DELETE` (vieux hash) + `INSERT` (nouveau hash). Déclarer `when: [INSERT, DELETE]` dans le trigger pour réagir aux deux côtés.
+- Polling uniquement (pas d'inotify) — l'intervalle est fixé par le watcher loop.
+- Single-layer par fichier (multi-layers = pipeline GPKG).
+- Pas d'exécution SQL contre le fichier (`execute_sql` lève `NotImplementedError`) — pour ad-hoc SQL utilisez l'engine `duckdb` standalone via `gispulse run`.
 
 ### Lecture par lots (chunked)
 

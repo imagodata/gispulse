@@ -114,13 +114,26 @@ def _spatialite_factory(*, dsn: str | None = None, duckdb_path: str = ":memory:"
     return SpatiaLiteEngine(path=path)
 
 
+def _duckdb_diff_factory(*, dsn: str | None = None, duckdb_path: str = ":memory:", file_path: str | None = None, gpkg_path: str | None = None, **_kw: Any) -> SpatialEngine:
+    # Accept ``gpkg_path`` as an alias for routing-uniformity — the
+    # config_loader passes the dataset URI through that name for every
+    # file-backed engine. The ``duckdb_path`` kwarg is silently dropped;
+    # this engine uses an ephemeral in-memory DuckDB for diff snapshots,
+    # persisted as a sidecar next to the file.
+    path = file_path or gpkg_path or settings.database.gpkg_path
+    from persistence.duckdb_diff_engine import DuckDBDiffEngine
+
+    return DuckDBDiffEngine(path=path)
+
+
 def _register_builtins() -> None:
-    """Register the five built-in engine backends."""
+    """Register the built-in engine backends."""
     register_engine_backend("duckdb", _duckdb_factory)
     register_engine_backend("postgis", _postgis_factory)
     register_engine_backend("hybrid", _hybrid_factory)
     register_engine_backend("gpkg", _gpkg_factory)
     register_engine_backend("spatialite", _spatialite_factory)
+    register_engine_backend("duckdb_diff", _duckdb_diff_factory)
 
 
 # ---------------------------------------------------------------------------
