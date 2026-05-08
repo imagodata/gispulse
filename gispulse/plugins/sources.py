@@ -18,7 +18,7 @@ from core.models import OGCSourceConfig
 
 if TYPE_CHECKING:
     from gispulse.adapters.apicarto import ApiCartoGeoJsonClient
-    from gispulse.adapters.ogc.wfs_client import fetch_wfs as _FetchWfsFn
+    from gispulse.adapters.ogc.wfs_client import fetch_wfs
 
 
 def get_catalog_entry(entry_id: str) -> CatalogEntry | None:
