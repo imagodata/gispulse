@@ -128,7 +128,7 @@ class RasterLayer:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+@dataclass(kw_only=True)
 class OGCSourceConfig:
     """Configuration for a remote OGC service (WFS or OGC API Features)."""
 

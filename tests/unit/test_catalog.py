@@ -4,6 +4,64 @@ from catalog import registry
 from catalog.models import CatalogDomain, ProjectionEntry, BasemapEntry, FluxEntry
 
 
+GPU_FLUX_ENTRIES = {
+    "flux:ign:ign-gpu-zone-urba-wfs": {
+        "layer_name": "wfs_du:zone_urba",
+        "tags": {"gpu", "plu", "urbanisme", "zonage", "france", "vector"},
+    },
+    "flux:ign:ign-gpu-prescription-surf-wfs": {
+        "layer_name": "wfs_du:prescription_surf",
+        "tags": {"gpu", "plu", "urbanisme", "prescription", "france", "vector"},
+    },
+    "flux:ign:ign-gpu-doc-urba-wfs": {
+        "layer_name": "wfs_du:doc_urba",
+        "tags": {"gpu", "plu", "urbanisme", "document", "france", "vector"},
+    },
+    "flux:ign:ign-gpu-prescription-lin-wfs": {
+        "layer_name": "wfs_du:prescription_lin",
+        "tags": {"gpu", "plu", "urbanisme", "prescription", "lineaire", "france", "vector"},
+    },
+    "flux:ign:ign-gpu-prescription-pct-wfs": {
+        "layer_name": "wfs_du:prescription_pct",
+        "tags": {"gpu", "plu", "urbanisme", "prescription", "ponctuel", "france", "vector"},
+    },
+    "flux:ign:ign-gpu-info-surf-wfs": {
+        "layer_name": "wfs_du:info_surf",
+        "tags": {"gpu", "plu", "urbanisme", "information", "surfacique", "france", "vector"},
+    },
+    "flux:ign:ign-gpu-info-lin-wfs": {
+        "layer_name": "wfs_du:info_lin",
+        "tags": {"gpu", "plu", "urbanisme", "information", "lineaire", "france", "vector"},
+    },
+    "flux:ign:ign-gpu-info-pct-wfs": {
+        "layer_name": "wfs_du:info_pct",
+        "tags": {"gpu", "plu", "urbanisme", "information", "ponctuel", "france", "vector"},
+    },
+    "flux:ign:ign-gpu-secteur-cc-wfs": {
+        "layer_name": "wfs_du:secteur_cc",
+        "tags": {"gpu", "carte-communale", "urbanisme", "secteur", "france", "vector"},
+    },
+}
+GPU_FLUX_IDS = set(GPU_FLUX_ENTRIES)
+SUP_FLUX_ENTRIES = {
+    "flux:ign:ign-sup-servitude-wfs": "wfs_sup:servitude",
+    "flux:ign:ign-sup-assiette-s-wfs": "wfs_sup:assiette_sup_s",
+    "flux:ign:ign-sup-assiette-l-wfs": "wfs_sup:assiette_sup_l",
+    "flux:ign:ign-sup-assiette-p-wfs": "wfs_sup:assiette_sup_p",
+    "flux:ign:ign-sup-generateur-s-wfs": "wfs_sup:generateur_sup_s",
+    "flux:ign:ign-sup-generateur-l-wfs": "wfs_sup:generateur_sup_l",
+    "flux:ign:ign-sup-generateur-p-wfs": "wfs_sup:generateur_sup_p",
+    "flux:ign:ign-sup-acte-wfs": "wfs_sup:acte_sup",
+}
+GPU_WFS_SERVICE_URL = "https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0"
+APICARTO_NATURE_ENTRIES = {
+    "opendata:ign:apicarto-nature-natura-habitat": "/api/nature/natura-habitat",
+    "opendata:ign:apicarto-nature-natura-oiseaux": "/api/nature/natura-oiseaux",
+    "opendata:ign:apicarto-nature-znieff1": "/api/nature/znieff1",
+    "opendata:ign:apicarto-nature-znieff2": "/api/nature/znieff2",
+}
+
+
 class TestCatalogRegistry:
     def test_providers_registered(self):
         providers = registry.list_providers()
@@ -50,6 +108,46 @@ class TestCatalogRegistry:
         assert len(osm) > 0
         assert all(e.provider == "ign" for e in ign)
         assert all(e.provider == "osm" for e in osm)
+
+    def test_gpu_flux_entries_resolve(self):
+        for entry_id, expected in GPU_FLUX_ENTRIES.items():
+            entry = registry.get_entry(entry_id)
+            assert entry is not None, entry_id
+            assert isinstance(entry, FluxEntry)
+            assert entry.protocol == "wfs"
+            assert entry.service_url == GPU_WFS_SERVICE_URL
+            assert entry.layer_name == expected["layer_name"]
+            assert set(entry.tags) == expected["tags"]
+
+    def test_sup_flux_entries_resolve(self):
+        for entry_id, layer_name in SUP_FLUX_ENTRIES.items():
+            entry = registry.get_entry(entry_id)
+            assert entry is not None, entry_id
+            assert isinstance(entry, FluxEntry)
+            assert entry.protocol == "wfs"
+            assert entry.service_url == GPU_WFS_SERVICE_URL
+            assert entry.layer_name == layer_name
+            assert "sup" in entry.tags
+            assert "servitude" in entry.tags
+            # SUP are part of the urbanism regulatory layer family;
+            # callers filtering by `urbanisme` must pick them up.
+            assert "urbanisme" in entry.tags
+
+    def test_apicarto_nature_entries_resolve_from_catalog(self):
+        for entry_id, endpoint_path in APICARTO_NATURE_ENTRIES.items():
+            entry = registry.get_entry(entry_id)
+
+            assert entry is not None, entry_id
+            assert entry.provider == "ign"
+            assert entry.source_url == f"https://apicarto.ign.fr{endpoint_path}"
+            assert entry.format == "geojson"
+            assert entry.metadata["endpoint_path"] == endpoint_path
+            assert entry.metadata["query_param"] == "geom"
+
+    def test_search_flux_gpu_returns_gpu_entries(self):
+        results = registry.search(domain=CatalogDomain.FLUX, search="gpu")
+        ids = {entry.id for entry in results}
+        assert GPU_FLUX_IDS <= ids
 
     def test_search_opendata_ign(self):
         results = registry.search(domain=CatalogDomain.OPENDATA, provider="ign")

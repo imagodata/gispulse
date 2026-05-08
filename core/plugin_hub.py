@@ -12,12 +12,14 @@ middleware, billing and licence providers at process start.
 """
 from __future__ import annotations
 
+import re
 from importlib.metadata import entry_points
 from threading import Lock
 from typing import Any, ClassVar
 
 from core.logging import get_logger
 from core.plugin_contracts import (
+    PROTOCOL_VERSION,
     AuthProvider,
     BillingProvider,
     Connector,
@@ -229,6 +231,8 @@ def _safe_load(ep, kind: str):
 
     Plugins may declare an entry-point pointing to either an instance
     (``module:factory``) or a class (``module:Factory``); we accept both.
+    After loading, checks ``requires_protocol`` against ``PROTOCOL_VERSION``
+    and warns if the plugin's declared specifier is not satisfied.
     """
     try:
         obj = ep.load()
@@ -241,4 +245,87 @@ def _safe_load(ep, kind: str):
         except Exception as exc:
             log.warning("plugin_instantiate_failed", kind=kind, name=ep.name, error=str(exc))
             return None
+    _check_protocol_version(obj, ep.name, kind)
     return obj
+
+
+# ---------------------------------------------------------------------------
+# Protocol version check (stdlib-only, no `packaging` dep)
+# ---------------------------------------------------------------------------
+
+_SPEC_RE = re.compile(
+    r"(?P<op>>=|<=|!=|==|>|<|~=)\s*(?P<ver>\d+(?:\.\d+)*)"
+)
+
+
+def _version_tuple(ver: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in ver.split("."))
+
+
+def _version_satisfies(specifier_str: str, version: str) -> bool:
+    """Return True if *version* satisfies all clauses in *specifier_str*.
+
+    Supports: ``>=``, ``<=``, ``!=``, ``==``, ``>``, ``<``.
+    Multiple clauses may be comma-separated (e.g. ``">=1.0,<2.0"``).
+    """
+    v = _version_tuple(version)
+    for clause in specifier_str.split(","):
+        clause = clause.strip()
+        m = _SPEC_RE.fullmatch(clause)
+        if m is None:
+            # Unrecognised clause — skip rather than hard-fail.
+            continue
+        op, req_ver = m.group("op"), m.group("ver")
+        r = _version_tuple(req_ver)
+        if op == ">=":
+            if not (v >= r):
+                return False
+        elif op == "<=":
+            if not (v <= r):
+                return False
+        elif op == "!=":
+            if not (v != r):
+                return False
+        elif op == "==":
+            if not (v == r):
+                return False
+        elif op == ">":
+            if not (v > r):
+                return False
+        elif op == "<":
+            if not (v < r):
+                return False
+        elif op == "~=":
+            # Compatible release: >=X.Y and ==X.*
+            if len(r) < 2:
+                if not (v >= r):
+                    return False
+            else:
+                prefix = r[:-1]
+                if not (v >= r and v[: len(prefix)] == prefix):
+                    return False
+    return True
+
+
+def _check_protocol_version(obj: object, name: str, kind: str) -> None:
+    """Warn when the plugin's ``requires_protocol`` is not satisfied."""
+    spec = getattr(obj, "requires_protocol", None)
+    if spec is None:
+        return
+    if not isinstance(spec, str):
+        log.warning(
+            "plugin_protocol_version_invalid",
+            kind=kind,
+            name=name,
+            requires_protocol=repr(spec),
+            reason="requires_protocol must be a string",
+        )
+        return
+    if not _version_satisfies(spec, PROTOCOL_VERSION):
+        log.warning(
+            "plugin_protocol_version_mismatch",
+            kind=kind,
+            name=name,
+            requires_protocol=spec,
+            host_protocol_version=PROTOCOL_VERSION,
+        )
