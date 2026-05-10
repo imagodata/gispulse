@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Cocarte Map entity (Sprint 1.1 backend foundation, imagodata/gispulse-portal#56).** First-class `CocarteMap` domain entity (`core.models`, alias `Map`), `MapVisibility` enum (`private | unlisted | public`), and `core.slug` helpers (NFKD diacritics, reserved-route blocklist, deduped allocation). New `persistence.map_io.MapRepository` wraps `SQLiteRepository[CocarteMap]` and adds Cocarte-specific queries: `get_by_slug`, `get_by_share_token` (constant-time via `hmac.compare_digest`), `count_for_owner` / `list_for_owner`, `soft_delete` / `restore` / `purge_older_than`, `allocate_slug`. Four idempotent indices (`maps_slug_idx` UNIQUE, `maps_owner_idx`, `maps_share_token_idx` UNIQUE partial, `maps_active_idx` partial). HTTP router `/maps` (cocarte tag) ships 7 endpoints — CRUD + restore + share-token rotation — gated by `_MAP_LIMITS` mirroring `core/pricing_catalog.yml` (community 5 / pro 100 / team+ unlimited). `gispulse.adapters.http.dependencies.get_map_repo` returns 503 in in-memory mode; the Map repo is SQLite-only by design. (PR #168)
+- **ADR 0005 — Per-user entity ownership for Cocarte.** Records that `CocarteMap` is the first GISPulse entity with a participating `owner_id` column, sets the convention for v1.8+ user-facing entities (mini-apps, comments, gallery), and explicitly bounds the change: no retroactive multi-tenancy on `Project` / `Trigger` / `Rule`. Single-user / legacy instances continue to work with `owner_id IS NULL` rows. (PR #168)
+- **`maps:` limits in `core/pricing_catalog.yml`.** Adds the new feature limit to all four tiers: community 5, pro 100, team unlimited, enterprise unlimited. (PR #168)
+
+### Changed
+
+- **`SCHEMA_VERSION` 3 → 4.** New `maps` table in `_TABLE_DEFS`; serialisation column sets (`JSON_COLUMNS`, `DATETIME_COLUMNS`, `UUID_COLUMNS`) extended with the Map-specific fields. Pre-flight migration test (`tests/unit/test_map_migration.py`) seeds a v1.6-shaped DB and asserts that startup under v1.7 (a) creates the `maps` table + 4 indices idempotently, (b) leaves pre-existing `projects` rows intact, (c) survives repeated startup. (PR #168)
+
 ## [1.6.2] - 2026-05-07
 
 The "Format Frontier" release — DuckDB Spatial as the universal CDC substrate. Adds two new engines (`spatialite`, `duckdb_diff`), brings DML detection to seven file formats (GPKG, SpatiaLite, GeoJSON, FlatGeobuf, Shapefile, KML, CSV+WKT) — five of which had no native trigger surface — and closes EPIC #139 (DML semantics ADRs + WAL connection safety).
