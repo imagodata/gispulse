@@ -39,6 +39,7 @@ from gispulse.adapters.http.routers.filter_router import router as filter_router
 from gispulse.adapters.http.routers.esb_router import router as esb_router
 from gispulse.adapters.http.routers.jobs_router import router as jobs_router, recover_stale_jobs
 from gispulse.adapters.http.routers.portal_router import router as portal_router
+from gispulse.adapters.http.routers.cocarte_public_router import router as cocarte_public_router
 from gispulse.adapters.http.routers.maps_router import router as maps_router
 from gispulse.adapters.http.routers.projects_router import router as projects_router
 from gispulse.adapters.http.routers.rules_router import router as rules_router
@@ -804,6 +805,12 @@ def create_app(
     # only whitelists the dryrun POST.
     app.include_router(examples_router)
     log.info("examples_router_mounted")
+
+    # Cocarte public viewer (`/c/{slug}` + `/c/by-token/{token}`) — auth-bypassed
+    # like the examples router; both portal and full modes. Sanitises owner_id
+    # and share_token from responses (see `MapPublic` schema). Issue #59.
+    app.include_router(cocarte_public_router)
+    log.info("cocarte_public_router_mounted")
 
     if is_portal:
         # Portal mode: no auth on routers
