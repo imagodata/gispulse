@@ -30,6 +30,7 @@ class TriggerEvent(str, Enum):
 
 class DataCategory(str, Enum):
     """Catégorie de données spatiales supportées par GISPulse."""
+
     VECTOR = "vector"
     RASTER = "raster"
     POINT_CLOUD = "point_cloud"
@@ -41,6 +42,7 @@ class DataCategory(str, Enum):
 
 class ProcessingMode(str, Enum):
     """Mode de traitement des jobs et des triggers."""
+
     SYNC = "SYNC"
     ASYNC = "ASYNC"
     HYBRID = "HYBRID"
@@ -48,6 +50,7 @@ class ProcessingMode(str, Enum):
 
 class MessageStatus(str, Enum):
     """État d'un message dans le bus ESB de GISPulse."""
+
     NEW = "NEW"
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
@@ -58,12 +61,14 @@ class MessageStatus(str, Enum):
 
 class ExecutionMode(str, Enum):
     """Mode d'exécution d'un job ou d'un pipeline."""
-    SESSION = "session"       # PostGIS éphémère spin-up/tear-down
-    PERSISTENT = "persistent" # PostGIS central permanent
+
+    SESSION = "session"  # PostGIS éphémère spin-up/tear-down
+    PERSISTENT = "persistent"  # PostGIS central permanent
 
 
 class TriggerCategory(str, Enum):
     """Catégorie fonctionnelle de trigger."""
+
     DATA = "data"
     TEMPORAL = "temporal"
     BUSINESS_RULE = "business_rule"
@@ -73,6 +78,7 @@ class TriggerCategory(str, Enum):
 
 class TriggerType(str, Enum):
     """Type de déclencheur."""
+
     # --- Data triggers ---
     DML = "dml"
     THRESHOLD = "threshold"
@@ -101,6 +107,7 @@ class ChangeOperation(str, Enum):
     ``geom_changed`` flag before handing the :class:`ChangeRecord` to the
     evaluator.
     """
+
     INSERT = "INSERT"
     UPDATE = "UPDATE"
     UPDATE_GEOM = "UPDATE_GEOM"
@@ -114,6 +121,7 @@ class RuleScope(str, Enum):
 
     Rules are resolved in cascade: global → project → dataset → layer.
     """
+
     GLOBAL = "global"
     PROJECT = "project"
     DATASET = "dataset"
@@ -122,6 +130,7 @@ class RuleScope(str, Enum):
 
 class RelationType(str, Enum):
     """Type of relationship between two layers."""
+
     FK = "fk"
     SPATIAL = "spatial"
     ATTRIBUTE = "attribute"
@@ -130,6 +139,7 @@ class RelationType(str, Enum):
 
 class ComputationRefreshMode(str, Enum):
     """When a computed field is recalculated."""
+
     ON_CHANGE = "on_change"
     ON_SCHEDULE = "on_schedule"
     MANUAL = "manual"
@@ -137,6 +147,7 @@ class ComputationRefreshMode(str, Enum):
 
 class SessionStatus(str, Enum):
     """Status d'une session PostGIS éphémère."""
+
     PROVISIONING = "provisioning"
     ACTIVE = "active"
     EXPIRED = "expired"
@@ -146,5 +157,14 @@ class SessionStatus(str, Enum):
 
 class SessionBackend(str, Enum):
     """Backend moteur d'une session GISPulse."""
+
     POSTGIS = "postgis"
     SPATIALITE = "spatialite"
+
+
+class MapVisibility(str, Enum):
+    """Visibilité d'une carte Cocarte publiée ou en brouillon."""
+
+    PRIVATE = "private"
+    UNLISTED = "unlisted"
+    PUBLIC = "public"

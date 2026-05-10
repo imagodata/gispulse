@@ -133,6 +133,26 @@ _TABLE_DEFS: dict[str, list[tuple[str, str]]] = {
         ("created_at", "TEXT"),
         ("updated_at", "TEXT"),
     ],
+    "maps": [
+        ("id", "TEXT PRIMARY KEY"),
+        ("slug", "TEXT NOT NULL UNIQUE"),
+        ("project_id", "TEXT"),
+        ("owner_id", "TEXT"),
+        ("title", "TEXT NOT NULL DEFAULT ''"),
+        ("description", "TEXT NOT NULL DEFAULT ''"),
+        ("visibility", "TEXT NOT NULL DEFAULT 'private'"),
+        ("share_token", "TEXT"),
+        ("view_state", "TEXT NOT NULL DEFAULT '{}'"),
+        ("layers", "TEXT NOT NULL DEFAULT '[]'"),
+        ("style_overrides", "TEXT NOT NULL DEFAULT '{}'"),
+        ("snapshot_uri", "TEXT"),
+        ("published_at", "TEXT"),
+        ("template_origin_id", "TEXT"),
+        ("deleted_at", "TEXT"),
+        ("metadata", "TEXT NOT NULL DEFAULT '{}'"),
+        ("created_at", "TEXT NOT NULL"),
+        ("updated_at", "TEXT NOT NULL"),
+    ],
     "ref_layers": [
         ("id", "TEXT PRIMARY KEY"),
         ("name", "TEXT NOT NULL"),
@@ -185,12 +205,14 @@ JSON_COLUMNS = frozenset({
     "predicates", "actions", "jobs", "rules", "graph",
     "datasets", "triggers", "ogc_source",
     "spatial_config", "computed_fields",
+    "view_state", "layers", "style_overrides",
 })
 
 # Columns that store datetimes (serialised as ISO text)
 DATETIME_COLUMNS = frozenset({
     "created_at", "started_at", "completed_at", "locked_at",
     "updated_at", "expired_at", "torn_down_at",
+    "published_at", "deleted_at",
 })
 
 # Columns that store UUIDs (serialised as TEXT)
@@ -198,6 +220,7 @@ UUID_COLUMNS = frozenset({
     "id", "dataset_id", "job_id", "rule_id",
     "source_layer_id", "target_layer_id", "trigger_id",
     "scope_target_id",
+    "project_id", "owner_id", "template_origin_id",
 })
 
 # Columns that store booleans (serialised as INTEGER 0/1)
@@ -268,4 +291,8 @@ def build_model_table_mapping(prefix: str = "_gispulse_") -> dict[str, str]:
 #                                  WHEN clause that suppresses re-fires when
 #                                  an action_dispatcher write-back tagged the
 #                                  row with ``trigger:<id>`` (origin-tagging M1).
-SCHEMA_VERSION = 3
+# v3 → v4 (2026-05-10, Cocarte #56): new ``maps`` table for first-class
+#                                    Cocarte map publishing entity (slug,
+#                                    visibility, owner-scoped tier gating,
+#                                    soft-delete via deleted_at).
+SCHEMA_VERSION = 4

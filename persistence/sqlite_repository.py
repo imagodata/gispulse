@@ -20,10 +20,12 @@ from uuid import UUID
 
 from core.models import (
     Artifact,
+    CocarteMap,
     Dataset,
     Job,
     JobStatus,
     Layer,
+    MapVisibility,
     Project,
     RefLayerDef,
     Rule,
@@ -52,6 +54,7 @@ T = TypeVar(
     Project,
     TableRelation,
     RefLayerDef,
+    CocarteMap,
 )
 
 # Default database path
@@ -121,6 +124,7 @@ _MODEL_TABLE: dict[type, str] = {
     Trigger: "triggers",
     TableRelation: "table_relations",
     RefLayerDef: "ref_layers",
+    CocarteMap: "maps",
 }
 
 
@@ -140,6 +144,12 @@ def _row_to_model(model_cls: type, row: dict[str, Any]) -> Any:
         raw = kwargs["status"]
         if isinstance(raw, str):
             kwargs["status"] = JobStatus(raw)
+
+    # Special handling for CocarteMap.visibility enum
+    if model_cls is CocarteMap and "visibility" in kwargs:
+        raw = kwargs["visibility"]
+        if isinstance(raw, str):
+            kwargs["visibility"] = MapVisibility(raw)
 
     return model_cls(**kwargs)
 

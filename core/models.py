@@ -41,6 +41,7 @@ from core.enums import (  # noqa: F401
     ComputationRefreshMode,
     SessionStatus,
     SessionBackend,
+    MapVisibility,
 )
 
 # Typed trigger conditions
@@ -329,3 +330,46 @@ class Project:
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class CocarteMap:
+    """Cocarte map: a published-or-draft visualisation backed by datasets.
+
+    Distinct from `Project` (which groups datasets/rules/triggers) — a
+    `CocarteMap` is the publishable, shareable artefact aimed at the public
+    Cocarte audience (journalists, NGOs, civic groups).
+
+    Naming: class is `CocarteMap` (not `Map`) to avoid shadowing the JS
+    built-in `Map` on the frontend; the module-level alias `Map` is exported
+    for backend Python ergonomics where no clash exists.
+    """
+
+    id: UUID = field(default_factory=uuid4)
+    slug: str = ""
+    project_id: UUID | None = None
+    owner_id: UUID | None = None
+
+    title: str = ""
+    description: str = ""
+    visibility: MapVisibility = MapVisibility.PRIVATE
+    share_token: str | None = None
+
+    view_state: dict[str, Any] = field(default_factory=dict)
+    layers: list[dict[str, Any]] = field(default_factory=list)
+    style_overrides: dict[str, Any] = field(default_factory=dict)
+
+    snapshot_uri: str | None = None
+    published_at: datetime | None = None
+    template_origin_id: UUID | None = None
+    deleted_at: datetime | None = None
+
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# Backend Python ergonomic alias — frontend uses `CocarteMap` to avoid
+# shadowing globalThis.Map.
+Map = CocarteMap

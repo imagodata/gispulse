@@ -39,6 +39,7 @@ from gispulse.adapters.http.routers.filter_router import router as filter_router
 from gispulse.adapters.http.routers.esb_router import router as esb_router
 from gispulse.adapters.http.routers.jobs_router import router as jobs_router, recover_stale_jobs
 from gispulse.adapters.http.routers.portal_router import router as portal_router
+from gispulse.adapters.http.routers.maps_router import router as maps_router
 from gispulse.adapters.http.routers.projects_router import router as projects_router
 from gispulse.adapters.http.routers.rules_router import router as rules_router
 from gispulse.adapters.http.routers.scenarios_router import router as scenarios_router
@@ -58,6 +59,7 @@ from core.models import Dataset, Job, Project, Rule, Scenario, TableRelation, Tr
 from core.observability import MetricsCollector
 from orchestration.runner import JobRunner
 from persistence.engine_factory import create_spatial_engine
+from persistence.map_io import MapRepository
 from persistence.repository import InMemoryRepository
 from persistence.session_provisioner import SessionProvisioner
 from persistence.sqlite_repository import SQLiteRepository
@@ -113,6 +115,7 @@ def _setup_repos(app: FastAPI, storage_mode: str, db_path: Path) -> None:
         app.state.trigger_repo = SQLiteRepository(Trigger, db_path=db_path)
         app.state.project_repo = SQLiteRepository(Project, db_path=db_path)
         app.state.relation_repo = SQLiteRepository(TableRelation, db_path=db_path)
+        app.state.map_repo = MapRepository(db_path=db_path)
     else:
         app.state.rule_repo = InMemoryRepository()
         app.state.job_repo = InMemoryRepository()
@@ -121,6 +124,8 @@ def _setup_repos(app: FastAPI, storage_mode: str, db_path: Path) -> None:
         app.state.trigger_repo = InMemoryRepository()
         app.state.project_repo = InMemoryRepository()
         app.state.relation_repo = InMemoryRepository()
+        # MapRepository is SQLite-backed only; in-memory mode disables /maps endpoints.
+        app.state.map_repo = None
 
     # RBAC auth repository (opt-in via GISPULSE_RBAC=true)
     rbac_enabled = cfg.api.rbac
@@ -804,6 +809,7 @@ def create_app(
         # Portal mode: no auth on routers
         app.include_router(portal_router)
         app.include_router(projects_router)
+        app.include_router(maps_router)
         app.include_router(rules_router)
         app.include_router(triggers_router)
         app.include_router(jobs_router)
@@ -844,6 +850,7 @@ def create_app(
         app.include_router(jobs_router, **protected)
         app.include_router(datasets_router, **protected)
         app.include_router(projects_router, **protected)
+        app.include_router(maps_router, **protected)
         app.include_router(scenarios_router, **protected)
         app.include_router(triggers_router, **write_protected)
         app.include_router(relations_router, **write_protected)

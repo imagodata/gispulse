@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 from persistence.engine import SpatialEngine
+from persistence.map_io import MapRepository
 from persistence.repository import Repository
 from rules.engine import RuleEngine
 from orchestration.runner import JobRunner
@@ -175,3 +176,18 @@ from orchestration.scheduler import PipelineScheduler  # noqa: E402
 def get_scheduler(request: Request) -> PipelineScheduler | None:
     """Return the shared PipelineScheduler from app state, or None."""
     return getattr(request.app.state, "scheduler", None)
+
+
+def get_map_repo(request: Request) -> MapRepository:
+    """Return the shared MapRepository (Cocarte) from app state.
+
+    Raises 503 if the instance was started in in-memory mode (the Map
+    repository is SQLite-backed and has no in-memory variant).
+    """
+    repo = getattr(request.app.state, "map_repo", None)
+    if repo is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Cocarte map endpoints require sqlite storage mode.",
+        )
+    return repo

@@ -26,6 +26,7 @@ tiers:
       api_keys: 0
       users: 1
       projects: 1
+      maps: 5
 
   pro:
     inherits: community
@@ -44,6 +45,7 @@ tiers:
       api_keys: 5
       datasets: 50
       projects: 5
+      maps: 100
 
   team:
     inherits: pro
@@ -56,6 +58,7 @@ tiers:
       api_keys: 20
       datasets: unlimited
       projects: unlimited
+      maps: unlimited
 
   enterprise:
     inherits: team
@@ -70,6 +73,7 @@ tiers:
       api_keys: unlimited
       datasets: unlimited
       projects: unlimited
+      maps: unlimited
 
 # ---------------------------------------------------------------------------
 # Feature descriptions / per-feature caps
