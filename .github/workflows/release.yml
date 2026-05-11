@@ -132,7 +132,7 @@ jobs:
           python -m build
 
       - name: Download plugin ZIP from build-plugin-zip job
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: qgis-plugin-zip
           path: dist/
