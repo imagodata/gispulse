@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
 
 import pytest
+
+# tomllib is stdlib on Python 3.11+; fall back to tomli on 3.10.
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        tomllib = None  # type: ignore[assignment]
 
 _REPO = Path(__file__).resolve().parents[2]
 _PLUGIN_PYPROJECTS = sorted((_REPO / "plugins").glob("*/pyproject.toml"))
@@ -95,6 +103,7 @@ def test_plugin_pyprojects_present() -> None:
 _VALID_KINDS = {"capability", "source", "sink", "protocol"}
 
 
+@pytest.mark.skipif(tomllib is None, reason="needs tomllib (py3.11+) or tomli")
 @pytest.mark.parametrize(
     "pyproject",
     [*_PLUGIN_PYPROJECTS, _TEMPLATE / "pyproject.toml"],
