@@ -12,8 +12,11 @@ middleware, billing and licence providers at process start.
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 from importlib.metadata import entry_points
+from pathlib import Path
 from threading import Lock
 from typing import Any, ClassVar
 
@@ -33,9 +36,13 @@ from core.plugin_contracts import (
 )
 from core.plugin_model import (
     ENTRYPOINT_GROUPS,
+    Origin,
     PluginKind,
     PluginRecord,
     PluginState,
+    Tier,
+    Trust,
+    tier_satisfies,
 )
 
 log = get_logger(__name__)
@@ -54,6 +61,75 @@ _EXTENSION_GROUPS: tuple[str, ...] = (
     "gispulse.mcp_tools",
     "gispulse.mcp_resources",
 )
+
+# Distributions shipped by GISPulse itself — their plugins are trusted
+# first-party code (issue #182).
+_FIRST_PARTY_DISTRIBUTIONS: frozenset[str] = frozenset(
+    {"gispulse", "gispulse-enterprise"}
+)
+
+# Curated marketplace registry — the tier/trust authority for external
+# plugins. Versioned in the OSS repo, hence tamper-evident.
+_REGISTRY_PATH = Path(__file__).resolve().parent.parent / "marketplace" / "registry.json"
+
+
+def _tier_from_str(value: object) -> Tier:
+    """Map a tier string to :class:`Tier`, defaulting to community."""
+    try:
+        return Tier(str(value).lower())
+    except ValueError:
+        return Tier.COMMUNITY
+
+
+def _trust_from_str(value: object) -> Trust:
+    """Map a trust string to :class:`Trust`, defaulting to community."""
+    try:
+        return Trust(str(value).lower())
+    except ValueError:
+        return Trust.COMMUNITY
+
+
+def _curated_registry() -> dict[str, dict[str, Any]]:
+    """Load ``marketplace/registry.json`` as ``{package: {tier, trust}}``.
+
+    Reads the explicit v3 ``tier`` / ``trust`` fields when present, else
+    derives them from the v2 ``requires_pro`` / ``verified`` flags — so
+    the gate is correct before and after issue #181. A missing or
+    malformed file degrades to an empty mapping (no plugin gated).
+    """
+    try:
+        raw = json.loads(_REGISTRY_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for entry in raw.get("plugins", []):
+        package = str(entry.get("package", "")).lower()
+        if not package:
+            continue
+        tier = entry.get("tier")
+        trust = entry.get("trust")
+        out[package] = {
+            "tier": _tier_from_str(tier)
+            if tier
+            else (Tier.PRO if entry.get("requires_pro") else Tier.COMMUNITY),
+            "trust": _trust_from_str(trust)
+            if trust
+            else (Trust.VERIFIED if entry.get("verified") else Trust.COMMUNITY),
+        }
+    return out
+
+
+def _record_package(rec: PluginRecord) -> str:
+    """Best-effort distribution name backing a record's entry-point."""
+    dist = getattr(rec.entry_point, "dist", None)
+    name = getattr(dist, "name", None)
+    return str(name).lower() if name else ""
+
+
+def _allow_unverified() -> bool:
+    """Whether community-trust plugins may activate (default: yes)."""
+    raw = os.environ.get("GISPULSE_PLUGINS_ALLOW_UNVERIFIED", "true")
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +237,8 @@ class PluginHub:
         self.mcp_tools = []
         self.mcp_resources = []
         self.records = []
+        # Licence tier resolved once per discovery for the activation gate.
+        self._licence_tier: Tier = Tier.COMMUNITY
 
     # ------------------------------------------------------------------ API
 
@@ -222,6 +300,7 @@ class PluginHub:
         wiring surface consumed by the app. Issues #180 and the extension
         migration move consumers onto ``records``.
         """
+        self._licence_tier = _tier_from_str(self.licence_provider.current().tier)
         groups: list[tuple[str, PluginKind]] = [
             (group, PluginKind.EXTENSION) for group in _EXTENSION_GROUPS
         ]
@@ -239,20 +318,42 @@ class PluginHub:
     def _resolve(self, rec: PluginRecord) -> None:
         """Resolve ``origin`` / ``trust`` / ``tier_required`` for a record.
 
-        Placeholder (issue #177): records keep the
-        :class:`~core.plugin_model.PluginRecord` defaults — external,
-        community trust, community tier. Issue #182 fills this from the
-        curated marketplace registry and the first-party distribution
-        allowlist.
+        First-party distributions (:data:`_FIRST_PARTY_DISTRIBUTIONS`) are
+        trusted internal code. For every other plugin the curated
+        ``marketplace/registry.json`` is the tier/trust authority — an
+        external plugin cannot grant itself a tier. Plugins absent from
+        the registry keep the community defaults.
         """
+        package = _record_package(rec)
+        if package in _FIRST_PARTY_DISTRIBUTIONS:
+            rec.origin = Origin.INTERNAL
+            rec.trust = Trust.FIRST_PARTY
+        meta = _curated_registry().get(package)
+        if meta is not None:
+            rec.tier_required = meta["tier"]
+            if rec.trust is not Trust.FIRST_PARTY:
+                rec.trust = meta["trust"]
 
     def _gate(self, rec: PluginRecord) -> bool:
-        """Decide whether a record may be activated.
+        """Decide whether a record may be activated (issue #182).
 
-        Placeholder (issue #177): always allows activation. Issue #182
-        implements the tier gate (``tier_satisfies`` against the licence
-        provider) and the trust gate (``GISPULSE_PLUGINS_ALLOW_UNVERIFIED``).
+        Tier gate: the licence tier must satisfy ``rec.tier_required``.
+        Trust gate: a community-trust plugin is refused when
+        ``GISPULSE_PLUGINS_ALLOW_UNVERIFIED`` is disabled. A refused
+        record is marked LOCKED by the caller — its code is never loaded.
         """
+        if not tier_satisfies(self._licence_tier, rec.tier_required):
+            rec.detail = (
+                f"requires the '{rec.tier_required.value}' tier "
+                f"(licence: '{self._licence_tier.value}')"
+            )
+            return False
+        if rec.trust is Trust.COMMUNITY and not _allow_unverified():
+            rec.detail = (
+                "unverified community plugin blocked by "
+                "GISPULSE_PLUGINS_ALLOW_UNVERIFIED"
+            )
+            return False
         return True
 
     def _activate(self, rec: PluginRecord) -> None:
@@ -261,8 +362,8 @@ class PluginHub:
         ``rec.obj`` holds the loaded callable/class. The actual wiring
         (instantiation, routing, capability registration) still runs
         through the existing ``_load_*`` paths and the capability
-        registry — issue #177 only establishes the inventory and its
-        lifecycle state.
+        registry. After a successful load the plugin's declared
+        ``requires_protocol`` is checked (warn-only, issue #182).
         """
         try:
             rec.obj = rec.entry_point.load()
@@ -277,6 +378,7 @@ class PluginHub:
             )
             return
         rec.state = PluginState.ACTIVE
+        _check_protocol_version(rec.obj, rec.name, rec.kind.value)
 
     def records_by_kind(self, kind: PluginKind) -> list[PluginRecord]:
         """Return the inventory records of a given :class:`PluginKind`."""
