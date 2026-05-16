@@ -93,38 +93,53 @@ def _validate_plugin_name(name: str) -> str:
 # ----------------------------------------------------------------------
 
 
+def _record_package(rec: Any) -> str:
+    """Best-effort distribution name backing a plugin record's entry-point."""
+    dist = getattr(rec.entry_point, "dist", None)
+    name = getattr(dist, "name", None)
+    return str(name).lower() if name else ""
+
+
 @router.get("/plugins", summary="List installed plugins")
 def list_installed_plugins() -> list[dict[str, Any]]:
-    """Return metadata for all installed GISPulse plugins (entry-point scan).
+    """Return metadata for all installed plugins from the unified PluginHub.
 
-    Enriches basic entry-point data with registry metadata so the Portal
-    UI has everything it needs (description, category, tags, etc.).
+    Each entry carries the hub's classification — ``kind`` / ``tier`` /
+    ``trust`` / ``origin`` / ``state`` — so the Portal UI can surface
+    tier-gated (``locked``) plugins with an upgrade prompt. Curated
+    registry metadata enriches the descriptive fields.
     """
-    from capabilities.registry import list_plugins
+    from core.plugin_hub import PluginHub
 
-    installed = list_plugins()
     registry_plugins = {p["package"]: p for p in _load_registry_plugins()}
 
     enriched = []
-    for plugin in installed:
-        short_name = plugin["name"]
-        package = f"{_PLUGIN_PREFIX}{short_name}"
+    for rec in PluginHub.get().records:
+        package = _record_package(rec)
         registry_entry = registry_plugins.get(package, {})
+        state = rec.state.value
 
         enriched.append({
-            "id": registry_entry.get("id", package),
-            "name": registry_entry.get("name", short_name),
+            "id": registry_entry.get("id", package or rec.name),
+            "name": registry_entry.get("name", rec.name),
             "description": registry_entry.get("description", ""),
             "author": registry_entry.get("author", ""),
             "version": registry_entry.get("version", "0.0.0"),
             "category": registry_entry.get("category", "utilities"),
-            "verified": registry_entry.get("verified", False),
-            "requires_pro": registry_entry.get("requires_pro", False),
+            "kind": rec.kind.value,
+            "tier": rec.tier_required.value,
+            "trust": rec.trust.value,
+            "origin": rec.origin.value,
+            "state": state,
+            "locked": state == "locked",
+            "detail": rec.detail,
+            "verified": rec.trust.value in ("verified", "first_party"),
+            "requires_pro": rec.tier_required.value != "community",
             "tags": registry_entry.get("tags", []),
             "homepage_url": registry_entry.get("homepage_url"),
             "install_count": registry_entry.get("install_count", 0),
             "installed_at": None,  # Not tracked yet
-            "enabled": True,
+            "enabled": state == "active",
         })
 
     return enriched

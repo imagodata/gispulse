@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "plugins": [
     {
       "id": "gispulse-cap-ftth",
@@ -11,10 +11,20 @@
       "category": "analysis",
       "verified": true,
       "requires_pro": true,
-      "tags": ["telecom", "ftth", "network"],
+      "tags": [
+        "telecom",
+        "ftth",
+        "network"
+      ],
       "homepage_url": "https://gispulse.dev/plugins/fibreflow",
       "install_count": 312,
-      "capabilities": ["ftth_coverage", "ftth_nearest_node"]
+      "capabilities": [
+        "ftth_coverage",
+        "ftth_nearest_node"
+      ],
+      "kind": "capability",
+      "tier": "pro",
+      "trust": "verified"
     },
     {
       "id": "gispulse-cap-filtermate",
@@ -26,10 +36,20 @@
       "category": "utilities",
       "verified": true,
       "requires_pro": false,
-      "tags": ["filter", "export", "gpkg"],
+      "tags": [
+        "filter",
+        "export",
+        "gpkg"
+      ],
       "homepage_url": "https://gispulse.dev/plugins/filtermate",
       "install_count": 841,
-      "capabilities": ["spatial_filter", "attribute_prep"]
+      "capabilities": [
+        "spatial_filter",
+        "attribute_prep"
+      ],
+      "kind": "capability",
+      "tier": "community",
+      "trust": "verified"
     },
     {
       "id": "gispulse-cap-osm-import",
@@ -41,10 +61,20 @@
       "category": "import",
       "verified": false,
       "requires_pro": false,
-      "tags": ["osm", "import", "openstreetmap"],
+      "tags": [
+        "osm",
+        "import",
+        "openstreetmap"
+      ],
       "homepage_url": null,
       "install_count": 156,
-      "capabilities": ["osm_import", "osm_tag_extract"]
+      "capabilities": [
+        "osm_import",
+        "osm_tag_extract"
+      ],
+      "kind": "capability",
+      "tier": "community",
+      "trust": "community"
     },
     {
       "id": "gispulse-cap-h3",
@@ -56,10 +86,19 @@
       "category": "analysis",
       "verified": true,
       "requires_pro": true,
-      "tags": ["h3", "hexgrid", "aggregation"],
+      "tags": [
+        "h3",
+        "hexgrid",
+        "aggregation"
+      ],
       "homepage_url": "https://gispulse.dev/plugins/h3",
       "install_count": 98,
-      "capabilities": ["h3_aggregate"]
+      "capabilities": [
+        "h3_aggregate"
+      ],
+      "kind": "capability",
+      "tier": "pro",
+      "trust": "verified"
     },
     {
       "id": "gispulse-cap-stac",
@@ -71,10 +110,19 @@
       "category": "import",
       "verified": false,
       "requires_pro": false,
-      "tags": ["stac", "satellite", "catalog"],
+      "tags": [
+        "stac",
+        "satellite",
+        "catalog"
+      ],
       "homepage_url": null,
       "install_count": 74,
-      "capabilities": ["stac_search"]
+      "capabilities": [
+        "stac_search"
+      ],
+      "kind": "capability",
+      "tier": "community",
+      "trust": "community"
     },
     {
       "id": "gispulse-cap-report",
@@ -86,10 +134,19 @@
       "category": "export",
       "verified": true,
       "requires_pro": true,
-      "tags": ["report", "html", "export"],
+      "tags": [
+        "report",
+        "html",
+        "export"
+      ],
       "homepage_url": "https://gispulse.dev/plugins/report-builder",
       "install_count": 203,
-      "capabilities": ["report_build"]
+      "capabilities": [
+        "report_build"
+      ],
+      "kind": "capability",
+      "tier": "pro",
+      "trust": "verified"
     }
   ]
 }
