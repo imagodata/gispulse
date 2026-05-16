@@ -31,8 +31,29 @@ from core.plugin_contracts import (
     MiddlewareFactory,
     RouterFactory,
 )
+from core.plugin_model import (
+    ENTRYPOINT_GROUPS,
+    PluginKind,
+    PluginRecord,
+    PluginState,
+)
 
 log = get_logger(__name__)
+
+# The nine host-extension entry-point groups. Every entry-point in these
+# maps to ``PluginKind.EXTENSION`` in the unified inventory; the four
+# ETL/single-group kinds come from :data:`core.plugin_model.ENTRYPOINT_GROUPS`.
+_EXTENSION_GROUPS: tuple[str, ...] = (
+    "gispulse.routers",
+    "gispulse.middleware",
+    "gispulse.auth_provider",
+    "gispulse.billing_provider",
+    "gispulse.licence_provider",
+    "gispulse.connectors",
+    "gispulse.lifecycle",
+    "gispulse.mcp_tools",
+    "gispulse.mcp_resources",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +146,9 @@ class PluginHub:
     lifecycle: list[LifecycleHook]
     mcp_tools: list[McpToolFactory]
     mcp_resources: list[McpResourceFactory]
+    # Unified inventory across all 11 entry-point groups (issue #177).
+    # Additive: the typed collections above remain the wiring surface.
+    records: list[PluginRecord]
 
     def __init__(self) -> None:
         self.routers = {}
@@ -136,6 +160,7 @@ class PluginHub:
         self.lifecycle = []
         self.mcp_tools = []
         self.mcp_resources = []
+        self.records = []
 
     # ------------------------------------------------------------------ API
 
@@ -165,6 +190,7 @@ class PluginHub:
         hub._load_lifecycle()
         hub._load_mcp_tools()
         hub._load_mcp_resources()
+        hub._discover_records()
         log.info(
             "plugin_hub_initialized",
             routers=sorted(hub.routers),
@@ -176,8 +202,85 @@ class PluginHub:
             lifecycle=[p.name for p in hub.lifecycle],
             mcp_tools=[p.name for p in hub.mcp_tools],
             mcp_resources=[p.name for p in hub.mcp_resources],
+            plugin_records=len(hub.records),
         )
         return hub
+
+    # ---------------------------------------------------- unified inventory
+
+    def _discover_records(self) -> None:
+        """Build the unified plugin inventory across all 11 entry-point groups.
+
+        Each entry-point becomes a :class:`~core.plugin_model.PluginRecord`
+        and runs the ``discover → resolve → gate → activate`` cycle. The
+        nine host-extension sub-groups collapse to
+        :attr:`~core.plugin_model.PluginKind.EXTENSION`; capabilities /
+        data_sources / data_sinks / protocols map to their own kind.
+
+        Additive by design: the typed collections (``routers``,
+        ``middleware``, …) populated by the ``_load_*`` methods stay the
+        wiring surface consumed by the app. Issues #180 and the extension
+        migration move consumers onto ``records``.
+        """
+        groups: list[tuple[str, PluginKind]] = [
+            (group, PluginKind.EXTENSION) for group in _EXTENSION_GROUPS
+        ]
+        groups += [(group, kind) for kind, group in ENTRYPOINT_GROUPS.items()]
+        for group, kind in groups:
+            for ep in _eps(group):
+                rec = PluginRecord(name=ep.name, kind=kind, entry_point=ep)
+                self._resolve(rec)
+                if self._gate(rec):
+                    self._activate(rec)
+                else:
+                    rec.state = PluginState.LOCKED
+                self.records.append(rec)
+
+    def _resolve(self, rec: PluginRecord) -> None:
+        """Resolve ``origin`` / ``trust`` / ``tier_required`` for a record.
+
+        Placeholder (issue #177): records keep the
+        :class:`~core.plugin_model.PluginRecord` defaults — external,
+        community trust, community tier. Issue #182 fills this from the
+        curated marketplace registry and the first-party distribution
+        allowlist.
+        """
+
+    def _gate(self, rec: PluginRecord) -> bool:
+        """Decide whether a record may be activated.
+
+        Placeholder (issue #177): always allows activation. Issue #182
+        implements the tier gate (``tier_satisfies`` against the licence
+        provider) and the trust gate (``GISPULSE_PLUGINS_ALLOW_UNVERIFIED``).
+        """
+        return True
+
+    def _activate(self, rec: PluginRecord) -> None:
+        """Load the entry-point to confirm importability; set ACTIVE/FAILED.
+
+        ``rec.obj`` holds the loaded callable/class. The actual wiring
+        (instantiation, routing, capability registration) still runs
+        through the existing ``_load_*`` paths and the capability
+        registry — issue #177 only establishes the inventory and its
+        lifecycle state.
+        """
+        try:
+            rec.obj = rec.entry_point.load()
+        except Exception as exc:  # noqa: BLE001 — isolate a bad plugin
+            rec.state = PluginState.FAILED
+            rec.detail = str(exc)
+            log.warning(
+                "plugin_record_load_failed",
+                name=rec.name,
+                kind=rec.kind.value,
+                error=str(exc),
+            )
+            return
+        rec.state = PluginState.ACTIVE
+
+    def records_by_kind(self, kind: PluginKind) -> list[PluginRecord]:
+        """Return the inventory records of a given :class:`PluginKind`."""
+        return [r for r in self.records if r.kind is kind]
 
     def _load_routers(self) -> None:
         for ep in _eps("gispulse.routers"):
