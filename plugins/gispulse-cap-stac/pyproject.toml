@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "community-geo" }]
 dependencies = [
+    "gispulse",
     "geopandas>=0.14",
     "shapely>=2.0",
     "pystac-client>=0.6",
@@ -17,3 +18,7 @@ dependencies = [
 
 [project.entry-points."gispulse.capabilities"]
 stac_import = "gispulse_cap_stac:register"
+
+[tool.gispulse.plugin]
+kind = "capability"
+protocol = ">=1.0,<2.0"

@@ -10,9 +10,14 @@ requires-python = ">=3.10"
 license = "AGPL-3.0-or-later"
 authors = [{ name = "GISPulse", email = "dev@gispulse.io" }]
 dependencies = [
+    "gispulse",
     "geopandas>=0.14",
     "jinja2>=3.1",
 ]
 
 [project.entry-points."gispulse.capabilities"]
 report_builder = "gispulse_cap_report:register"
+
+[tool.gispulse.plugin]
+kind = "capability"
+protocol = ">=1.0,<2.0"

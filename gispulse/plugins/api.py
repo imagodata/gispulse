@@ -1,12 +1,35 @@
-"""Transitional public API for external GISPulse plugin authors.
+"""Public API for external GISPulse plugin authors.
 
-The goal is to give plugins one documented import path while the runtime
-keeps its existing internal module layout.
+The single documented import path for every plugin kind — capability,
+source, sink, protocol adapter — while the runtime keeps its internal
+module layout. Plugins import from here, never from ``capabilities.*``
+or ``core.*`` directly (issue #183).
 """
 
 from capabilities.base import Capability
 from capabilities.registry import register as register_capability
 from core.plugin_contracts import PluginHostContext
+from core.plugin_model import (
+    AccessProtocol,
+    AccessSpec,
+    Payload,
+    PluginManifest,
+    RuleClause,
+    SourceDomain,
+    SourceResult,
+    WriteSpec,
+)
+from core.sources import (
+    DataSink,
+    DataSource,
+    DeclarativeSink,
+    DeclarativeSource,
+    Fetcher,
+    ProtocolRegistry,
+    RegulatorySource,
+    SourceEntryRef,
+    Writer,
+)
 
 _LAZY_EXPORTS = {
     "ApiCartoGeoJsonClient": "gispulse.plugins.sources",
@@ -35,8 +58,29 @@ def __getattr__(name: str) -> object:
     return value
 
 __all__ = [
+    # capability authoring
     "Capability",
-    "PluginHostContext",
     "register_capability",
+    # host extension context
+    "PluginHostContext",
+    # plugin manifest + ETL data shapes
+    "PluginManifest",
+    "AccessProtocol",
+    "AccessSpec",
+    "Payload",
+    "RuleClause",
+    "SourceDomain",
+    "SourceResult",
+    "WriteSpec",
+    # source / sink / protocol contracts
+    "DataSource",
+    "RegulatorySource",
+    "DataSink",
+    "Fetcher",
+    "Writer",
+    "ProtocolRegistry",
+    "SourceEntryRef",
+    "DeclarativeSource",
+    "DeclarativeSink",
     *_LAZY_EXPORTS,
 ]
