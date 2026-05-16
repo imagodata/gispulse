@@ -6,8 +6,8 @@ from pathlib import Path
 
 import geopandas as gpd
 
-from capabilities.base import Capability
-from capabilities.registry import register
+from gispulse.plugins.api import Capability
+from gispulse.plugins.api import register_capability as register
 
 
 @register
