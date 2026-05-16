@@ -510,6 +510,38 @@ class TriggerEvaluator:
         """Generic handler for schedule, api, esb_event, webhook_in — always matches."""
         return True
 
+    def _eval_source_changed(
+        self, record: ChangeRecord, trigger: Trigger, typed_cond: Any = None
+    ) -> bool:
+        """SOURCE_CHANGED: fire when a watched external source has a new revision.
+
+        The event ``record`` carries the source identity and its current
+        revision token in ``new_values`` (keys ``source`` and
+        ``revision``) — emitted by the source watcher (issue #187). The
+        trigger fires when:
+
+        - the event source matches the trigger's configured ``source``
+          (when one is set), and
+        - the event ``revision`` differs from the trigger's last-seen
+          ``last_revision`` (an absent ``last_revision`` means this is
+          the first observation, which fires).
+
+        An event without a ``revision`` token never fires — there is
+        nothing to compare against.
+        """
+        cond = trigger.conditions or {}
+        values = record.new_values or {}
+
+        want_source = cond.get("source")
+        event_source = values.get("source")
+        if want_source and event_source and want_source != event_source:
+            return False
+
+        new_revision = values.get("revision")
+        if new_revision is None:
+            return False
+        return new_revision != cond.get("last_revision")
+
     # Handler dispatch table
     _TYPE_HANDLERS: dict[str, Callable[..., bool]] = {
         "dml": _eval_dml,
@@ -523,6 +555,7 @@ class TriggerEvaluator:
         "api": _eval_generic,
         "esb_event": _eval_generic,
         "webhook_in": _eval_generic,
+        "source_changed": _eval_source_changed,
     }
 
 
