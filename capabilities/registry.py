@@ -88,10 +88,36 @@ def list_all() -> list[dict]:
 
 
 def _discover_plugins() -> list[dict[str, str]]:
-    """Discover capabilities from installed packages via entry-points."""
-    # Reset flag to allow re-discovery (needed for testing with mocked entry-points)
-    REGISTRY._plugins_discovered = False
-    return REGISTRY.discover_plugins("gispulse.capabilities")
+    """Register capability plugins discovered by the unified PluginHub.
+
+    Issue #180 — end of the double discovery: the hub
+    (:class:`core.plugin_hub.PluginHub`) owns entry-point scanning for
+    all eleven groups. Here we simply invoke the ``register()`` callable
+    of every ACTIVE capability record so the capabilities land in
+    :data:`REGISTRY`. Records the hub marked FAILED were already logged
+    there and surface as errors in the returned report.
+    """
+    from core.plugin_hub import PluginHub
+    from core.plugin_model import PluginKind, PluginState
+
+    results: list[dict[str, str]] = []
+    for rec in PluginHub.get().records_by_kind(PluginKind.CAPABILITY):
+        module = getattr(rec.entry_point, "value", rec.name)
+        if rec.state is not PluginState.ACTIVE:
+            results.append(
+                {"name": rec.name, "module": module,
+                 "status": f"error: {rec.detail or 'plugin not active'}"}
+            )
+            continue
+        try:
+            rec.obj()  # the plugin's register() callable
+            results.append({"name": rec.name, "module": module, "status": "ok"})
+        except Exception as exc:  # noqa: BLE001 — isolate a bad plugin
+            log.warning("capability_plugin_register_failed", plugin=rec.name, error=str(exc))
+            results.append(
+                {"name": rec.name, "module": module, "status": f"error: {exc}"}
+            )
+    return results
 
 
 def list_plugins() -> list[dict[str, str]]:
