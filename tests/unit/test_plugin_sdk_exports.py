@@ -88,7 +88,11 @@ def test_template_uses_the_sdk() -> None:
 
 
 def test_plugin_pyprojects_present() -> None:
-    assert len(_PLUGIN_PYPROJECTS) == 6
+    # 6 gispulse-cap-* plugins, plus any gispulse-src-* pilots (#184).
+    assert len(_PLUGIN_PYPROJECTS) >= 6
+
+
+_VALID_KINDS = {"capability", "source", "sink", "protocol"}
 
 
 @pytest.mark.parametrize(
@@ -101,7 +105,9 @@ def test_pyproject_declares_manifest_and_gispulse_dep(pyproject: Path) -> None:
     manifest = data.get("tool", {}).get("gispulse", {}).get("plugin")
     assert manifest is not None, f"{pyproject} missing [tool.gispulse.plugin]"
     assert manifest.get("protocol"), "manifest must declare a protocol specifier"
-    assert manifest.get("kind") == "capability"
+    assert manifest.get("kind") in _VALID_KINDS, (
+        f"{pyproject}: kind must be one of {sorted(_VALID_KINDS)}"
+    )
 
     deps = " ".join(data.get("project", {}).get("dependencies", []))
     assert "gispulse" in deps, f"{pyproject} must depend on gispulse"
