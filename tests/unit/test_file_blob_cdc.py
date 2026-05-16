@@ -13,9 +13,7 @@ Covers:
 """
 from __future__ import annotations
 
-import json
 import os
-import time
 from pathlib import Path
 
 import geopandas as gpd
@@ -26,7 +24,6 @@ from core.models import ChangeOperation
 from persistence.file_blob_cdc import (
     SNAPSHOT_SUFFIX,
     FileBlobChangeDetector,
-    FileBlobSnapshot,
 )
 
 
