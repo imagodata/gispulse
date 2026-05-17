@@ -158,3 +158,93 @@ def test_dispatch_fetch_routes_to_wfs_fetcher(mock_fetch_wfs: list) -> None:
     result = reg.dispatch_fetch(access, mode=FetchMode.MATERIALIZE)
     assert result.payload is Payload.VECTOR
     assert len(mock_fetch_wfs) == 1
+
+
+# ---------------------------------------------------------------------------
+# OgcFeaturesFetcher (#192)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_fetch_ogc(monkeypatch: pytest.MonkeyPatch) -> list:
+    """Patch wfs_client.fetch_ogc_api_features; return the recorded calls."""
+    calls: list = []
+
+    def fake(cfg, *, bbox=None, **_kw):
+        calls.append({"cfg": cfg, "bbox": bbox})
+        return _FakeGDF(4)
+
+    monkeypatch.setattr(
+        "gispulse.adapters.ogc.wfs_client.fetch_ogc_api_features", fake
+    )
+    return calls
+
+
+def test_ogc_features_fetcher_declares_protocol() -> None:
+    from gispulse.adapters.ogc.wfs_fetcher import OgcFeaturesFetcher
+
+    assert OgcFeaturesFetcher.protocol is AccessProtocol.OGC_FEATURES
+
+
+def test_ogc_features_fetch_returns_vector_result(mock_fetch_ogc: list) -> None:
+    from gispulse.adapters.ogc.wfs_fetcher import OgcFeaturesFetcher
+
+    access = AccessSpec(
+        protocol=AccessProtocol.OGC_FEATURES,
+        endpoint="https://features.example.org",
+        params={"collection": "buildings", "crs": "EPSG:4326"},
+    )
+    result = OgcFeaturesFetcher().fetch(access, extent=(0, 0, 5, 5))
+
+    assert result.payload is Payload.VECTOR
+    assert len(result.data) == 4
+    assert result.metadata["collection"] == "buildings"
+    assert mock_fetch_ogc[0]["cfg"].layer_name == "buildings"
+    assert mock_fetch_ogc[0]["bbox"] == (0.0, 0.0, 5.0, 5.0)
+
+
+def test_ogc_features_layer_falls_back_to_typename(mock_fetch_ogc: list) -> None:
+    from gispulse.adapters.ogc.wfs_fetcher import OgcFeaturesFetcher
+
+    access = AccessSpec(
+        protocol=AccessProtocol.OGC_FEATURES,
+        endpoint="https://features.example.org",
+        params={"typename": "parcels"},
+    )
+    OgcFeaturesFetcher().fetch(access)
+    assert mock_fetch_ogc[0]["cfg"].layer_name == "parcels"
+
+
+def test_ogc_features_without_layer_raises(mock_fetch_ogc: list) -> None:
+    from gispulse.adapters.ogc.wfs_fetcher import OgcFeaturesFetcher
+
+    access = AccessSpec(
+        protocol=AccessProtocol.OGC_FEATURES,
+        endpoint="https://features.example.org",
+        params={},
+    )
+    with pytest.raises(ValueError, match="must declare a 'typename'"):
+        OgcFeaturesFetcher().fetch(access)
+
+
+def test_register_core_ogc_fetchers_registers_both() -> None:
+    from gispulse.adapters.ogc.wfs_fetcher import (
+        OgcFeaturesFetcher,
+        register_core_ogc_fetchers,
+    )
+
+    reg = ProtocolRegistry()
+    register_core_ogc_fetchers(reg)
+    assert isinstance(reg.get_fetcher(AccessProtocol.WFS), WfsFetcher)
+    assert isinstance(
+        reg.get_fetcher(AccessProtocol.OGC_FEATURES), OgcFeaturesFetcher
+    )
+
+
+def test_ogc_features_fetcher_self_registered() -> None:
+    from core.sources import PROTOCOLS
+    from gispulse.adapters.ogc.wfs_fetcher import OgcFeaturesFetcher
+
+    assert isinstance(
+        PROTOCOLS.get_fetcher(AccessProtocol.OGC_FEATURES), OgcFeaturesFetcher
+    )
