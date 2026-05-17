@@ -57,29 +57,54 @@ def list_providers() -> list[dict]:
     ]
 
 
-def _discover_providers() -> list[dict[str, str]]:
-    """Discover catalog providers from installed packages via entry-points.
+#: Entry-point group for third-party catalog-provider plugins.
+_CATALOG_PROVIDER_GROUP = "gispulse.catalog_providers"
 
-    Scans the ``gispulse.catalog_providers`` entry-point group. Each
-    entry-point must point to a callable that registers providers when
-    invoked (e.g. by calling :func:`register_provider`).
+
+def _discover_providers() -> list[dict[str, str]]:
+    """Register catalog-provider plugins discovered by the PluginHub.
+
+    Issue #193 — the :class:`~core.plugin_hub.PluginHub` owns the single
+    ``gispulse.catalog_providers`` entry-point scan; this function no
+    longer scans a second time, it *consumes* ``PluginHub.records``.
+
+    Each catalog-provider record is an ``EXTENSION`` whose loaded ``obj``
+    is the plugin's register callable — invoking it calls
+    :func:`register_provider`. A record the hub locked (tier/trust gate)
+    or failed to load is reported but never invoked.
 
     Returns:
-        List of dicts with ``name``, ``module``, and ``status`` for each
-        discovered plugin entry-point.
+        List of dicts with ``name``, ``module`` and ``status`` for each
+        catalog-provider record the hub discovered.
     """
     loaded: list[dict[str, str]] = []
     try:
-        from importlib.metadata import entry_points
+        from core.plugin_hub import PluginHub
+        from core.plugin_model import PluginState
 
-        eps = entry_points(group="gispulse.catalog_providers")
-        for ep in eps:
-            try:
-                register_fn = ep.load()
-                register_fn()
-                loaded.append({"name": ep.name, "module": ep.value, "status": "ok"})
-            except Exception as exc:
-                loaded.append({"name": ep.name, "module": ep.value, "status": f"error: {exc}"})
+        hub = PluginHub.get()
     except Exception:
-        pass
+        return loaded
+
+    for rec in hub.records:
+        ep = rec.entry_point
+        if ep is None or getattr(ep, "group", None) != _CATALOG_PROVIDER_GROUP:
+            continue
+        module = str(getattr(ep, "value", ""))
+        if rec.state is not PluginState.ACTIVE:
+            loaded.append(
+                {
+                    "name": rec.name,
+                    "module": module,
+                    "status": f"skipped: {rec.detail or rec.state.value}",
+                }
+            )
+            continue
+        try:
+            rec.obj()  # the loaded register callable
+            loaded.append({"name": rec.name, "module": module, "status": "ok"})
+        except Exception as exc:
+            loaded.append(
+                {"name": rec.name, "module": module, "status": f"error: {exc}"}
+            )
     return loaded
