@@ -442,3 +442,162 @@ def test_when_dedupes_and_rejects_empty(tracked_gpkg: Path, tmp_path: Path) -> N
     )
     cfg = load_config(dup)
     assert cfg.triggers[0].when == ["INSERT", "UPDATE"]
+
+
+# ---------------------------------------------------------------------------
+# Source-watched triggers — `on: source_changed:` (#195)
+# ---------------------------------------------------------------------------
+
+
+def test_source_changed_trigger_loads(tracked_gpkg: Path, tmp_path: Path) -> None:
+    """A trigger declaring ``on: {source_changed: <uri>}`` parses cleanly."""
+    cfg_path = tmp_path / "src.yaml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            f"""
+            version: 1
+            gpkg: {tracked_gpkg}
+            triggers:
+              - name: refresh_on_millesime
+                on:
+                  source_changed: cadastre://parcelles
+                  frequency: mensuel
+                actions:
+                  - type: log_event
+            """,
+        ).strip(),
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_path)
+    assert len(cfg.triggers) == 1
+    entry = cfg.triggers[0]
+    assert entry.table is None
+    assert entry.on is not None
+    assert entry.on.source_changed == "cadastre://parcelles"
+    assert entry.on.frequency == "mensuel"
+
+
+def test_source_changed_to_triggers_maps_source_changed_type(
+    tracked_gpkg: Path, tmp_path: Path
+) -> None:
+    """``to_triggers`` builds a SOURCE_CHANGED domain trigger."""
+    from core.enums import TriggerCategory, TriggerType
+
+    cfg_path = tmp_path / "src.yaml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            f"""
+            version: 1
+            gpkg: {tracked_gpkg}
+            triggers:
+              - name: refresh
+                on:
+                  source_changed: cadastre://parcelles
+                actions:
+                  - type: log_event
+            """,
+        ).strip(),
+        encoding="utf-8",
+    )
+    triggers = to_triggers(load_config(cfg_path))
+    assert len(triggers) == 1
+    trig = triggers[0]
+    assert trig.trigger_type == TriggerType.SOURCE_CHANGED
+    assert trig.category == TriggerCategory.INTEGRATION
+    assert trig.conditions["source"] == "cadastre://parcelles"
+    assert "table" not in trig.conditions
+
+
+def test_source_changed_trigger_rejects_table(
+    tracked_gpkg: Path, tmp_path: Path
+) -> None:
+    """Declaring both ``on:`` and ``table`` is a config error."""
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        textwrap.dedent(
+            f"""
+            version: 1
+            gpkg: {tracked_gpkg}
+            triggers:
+              - name: confused
+                table: parcels
+                on:
+                  source_changed: cadastre://parcelles
+                actions: []
+            """,
+        ).strip(),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="must not declare a 'table'"):
+        load_config(bad)
+
+
+def test_source_changed_trigger_rejects_predicate(
+    tracked_gpkg: Path, tmp_path: Path
+) -> None:
+    """A source trigger cannot carry a DML predicate."""
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        textwrap.dedent(
+            f"""
+            version: 1
+            gpkg: {tracked_gpkg}
+            triggers:
+              - name: confused
+                predicate: "status == 'x'"
+                on:
+                  source_changed: cadastre://parcelles
+                actions: []
+            """,
+        ).strip(),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="'predicate' is not supported"):
+        load_config(bad)
+
+
+def test_dml_trigger_still_requires_table(
+    tracked_gpkg: Path, tmp_path: Path
+) -> None:
+    """A trigger without ``on:`` must still name a ``table``."""
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        textwrap.dedent(
+            f"""
+            version: 1
+            gpkg: {tracked_gpkg}
+            triggers:
+              - name: tableless
+                actions: []
+            """,
+        ).strip(),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="requires a 'table'"):
+        load_config(bad)
+
+
+def test_source_changed_trigger_skips_gpkg_table_check(
+    tracked_gpkg: Path, tmp_path: Path
+) -> None:
+    """``validate_against_gpkg`` does not flag a source trigger's absent table."""
+    cfg_path = tmp_path / "mixed.yaml"
+    cfg_path.write_text(
+        textwrap.dedent(
+            f"""
+            version: 1
+            gpkg: {tracked_gpkg}
+            triggers:
+              - name: dml_one
+                table: parcels
+                actions: []
+              - name: src_one
+                on:
+                  source_changed: cadastre://parcelles
+                actions: []
+            """,
+        ).strip(),
+        encoding="utf-8",
+    )
+    errors = validate_against_gpkg(load_config(cfg_path))
+    assert errors == []

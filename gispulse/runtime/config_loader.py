@@ -18,6 +18,15 @@ Schema (version 1, strict)::
             value: 2026-04-27
           - type: run_sql
             expression: "UPDATE parcels SET status='ok' WHERE fid=NEW.fid"
+      # A source-watched trigger (#195) — fires when an external data
+      # source publishes a new revision instead of on a local DML edit.
+      # It declares ``on: {source_changed: <uri>}`` and no ``table``.
+      - name: refresh_on_new_millesime
+        on:
+          source_changed: cadastre://parcelles
+          frequency: mensuel
+        actions:
+          - type: log_event
     security:
       webhook_allowlist:
         - example.com
@@ -163,13 +172,48 @@ class ActionConfigModel(BaseModel):
         return v
 
 
+class OnConfigModel(BaseModel):
+    """The ``on:`` discriminator for non-DML triggers (issue #195).
+
+    Today it carries a single key — ``source_changed`` — naming the
+    external source URI to watch (e.g. ``cadastre://parcelles``). A
+    trigger declaring ``on:`` is a *source-watched* trigger: it fires
+    when :class:`~persistence.source_watcher.SourceWatcherRegistry`
+    observes a new ``revision()`` token, not on a local DML edit. Such
+    a trigger therefore declares no ``table`` / ``when`` / ``predicate``.
+
+    ``frequency`` is an optional catalog-style label (``quotidien``,
+    ``mensuel``…) mapped to a poll interval by
+    :func:`persistence.source_watcher.interval_from_frequency`.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    source_changed: str = Field(min_length=1, max_length=2048)
+    frequency: str | None = Field(default=None, max_length=64)
+
+
 class TriggerConfigModel(BaseModel):
-    """One trigger entry in the YAML config."""
+    """One trigger entry in the YAML config.
+
+    Two mutually-exclusive shapes:
+
+    - **DML trigger** (historical default) — declares a ``table`` and
+      fires on local change-log edits.
+    - **Source trigger** (#195) — declares ``on: {source_changed: <uri>}``
+      and fires on an external-source revision change. It declares no
+      ``table``.
+    """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     name: str = Field(min_length=1, max_length=120)
-    table: str = Field(min_length=1, max_length=120)
+    # Required for DML triggers, forbidden for source triggers — enforced
+    # by :meth:`_validate_trigger_mode`. Optional at the field level so a
+    # source trigger can omit it entirely.
+    table: str | None = Field(default=None, max_length=120)
+    # ``on:`` discriminator — when set, this is a source-watched trigger.
+    on: OnConfigModel | None = None
     # ESRI Attribute Rules vocabulary aliases (#125):
     # ``constraint`` ≡ ``validation`` (rule rejects/tags the row),
     # ``calculation`` ≡ ``trigger`` (rule writes derived attributes),
@@ -211,6 +255,35 @@ class TriggerConfigModel(BaseModel):
     predicate: str | None = None
     actions: list[ActionConfigModel] = Field(default_factory=list)
     enabled: bool = True
+
+    @model_validator(mode="after")
+    def _validate_trigger_mode(self) -> "TriggerConfigModel":
+        """Enforce the DML / source-trigger split (#195).
+
+        A source-watched trigger (``on:`` set) watches an external
+        source, not a GPKG layer — declaring a ``table`` or a
+        ``predicate`` on it is a config error. Conversely a DML trigger
+        must name the ``table`` it watches.
+        """
+        if self.on is not None:
+            if self.table is not None:
+                raise ValueError(
+                    f"trigger {self.name!r}: a source_changed trigger must "
+                    f"not declare a 'table' — it watches the external "
+                    f"source {self.on.source_changed!r}, not a layer"
+                )
+            if self.predicate is not None:
+                raise ValueError(
+                    f"trigger {self.name!r}: 'predicate' is not supported on "
+                    f"a source_changed trigger"
+                )
+        elif not self.table:
+            raise ValueError(
+                f"trigger {self.name!r}: a DML trigger requires a 'table' "
+                f"(or declare 'on: {{source_changed: <uri>}}' for a "
+                f"source-watched trigger)"
+            )
+        return self
 
     @field_validator("when")
     @classmethod
@@ -548,6 +621,32 @@ def load_config(
     )
 
 
+def _normalize_on_keys(raw: dict[str, Any]) -> None:
+    """Restore the trigger ``on:`` key mangled into ``True`` by YAML 1.1.
+
+    ``yaml.safe_load`` coerces the bare scalar ``on`` to the boolean
+    ``True`` per the YAML 1.1 boolean grammar (the "Norway problem").
+    The ``on:`` trigger discriminator (#195) therefore arrives as a
+    boolean dict key, which pydantic rejects (keys must be strings). We
+    move it back to the string ``"on"`` in place, before validation.
+
+    A trigger that somehow carries *both* a boolean ``on`` key and an
+    explicit string ``"on"`` key is a config error — we refuse rather
+    than silently picking one.
+    """
+    triggers = raw.get("triggers")
+    if not isinstance(triggers, list):
+        return
+    for entry in triggers:
+        if isinstance(entry, dict) and True in entry:
+            if "on" in entry:
+                raise ConfigError(
+                    "trigger declares the 'on:' key twice (once bare, once "
+                    "quoted) — keep a single 'on:'"
+                )
+            entry["on"] = entry.pop(True)
+
+
 def parse_config_text(
     text: str,
     *,
@@ -619,6 +718,10 @@ def parse_config_text(
             # ``GISPulseConfig`` requires a string here; fall back to a
             # placeholder so pydantic validates the rest of the doc.
             raw["gpkg"] = "<unbound>"
+
+    # YAML 1.1 coerces the bare trigger key ``on`` to boolean True;
+    # restore it to the string ``"on"`` so pydantic accepts it (#195).
+    _normalize_on_keys(raw)
 
     try:
         config = GISPulseConfig.model_validate(raw)
@@ -695,6 +798,34 @@ def to_triggers(config: GISPulseConfig) -> list["Trigger"]:
             actions.append(
                 ActionDef(action_type=type_map[ac.type], config=cfg),
             )
+
+        # Source-watched trigger (#195) — fires on an external-source
+        # revision change, not a local DML edit. It carries the watched
+        # source URI (and optional poll frequency) in ``conditions``;
+        # ``TriggerEvaluator._eval_source_changed`` reads ``source`` /
+        # ``last_revision`` from there.
+        if entry.on is not None:
+            source_conditions: dict[str, Any] = {
+                "yaml_name": entry.name,
+                "source": entry.on.source_changed,
+            }
+            if entry.on.frequency:
+                source_conditions["frequency"] = entry.on.frequency
+            triggers.append(
+                Trigger(
+                    name=entry.name,
+                    description=(
+                        f"Source watcher (source={entry.on.source_changed})"
+                    ),
+                    event=TriggerEvent.DATA_CHANGED,
+                    trigger_type=TriggerType.SOURCE_CHANGED,
+                    category=TriggerCategory.INTEGRATION,
+                    conditions=source_conditions,
+                    actions=actions,
+                    enabled=entry.enabled,
+                )
+            )
+            continue
 
         # Stash the user-friendly metadata on the trigger so log lines
         # and validate output can reference the YAML name. ``events`` is
@@ -776,7 +907,9 @@ def validate_against_gpkg(config: GISPulseConfig) -> list[str]:
         # (they show up in _gispulse_change_log too) but we don't
         # encourage that path. We just don't reject them.
         for entry in config.triggers:
-            if entry.table not in layers:
+            # Source-watched triggers (#195) reference an external source,
+            # not a GPKG layer — there is no table to check.
+            if entry.on is None and entry.table not in layers:
                 errors.append(
                     f"trigger {entry.name!r}: table {entry.table!r} not "
                     f"found in {gpkg_path.name} (available: "
@@ -810,6 +943,7 @@ __all__ = [
     "ActionConfigModel",
     "ConfigError",
     "GISPulseConfig",
+    "OnConfigModel",
     "RuntimeConfigModel",
     "SecurityConfigModel",
     "TriggerConfigModel",

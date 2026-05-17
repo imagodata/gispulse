@@ -95,6 +95,64 @@ def test_schema_per_layer(source: CadastreSource) -> None:
     assert source.schema("batiments")["geometry"] == "geometry"
 
 
-def test_revision_exposes_millesime(source: CadastreSource) -> None:
-    # A freshness token the source watcher (issue #187) can poll.
-    assert source.revision("parcelles") == "2026-01"
+class _FakeResponse:
+    """Minimal stand-in for an ``httpx.Response`` — only ``.headers``."""
+
+    def __init__(self, headers: dict[str, str]) -> None:
+        self.headers = headers
+
+
+def test_revision_probes_wfs_and_uses_etag(
+    source: CadastreSource, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """revision() derives its token from the WFS ETag header (#198)."""
+    captured: list[str] = []
+
+    def fake_head(url, **_kw):
+        captured.append(url)
+        return _FakeResponse({"etag": '"millesime-2026-07"'})
+
+    monkeypatch.setattr("httpx.head", fake_head)
+    token = source.revision("parcelles")
+
+    assert token == "millesime-2026-07"  # quotes stripped
+    assert captured and "GetCapabilities" in captured[0]
+
+
+def test_revision_falls_back_to_last_modified(
+    source: CadastreSource, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "httpx.head",
+        lambda *_a, **_kw: _FakeResponse(
+            {"last-modified": "Wed, 01 Jul 2026 00:00:00 GMT"}
+        ),
+    )
+    assert source.revision("communes") == "Wed, 01 Jul 2026 00:00:00 GMT"
+
+
+def test_revision_returns_none_on_network_error(
+    source: CadastreSource, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreachable endpoint yields None — the watcher skips it."""
+
+    def boom(*_a, **_kw):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr("httpx.head", boom)
+    assert source.revision("parcelles") is None
+
+
+def test_revision_returns_none_without_freshness_header(
+    source: CadastreSource, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("httpx.head", lambda *_a, **_kw: _FakeResponse({}))
+    assert source.revision("batiments") is None
+
+
+def test_revision_validates_entry_id(
+    source: CadastreSource, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("httpx.head", lambda *_a, **_kw: _FakeResponse({}))
+    with pytest.raises(KeyError, match="unknown entry 'ghost'"):
+        source.revision("ghost")

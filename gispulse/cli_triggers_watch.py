@@ -290,6 +290,29 @@ def _maybe_reload(
     )
 
 
+def _start_source_watcher(runtime: "HeadlessRuntime") -> Any:
+    """Build + start the external-source watcher for ``runtime`` (#197).
+
+    Returns the running :class:`SourceWatcherRegistry`, or ``None`` when
+    the config declares no ``source_changed`` trigger (or the build
+    fails — a broken source watcher must never abort the DML daemon).
+    """
+    from gispulse.runtime.source_watch import build_source_watcher
+
+    try:
+        watcher = build_source_watcher(
+            runtime.triggers, runtime.action_dispatcher
+        )
+    except Exception as exc:  # noqa: BLE001 — never abort the DML loop
+        emit_json("source_watcher_build_failed", error=str(exc))
+        return None
+    if watcher is None:
+        return None
+    watcher.start()
+    emit_json("source_watcher_started", watched=watcher.list_watched())
+    return watcher
+
+
 # ---------------------------------------------------------------------------
 # The loop itself
 # ---------------------------------------------------------------------------
@@ -367,6 +390,12 @@ def run_watch_loop(
         triggers=len(initial_runtime.triggers),
     )
 
+    # Source watcher (#197) — polls external data sources declared with
+    # ``on: {source_changed: ...}`` on its own slow daemon thread. ``None``
+    # when the config has no source trigger. Rebuilt on each runtime swap.
+    source_watcher = _start_source_watcher(initial_runtime)
+    watched_runtime: "HeadlessRuntime" = initial_runtime
+
     try:
         while not stop_event.is_set():
             tick_count += 1
@@ -387,6 +416,16 @@ def run_watch_loop(
                 # unexpected exception here means a bug, not a transient
                 # — log loudly and fall through.
                 emit_json("watch_reload_unexpected_error", error=str(exc))
+
+            # A successful config reload swaps the runtime; rebuild the
+            # source watcher so it tracks the new trigger list / dispatcher
+            # (#197). ``watched_runtime`` holds a reference so the swapped
+            # runtime object identity stays stable for this comparison.
+            if snapshot.runtime is not watched_runtime:
+                if source_watcher is not None:
+                    source_watcher.stop()
+                source_watcher = _start_source_watcher(snapshot.runtime)
+                watched_runtime = snapshot.runtime
 
             # Snapshot the busy-retry counter before the tick so we can
             # diff after.
@@ -450,6 +489,11 @@ def run_watch_loop(
             if sleeper(poll_interval):
                 break
     finally:
+        if source_watcher is not None:
+            try:
+                source_watcher.stop()
+            except Exception as exc:
+                log.warning("source_watcher_stop_failed: %s", exc)
         try:
             snapshot.runtime.close()
         except Exception as exc:

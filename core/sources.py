@@ -308,6 +308,50 @@ class DeclarativeSource(ABC):
         return self._entry(entry_id).revision_token
 
 
+class SourceRegistry:
+    """Process-wide registry of activated :class:`DataSource` instances.
+
+    Keyed by ``DataSource.name``. Populated by the ``register()`` hook of
+    each ``gispulse.data_sources`` plugin. The source watcher (issue
+    #197) resolves a ``<source>://<entry>`` URI from ``triggers.yaml``
+    against this registry to find the live source object to poll.
+    """
+
+    def __init__(self) -> None:
+        self._sources: dict[str, Any] = {}
+
+    def register(self, source: Any) -> None:
+        """Record ``source`` under its ``name`` (last registration wins)."""
+        name = getattr(source, "name", None)
+        if not name:
+            raise ValueError(
+                "a DataSource must declare a non-empty 'name' to be registered"
+            )
+        self._sources[name] = source
+
+    def get(self, name: str) -> Any:
+        """Return the source registered as ``name`` or raise ``KeyError``."""
+        try:
+            return self._sources[name]
+        except KeyError:
+            raise KeyError(
+                f"no data source named {name!r} is registered "
+                f"(available: {', '.join(self.names()) or 'none'})"
+            ) from None
+
+    def names(self) -> list[str]:
+        return sorted(self._sources)
+
+    def clear(self) -> None:
+        """Drop every registration — used by tests for isolation."""
+        self._sources.clear()
+
+
+# Process-wide source registry. Populated by ``gispulse.data_sources``
+# plugin ``register()`` hooks; read by the source watcher (#197).
+SOURCES = SourceRegistry()
+
+
 class DeclarativeSink(ABC):
     """Base for sinks that delegate writing to a registered :class:`Writer`."""
 
@@ -332,4 +376,6 @@ __all__ = [
     "DataSink",
     "DeclarativeSource",
     "DeclarativeSink",
+    "SourceRegistry",
+    "SOURCES",
 ]
