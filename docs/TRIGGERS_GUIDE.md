@@ -74,6 +74,51 @@ runtime:
   max_batch: 200
 ```
 
+### Source-watched triggers (`source_changed`)
+
+Every trigger above is a **DML trigger** — it declares a `table` and fires
+on a local edit. v1.7.0 adds a second shape: the **source-watched
+trigger**, which fires when an *external* data source publishes a new
+revision (EPIC #175, issue #195).
+
+```yaml
+triggers:
+  - name: refresh_on_new_cadastre
+    on:
+      source_changed: cadastre://parcelles   # <source>://<entry> URI
+      frequency: mensuel                      # poll cadence (optional)
+    actions:
+      - type: log_event
+      - type: webhook
+        url: https://example.com/hooks/cadastre-updated
+```
+
+- A `source_changed` trigger declares **no `table`, `when` or
+  `predicate`** — it watches a source, not a layer. (The config still
+  needs the top-level `gpkg:` key — the project database.)
+- `source_changed` is a `<source>://<entry>` URI, resolved against the
+  `core.sources.SOURCES` registry. The source comes from an installed
+  `gispulse-src-*` plugin — see the
+  [Source Plugin Authoring Guide](./SOURCE_PLUGIN_GUIDE.md).
+- `frequency` sets the `revision()` poll cadence. Recognised labels:
+  `temps-reel`, `quotidien`, `hebdomadaire`, `mensuel`, `trimestriel`,
+  `annuel`, `pluriannuel`; an unknown label falls back to the default
+  interval.
+- The `SourceWatcherRegistry` polls the source's `revision()` token — a
+  cheap freshness probe, never a full fetch. The first tick seeds the
+  baseline (no firing); a token change afterwards fires the trigger.
+
+Run a source-watched config with the long-running watch loop:
+
+```bash
+gispulse watch ./project.gpkg --rules triggers.yaml
+```
+
+A full runnable example ships in
+[`examples/triggers/source_changed_cadastre.yaml`](../examples/triggers/source_changed_cadastre.yaml);
+a step-by-step walkthrough lives in
+`docs-site/guide/walkthroughs/watch-external-source.md`.
+
 ### Commands
 
 ```bash
