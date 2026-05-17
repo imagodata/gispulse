@@ -10,8 +10,11 @@ from __future__ import annotations
 def register() -> None:
     """Entry-point hook for the ``gispulse.data_sources`` group.
 
-    Importing the module is enough — :class:`CadastreSource` is a plain
-    declarative class; the PluginHub records the source from this
-    callable.
+    Registers a :class:`CadastreSource` instance in the process-wide
+    ``core.sources.SOURCES`` registry so the source watcher (issue #197)
+    can resolve ``cadastre://<entry>`` URIs declared in ``triggers.yaml``.
     """
-    from gispulse_src_cadastre import source  # noqa: F401
+    from core.sources import SOURCES
+    from gispulse_src_cadastre.source import CadastreSource
+
+    SOURCES.register(CadastreSource())
