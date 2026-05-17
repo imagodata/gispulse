@@ -1,36 +1,46 @@
-"""
-GISPulse MCP server — FastMCP facade exposing GISPulse to LLM agents.
+"""GISPulse MCP server — a thin FastMCP adapter over :class:`GISPulseApp`.
+
+Every tool is a one-liner onto a :class:`gispulse.app.GISPulseApp` use-case
+(Chantier B of the v1.8.0 "Foundations" refonte). The server holds **no
+state of its own** — the pre-v1.8.0 in-memory ``Rule`` / ``Job`` / ``Dataset``
+repositories are gone; they modelled a rule grammar that predated the
+pipeline-v2 unification and drifted from the rest of the product.
 
 Tools
 -----
 Capabilities:
-  list_capabilities()          -> list of capability metadata dicts
+  list_capabilities()          -> capability metadata dicts
   get_capability_info(name)    -> single capability detail dict
 
-Rules:
-  create_rule(...)             -> creates and stores a Rule, returns its id
-  list_rules()                 -> lists all stored rules
-  validate_rule(rule_id)       -> validates a rule, returns result dict
-  delete_rule(rule_id)         -> removes a rule, returns bool
+Catalog:
+  browse_catalog(...)          -> matching GIS catalog entries
+  get_catalog_entry(entry_id)  -> single catalog entry
 
-Datasets:
-  list_datasets()              -> lists loaded datasets
-  load_gpkg(path, name)        -> loads a GPKG into the engine (requires fiona)
+Templates:
+  list_templates()             -> built-in pipeline templates
+  get_template(name)           -> raw template JSON
 
-Jobs:
-  run_job(name, dataset_id, rule_ids) -> executes a job, returns status dict
+Datasets / pipelines (read-only — no FS writes, no session state):
+  inspect_dataset(path)        -> layer names of a GeoPackage
+  validate_pipeline(path)      -> schema-validate a pipeline JSON file
+
+Plugins:
+  list_plugins()               -> PluginHub inventory records
 
 Resources
 ---------
   gispulse://capabilities      -> JSON list of capabilities
-  gispulse://rules             -> JSON list of rules
+  gispulse://templates         -> JSON list of built-in templates
+
+Execution-oriented tools (trigger / changelog / dryrun) and outbound FS
+scoping are tracked separately in the MCP epic (#202–#205).
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from typing import Any
-from uuid import UUID
 
 try:
     from fastmcp import FastMCP
@@ -40,28 +50,17 @@ except ImportError as exc:  # pragma: no cover
         "Install it with: pip install fastmcp"
     ) from exc
 
-from gispulse.capabilities import list_all as _list_all_capabilities
-from gispulse.capabilities.registry import REGISTRY
-from gispulse.core.plugin_hub import PluginHub
-from gispulse.core.models import Dataset, Job, JobStatus, Rule
+from gispulse.app import GISPulseApp
+from gispulse.catalog.models import CatalogDomain
 from gispulse.core.logging import get_logger
-from gispulse.persistence.repository import InMemoryRepository
-from gispulse.rules.engine import RuleEngine
-from gispulse.rules.validation import validate_rule as _validate_rule
-from gispulse.orchestration.runner import JobRunner
+from gispulse.core.plugin_hub import PluginHub
 
 log = get_logger(__name__)
 
-# ---------------------------------------------------------------------------
-# Module-level state (in-memory repositories for the MCP session)
-# ---------------------------------------------------------------------------
+# Stateless façade — shared by every tool. GISPulseApp holds no engine or
+# repository handle of its own; it wires each subsystem lazily on demand.
+_app = GISPulseApp()
 
-_rule_repo: InMemoryRepository[Rule] = InMemoryRepository()
-_dataset_repo: InMemoryRepository[Dataset] = InMemoryRepository()
-_job_repo: InMemoryRepository[Job] = InMemoryRepository()
-
-_rule_engine = RuleEngine(repository=_rule_repo)
-_job_runner = JobRunner(repository=_rule_repo, rule_engine=_rule_engine)
 
 # ---------------------------------------------------------------------------
 # FastMCP server helpers
@@ -82,17 +81,17 @@ def register_builtin_mcp_surface(server: Any) -> None:
     for fn in (
         list_capabilities,
         get_capability_info,
-        create_rule,
-        list_rules,
-        validate_rule,
-        delete_rule,
-        list_datasets,
-        load_gpkg,
-        run_job,
+        browse_catalog,
+        get_catalog_entry,
+        list_templates,
+        get_template,
+        inspect_dataset,
+        validate_pipeline,
+        list_plugins,
     ):
         server.tool()(fn)
     server.resource("gispulse://capabilities")(resource_capabilities)
-    server.resource("gispulse://rules")(resource_rules)
+    server.resource("gispulse://templates")(resource_templates)
 
 
 def register_plugin_mcp_surface(server: Any) -> None:
@@ -109,7 +108,9 @@ def register_plugin_mcp_surface(server: Any) -> None:
             factory.register(server)
             log.info("plugin_mcp_resources_registered", plugin=factory.name)
         except Exception as exc:
-            log.warning("plugin_mcp_resources_failed", plugin=factory.name, error=str(exc))
+            log.warning(
+                "plugin_mcp_resources_failed", plugin=factory.name, error=str(exc)
+            )
 
 
 # ===========================================================================
@@ -118,12 +119,12 @@ def register_plugin_mcp_surface(server: Any) -> None:
 
 
 def list_capabilities() -> list[dict[str, Any]]:
-    """List all registered GISPulse capabilities with their schemas.
+    """List every registered GISPulse capability with its schema.
 
     Returns:
         List of dicts with keys ``name``, ``description``, ``schema``.
     """
-    return _list_all_capabilities()
+    return _app.list_capabilities()
 
 
 def get_capability_info(name: str) -> dict[str, Any]:
@@ -133,281 +134,161 @@ def get_capability_info(name: str) -> dict[str, Any]:
         name: Registered capability name (e.g. 'buffer', 'filter').
 
     Returns:
-        Dict with keys ``name``, ``description``, ``schema``.
-        Contains an ``error`` key if the capability is not found.
+        Dict with keys ``name``, ``description``, ``schema``; or an
+        ``error`` key plus ``available`` names when ``name`` is unknown.
     """
-    if name not in REGISTRY:
-        registered = sorted(REGISTRY.keys())
-        return {"error": f"Capability '{name}' not found.", "available": registered}
-
-    cls = REGISTRY[name]
-    instance = cls()
+    caps = _app.list_capabilities()
+    for cap in caps:
+        if cap["name"] == name:
+            return cap
     return {
-        "name": cls.name,
-        "description": cls.description,
-        "schema": instance.get_schema(),
+        "error": f"Capability '{name}' not found.",
+        "available": sorted(c["name"] for c in caps),
     }
 
 
 # ===========================================================================
-# Rule tools
+# Catalog tools
 # ===========================================================================
 
 
-def create_rule(
-    name: str,
-    capability: str,
-    config: dict[str, Any],
-    description: str = "",
-) -> dict[str, Any]:
-    """Create and store a Rule in the session repository.
+def browse_catalog(
+    domain: str | None = None,
+    search: str | None = None,
+    provider: str | None = None,
+    limit: int = 25,
+) -> list[dict[str, Any]]:
+    """Search the unified GIS data catalog.
 
     Args:
-        name:        Human-readable rule name.
-        capability:  Registered capability name to invoke (e.g. 'buffer').
-        config:      Capability-specific parameter dict (e.g. {'distance': 100}).
-        description: Optional rule description.
+        domain:   Optional domain filter — ``projection`` | ``basemap`` |
+                  ``flux`` | ``opendata``.
+        search:   Optional free-text query matched on name / description.
+        provider: Optional provider name filter.
+        limit:    Maximum number of entries to return (default 25).
 
     Returns:
-        Dict with ``rule_id`` (str UUID) and ``name`` on success,
-        or ``error`` key on failure.
+        List of catalog entry dicts; an ``error`` key wraps an invalid
+        ``domain`` value.
+    """
+    domain_enum: CatalogDomain | None = None
+    if domain:
+        try:
+            domain_enum = CatalogDomain(domain)
+        except ValueError:
+            return [
+                {
+                    "error": f"Invalid domain '{domain}'.",
+                    "available": [d.value for d in CatalogDomain],
+                }
+            ]
+    entries = _app.browse_catalog(
+        domain=domain_enum, search=search, provider=provider, limit=limit
+    )
+    return [asdict(e) for e in entries]
+
+
+def get_catalog_entry(entry_id: str) -> dict[str, Any]:
+    """Look up a single catalog entry by its full id.
+
+    Returns:
+        The catalog entry dict, or an ``error`` key when not found.
+    """
+    entry = _app.get_catalog_entry(entry_id)
+    if entry is None:
+        return {"error": f"Catalog entry '{entry_id}' not found."}
+    return asdict(entry)
+
+
+# ===========================================================================
+# Template tools
+# ===========================================================================
+
+
+def list_templates() -> list[dict[str, Any]]:
+    """List the built-in pipeline templates.
+
+    Returns:
+        One dict per template with ``name``, ``title`` and ``description``.
+    """
+    return _app.list_templates()
+
+
+def get_template(name: str) -> dict[str, Any]:
+    """Return the raw JSON of a built-in pipeline template.
+
+    Args:
+        name: Template name (the file stem, without ``.json``).
+
+    Returns:
+        The template JSON object, or an ``error`` key when unknown.
     """
     try:
-        rule = Rule(
-            name=name,
-            capability=capability,
-            config=config,
-            description=description,
-        )
-        _rule_repo.save(rule)
-        log.info("mcp_rule_created", rule_id=str(rule.id), name=name)
-        return {"rule_id": str(rule.id), "name": rule.name}
-    except Exception as exc:  # pragma: no cover
-        log.error("mcp_create_rule_error", error=str(exc))
+        return _app.get_template(name)
+    except FileNotFoundError as exc:
         return {"error": str(exc)}
 
 
-def list_rules() -> list[dict[str, Any]]:
-    """List all rules stored in the session repository.
-
-    Returns:
-        List of dicts with keys ``rule_id``, ``name``, ``capability``,
-        ``description``, ``enabled``.
-    """
-    return [
-        {
-            "rule_id": str(rule.id),
-            "name": rule.name,
-            "capability": rule.capability,
-            "description": rule.description,
-            "config": rule.config,
-            "enabled": rule.enabled,
-        }
-        for rule in _rule_repo.list_all()
-    ]
-
-
-def validate_rule(rule_id: str) -> dict[str, Any]:
-    """Validate a stored rule against its capability's schema.
-
-    Args:
-        rule_id: String UUID of the rule to validate.
-
-    Returns:
-        Dict with keys ``valid`` (bool), ``errors`` (list of dicts with
-        ``field`` and ``message``), or an ``error`` key if rule not found.
-    """
-    try:
-        uid = UUID(rule_id)
-    except ValueError:
-        return {"error": f"Invalid UUID format: '{rule_id}'"}
-
-    rule = _rule_repo.get(uid)
-    if rule is None:
-        return {"error": f"Rule '{rule_id}' not found."}
-
-    result = _validate_rule(rule)
-    return {
-        "valid": result.valid,
-        "errors": [
-            {"field": err.field, "message": err.message}
-            for err in result.errors
-        ],
-    }
-
-
-def delete_rule(rule_id: str) -> dict[str, Any]:
-    """Delete a stored rule from the session repository.
-
-    Args:
-        rule_id: String UUID of the rule to delete.
-
-    Returns:
-        Dict with ``deleted`` (bool) and ``rule_id``, or ``error`` key if
-        UUID is malformed.
-    """
-    try:
-        uid = UUID(rule_id)
-    except ValueError:
-        return {"error": f"Invalid UUID format: '{rule_id}'"}
-
-    deleted = _rule_repo.delete(uid)
-    log.info("mcp_rule_deleted", rule_id=rule_id, deleted=deleted)
-    return {"deleted": deleted, "rule_id": rule_id}
-
-
 # ===========================================================================
-# Dataset tools
+# Dataset / pipeline tools (read-only)
 # ===========================================================================
 
 
-def list_datasets() -> list[dict[str, Any]]:
-    """List all datasets loaded in the current session.
-
-    Returns:
-        List of dicts with keys ``dataset_id``, ``name``, ``source_path``,
-        ``crs``, ``format``.
-    """
-    return [
-        {
-            "dataset_id": str(ds.id),
-            "name": ds.name,
-            "source_path": ds.source_path,
-            "crs": ds.crs,
-            "format": ds.format,
-        }
-        for ds in _dataset_repo.list_all()
-    ]
-
-
-def load_gpkg(path: str, name: str = "") -> dict[str, Any]:
-    """Load a GeoPackage file into the session engine.
-
-    Requires fiona to be installed. The dataset is registered in the
-    in-memory repository; individual layers are listed in the metadata.
+def inspect_dataset(path: str) -> dict[str, Any]:
+    """List the layers of a GeoPackage file without loading its features.
 
     Args:
-        path: Absolute path to the .gpkg file.
-        name: Optional display name (defaults to the file basename).
+        path: Absolute path to a ``.gpkg`` file.
 
     Returns:
-        Dict with ``dataset_id``, ``name``, ``layers`` (list of layer names),
-        or ``error`` key on failure.
+        Dict with ``path`` and ``layers`` (list of layer names), or an
+        ``error`` key when the file is missing or unreadable.
     """
-    try:
-        import pyogrio  # noqa: PLC0415
-    except ImportError:
-        return {"error": "pyogrio is required to load GPKG files. Install it with: pip install pyogrio"}
-
     import os
 
     if not os.path.isfile(path):
         return {"error": f"File not found: '{path}'"}
-
     try:
-        layer_info = pyogrio.list_layers(path)
-        layer_names: list[str] = [row[0] for row in layer_info]
+        layers = _app.list_layers(path)
     except Exception as exc:
-        return {"error": f"Cannot read GPKG layers: {exc}"}
-
-    display_name = name or os.path.basename(path)
-    dataset = Dataset(
-        name=display_name,
-        source_path=path,
-        format="GPKG",
-        metadata={"layers": layer_names},
-    )
-    _dataset_repo.save(dataset)
-    log.info(
-        "mcp_gpkg_loaded",
-        dataset_id=str(dataset.id),
-        name=display_name,
-        layers=layer_names,
-    )
-    return {
-        "dataset_id": str(dataset.id),
-        "name": display_name,
-        "layers": layer_names,
-    }
+        return {"error": f"Cannot read GeoPackage layers: {exc}"}
+    return {"path": path, "layers": layers}
 
 
-# ===========================================================================
-# Job tools
-# ===========================================================================
-
-
-def run_job(
-    name: str,
-    dataset_id: str,
-    rule_ids: list[str],
-) -> dict[str, Any]:
-    """Execute a GISPulse job applying rules to a loaded dataset.
-
-    The dataset must have been loaded with ``load_gpkg``. Each rule in
-    ``rule_ids`` must exist in the session repository. Rules are applied in
-    order using the rule engine.
+def validate_pipeline(path: str) -> dict[str, Any]:
+    """Schema-validate a pipeline JSON file (v1 or v2 grammar).
 
     Args:
-        name:       Human-readable job name.
-        dataset_id: String UUID of a loaded dataset.
-        rule_ids:   List of string UUIDs identifying rules to apply in order.
+        path: Path to a pipeline / rules JSON file.
 
     Returns:
-        Dict with ``job_id``, ``status``, ``rules_applied`` on success,
-        or ``error`` key on failure.
+        Dict with ``valid`` (bool). On success it also carries ``name``
+        and ``steps`` (count); on failure, ``errors`` (list of strings).
     """
     try:
-        ds_uid = UUID(dataset_id)
-    except ValueError:
-        return {"error": f"Invalid dataset_id UUID: '{dataset_id}'"}
+        spec = _app.load_pipeline(path, validate=True)
+    except FileNotFoundError as exc:
+        return {"valid": False, "errors": [str(exc)]}
+    except ValueError as exc:
+        return {"valid": False, "errors": str(exc).splitlines()}
+    except json.JSONDecodeError as exc:
+        return {"valid": False, "errors": [f"Invalid JSON: {exc}"]}
+    return {"valid": True, "name": spec.name, "steps": len(spec.steps)}
 
-    dataset = _dataset_repo.get(ds_uid)
-    if dataset is None:
-        return {"error": f"Dataset '{dataset_id}' not found. Load it first with load_gpkg."}
 
-    if dataset.source_path is None:
-        return {"error": f"Dataset '{dataset_id}' has no source path."}
+# ===========================================================================
+# Plugin tools
+# ===========================================================================
 
-    # Validate all rule IDs before running
-    for rid in rule_ids:
-        try:
-            uid = UUID(rid)
-        except ValueError:
-            return {"error": f"Invalid rule_id UUID: '{rid}'"}
-        if _rule_repo.get(uid) is None:
-            return {"error": f"Rule '{rid}' not found."}
 
-    # Load first layer of the GPKG for processing
-    try:
-        import geopandas as gpd  # noqa: PLC0415
+def list_plugins() -> list[dict[str, Any]]:
+    """List the plugins discovered by the unified PluginHub.
 
-        layers: list[str] = dataset.metadata.get("layers", [])
-        if not layers:
-            return {"error": "Dataset has no layers to process."}
-        gdf = gpd.read_file(dataset.source_path, layer=layers[0])
-    except Exception as exc:
-        return {"error": f"Failed to read dataset: {exc}"}
-
-    job = Job(
-        name=name,
-        dataset_id=ds_uid,
-        parameters={"rule_ids": rule_ids},
-    )
-    _job_repo.save(job)
-
-    try:
-        updated_job, _ = _job_runner.run(job, gdf)
-        return {
-            "job_id": str(updated_job.id),
-            "status": updated_job.status.value,
-            "rules_applied": len(rule_ids),
-        }
-    except Exception as exc:
-        return {
-            "job_id": str(job.id),
-            "status": JobStatus.FAILED.value,
-            "error": str(exc),
-        }
+    Returns:
+        One dict per plugin record — sources, capabilities, sinks,
+        templates and extensions — as produced by ``PluginRecord.as_dict``.
+    """
+    return [rec.as_dict() for rec in _app.list_plugins()]
 
 
 # ===========================================================================
@@ -416,25 +297,14 @@ def run_job(
 
 
 def resource_capabilities() -> str:
-    """MCP resource: list of all registered GISPulse capabilities (JSON)."""
-    return json.dumps(_list_all_capabilities(), indent=2)
+    """MCP resource: all registered GISPulse capabilities (JSON)."""
+    return json.dumps(_app.list_capabilities(), indent=2)
 
 
-def resource_rules() -> str:
-    """MCP resource: list of all rules stored in the session (JSON)."""
-    rules = [
-        {
-            "rule_id": str(rule.id),
-            "name": rule.name,
-            "capability": rule.capability,
-            "description": rule.description,
-            "config": rule.config,
-            "enabled": rule.enabled,
-        }
-        for rule in _rule_repo.list_all()
-    ]
-    return json.dumps(rules, indent=2)
+def resource_templates() -> str:
+    """MCP resource: the built-in pipeline templates (JSON)."""
+    return json.dumps(_app.list_templates(), indent=2)
 
 
-# Module-level compatibility instance used by existing imports.
+# Module-level compatibility instance used by existing imports / launchers.
 mcp = create_mcp_server()
