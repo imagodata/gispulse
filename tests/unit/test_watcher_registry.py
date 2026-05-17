@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from persistence.gpkg_schema import bootstrap_gpkg_project
-from persistence.watcher_registry import WatcherRegistry
+from gispulse.persistence.gpkg_schema import bootstrap_gpkg_project
+from gispulse.persistence.watcher_registry import WatcherRegistry
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +139,7 @@ class TestMultiDataset:
         triggers on each GPKG, INSERT a row into each via a fresh SQLite
         handle, and confirm BOTH dml.changed events land on the hub.
         """
-        from persistence.gpkg_schema import install_change_tracking
+        from gispulse.persistence.gpkg_schema import install_change_tracking
 
         path1 = tmp_path / "a.gpkg"
         path2 = tmp_path / "b.gpkg"
@@ -294,7 +294,7 @@ class TestStatsSnapshot:
 
     def test_rows_processed_after_insert(self, tmp_path: Path) -> None:
         """A real INSERT bumps ``rows_processed`` once the watcher drains."""
-        from persistence.gpkg_schema import install_change_tracking
+        from gispulse.persistence.gpkg_schema import install_change_tracking
 
         path = tmp_path / "a.gpkg"
         _make_gpkg(path)

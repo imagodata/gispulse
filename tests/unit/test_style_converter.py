@@ -8,8 +8,10 @@ import pytest
 
 # Direct import to avoid heavy persistence.__init__ deps
 import importlib.util
+from pathlib import Path
 _spec = importlib.util.spec_from_file_location(
-    "style_converter", "persistence/style_converter.py"
+    "style_converter",
+    Path(__file__).resolve().parents[2] / "src" / "gispulse" / "persistence" / "style_converter.py",
 )
 sc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sc)

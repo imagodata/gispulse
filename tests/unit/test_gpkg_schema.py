@@ -11,7 +11,7 @@ import sqlite3
 
 import pytest
 
-from persistence.gpkg_schema import (
+from gispulse.persistence.gpkg_schema import (
     EXTENSION_DEFINITION,
     EXTENSION_NAME,
     EXTENSION_SCOPE,
@@ -216,7 +216,7 @@ class TestBootstrapGpkgProject:
         assert set(INTERNAL_TABLES).issubset(registered)
 
     def test_sets_schema_version_in_kv_store(self, conn):
-        from persistence.schema import SCHEMA_VERSION
+        from gispulse.persistence.schema import SCHEMA_VERSION
 
         bootstrap_gpkg_project(conn)
         row = conn.execute(
@@ -468,7 +468,7 @@ class TestIdentifierValidation:
 
     def test_install_change_tracking_slug_stable(self, conn):
         """B-05: same Unicode layer name → same trigger names across calls."""
-        from core.sql_safety import slug_identifier
+        from gispulse.core.sql_safety import slug_identifier
 
         bootstrap_gpkg_project(conn)
         layer = "Parcelles cadastrales 2024"
@@ -490,7 +490,7 @@ class TestIdentifierValidation:
         names. The slug must keep returning the same identifier for
         ASCII-safe layer names so legacy projects round-trip cleanly.
         """
-        from core.sql_safety import slug_identifier
+        from gispulse.core.sql_safety import slug_identifier
 
         assert slug_identifier("parcels") == "parcels"
         assert slug_identifier("my_table_2024") == "my_table_2024"

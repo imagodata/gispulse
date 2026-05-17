@@ -13,7 +13,7 @@ from shapely.geometry import (
     Polygon,
 )
 
-from capabilities.transforms import (
+from gispulse.capabilities.transforms import (
     AddMCapability,
     AddZCapability,
     AffineTransformCapability,

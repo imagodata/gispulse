@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from shapely.geometry import Point
 
-from capabilities.classification import ClassifyCapability
+from gispulse.capabilities.classification import ClassifyCapability
 
 
 @pytest.fixture

@@ -23,10 +23,10 @@ from uuid import uuid4
 
 import pytest
 
-from core.models import Job, JobStatus
-from orchestration.job_queue import InMemoryJobQueue
-from persistence.audit import AuditEntry, AuditLogger, AuditQuery
-from persistence.storage import LocalStorage, StorageError
+from gispulse.core.models import Job, JobStatus
+from gispulse.orchestration.job_queue import InMemoryJobQueue
+from gispulse.persistence.audit import AuditEntry, AuditLogger, AuditQuery
+from gispulse.persistence.storage import LocalStorage, StorageError
 
 
 # ---------------------------------------------------------------------------
@@ -140,8 +140,8 @@ class TestRbacFullFlow:
         4. Verify the key maps back to the correct user
         5. Verify permissions via role comparison
         """
-        from persistence.auth_models import Organisation, User, role_gte
-        from persistence.auth_repository import AuthRepository, hash_api_key
+        from gispulse.persistence.auth_models import Organisation, User, role_gte
+        from gispulse.persistence.auth_repository import AuthRepository, hash_api_key
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "auth_test.db"
@@ -201,8 +201,8 @@ class TestRbacFullFlow:
 
     def test_api_key_expiration_blocks_access(self):
         """An expired API key must be detectable by the auth layer."""
-        from persistence.auth_models import User
-        from persistence.auth_repository import AuthRepository, hash_api_key
+        from gispulse.persistence.auth_models import User
+        from gispulse.persistence.auth_repository import AuthRepository, hash_api_key
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "auth_test.db"
@@ -238,7 +238,7 @@ class TestSchedulerCreateAndFire:
         Uses PipelineScheduler with an InMemoryJobQueue to validate the
         full scheduling flow without external dependencies.
         """
-        from orchestration.scheduler import (
+        from gispulse.orchestration.scheduler import (
             PipelineScheduler,
             ScheduledPipeline,
         )
@@ -276,7 +276,7 @@ class TestSchedulerCreateAndFire:
 
     def test_disabled_schedule_does_not_fire(self):
         """A disabled schedule must not enqueue any job, even if it's past due."""
-        from orchestration.scheduler import PipelineScheduler, ScheduledPipeline
+        from gispulse.orchestration.scheduler import PipelineScheduler, ScheduledPipeline
 
         queue = InMemoryJobQueue()
         scheduler = PipelineScheduler(job_queue=queue)
@@ -296,7 +296,7 @@ class TestSchedulerCreateAndFire:
 
     def test_schedule_without_next_run_does_not_fire(self):
         """A schedule with next_run=None must not fire."""
-        from orchestration.scheduler import PipelineScheduler, ScheduledPipeline
+        from gispulse.orchestration.scheduler import PipelineScheduler, ScheduledPipeline
 
         queue = InMemoryJobQueue()
         scheduler = PipelineScheduler(job_queue=queue)
@@ -519,7 +519,7 @@ class TestTierGatingAllFeatures:
 
     def test_community_blocks_s3_storage(self, monkeypatch):
         """S3 storage is gated to Pro tier — Community gets LocalStorage fallback."""
-        from persistence.storage import create_storage
+        from gispulse.persistence.storage import create_storage
 
         monkeypatch.setenv("GISPULSE_S3_ENDPOINT", "http://minio:9000")
         monkeypatch.setenv("GISPULSE_TIER", "community")
@@ -530,8 +530,8 @@ class TestTierGatingAllFeatures:
 
     def test_community_blocks_scheduler(self, monkeypatch):
         """PipelineScheduler.start() requires Pro tier."""
-        from orchestration.scheduler import PipelineScheduler
-        from persistence.tier import TierError
+        from gispulse.orchestration.scheduler import PipelineScheduler
+        from gispulse.persistence.tier import TierError
 
         monkeypatch.setenv("GISPULSE_TIER", "community")
         monkeypatch.delenv("GISPULSE_LICENSE_KEY", raising=False)
@@ -544,7 +544,7 @@ class TestTierGatingAllFeatures:
 
     def test_pro_tier_requires_license_key(self, monkeypatch):
         """Setting GISPULSE_TIER=pro without a license key must raise TierError."""
-        from persistence.tier import TierError, check_tier
+        from gispulse.persistence.tier import TierError, check_tier
 
         monkeypatch.setenv("GISPULSE_TIER", "pro")
         monkeypatch.delenv("GISPULSE_LICENSE_KEY", raising=False)
@@ -555,7 +555,7 @@ class TestTierGatingAllFeatures:
     def test_pro_tier_with_valid_license_passes(self, monkeypatch):
         """Setting GISPULSE_TIER=pro with license skip verify passes."""
         import base64
-        from persistence.tier import check_tier
+        from gispulse.persistence.tier import check_tier
 
         # Build a syntactically valid payload.signature key (skip actual Ed25519 verify)
         payload = base64.urlsafe_b64encode(b'{"org":"test","tier":"pro","exp":"2099-01-01T00:00:00Z"}').rstrip(b"=").decode()
@@ -569,7 +569,7 @@ class TestTierGatingAllFeatures:
 
     def test_community_blocks_postgis_engine(self, monkeypatch):
         """PostGIS engine is gated to Pro tier."""
-        from persistence.tier import TierError, enforce_engine_tier
+        from gispulse.persistence.tier import TierError, enforce_engine_tier
 
         monkeypatch.setenv("GISPULSE_TIER", "community")
         monkeypatch.delenv("GISPULSE_LICENSE_KEY", raising=False)
@@ -579,7 +579,7 @@ class TestTierGatingAllFeatures:
 
     def test_community_allows_duckdb_engine(self, monkeypatch):
         """DuckDB engine is available in Community tier."""
-        from persistence.tier import enforce_engine_tier
+        from gispulse.persistence.tier import enforce_engine_tier
 
         monkeypatch.setenv("GISPULSE_TIER", "community")
         # Should not raise
@@ -587,7 +587,7 @@ class TestTierGatingAllFeatures:
 
     def test_enterprise_features_blocked_for_pro(self, monkeypatch):
         """Enterprise-tier features must be blocked for Pro tier."""
-        from persistence.tier import TierError, check_tier
+        from gispulse.persistence.tier import TierError, check_tier
 
         monkeypatch.setenv("GISPULSE_TIER", "pro")
         monkeypatch.setenv("GISPULSE_LICENSE_KEY", "valid")

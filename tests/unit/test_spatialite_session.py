@@ -11,14 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from core.models import (
+from gispulse.core.models import (
     ChangeOperation,
     EphemeralSession,
     SessionBackend,
     Trigger,
 )
-from persistence.session_provisioner import SessionProvisioner
-from persistence.spatialite_session import SpatiaLiteSession, _build_sqlite_triggers
+from gispulse.persistence.session_provisioner import SessionProvisioner
+from gispulse.persistence.spatialite_session import SpatiaLiteSession, _build_sqlite_triggers
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +153,7 @@ class TestSpatiaLiteChangeLog:
 
 class TestProcessPendingChanges:
     def setup_method(self):
-        from rules.trigger_evaluator import TriggerEvaluator
+        from gispulse.rules.trigger_evaluator import TriggerEvaluator
         self.session = SpatiaLiteSession(db_path=":memory:")
         self.session.open()
         self.session.conn.execute(
@@ -305,7 +305,7 @@ class TestPolling:
             conditions={"table": "items", "operation": "INSERT"},
             actions=[],
         )
-        from rules.trigger_evaluator import TriggerEvaluator
+        from gispulse.rules.trigger_evaluator import TriggerEvaluator
         evaluator = TriggerEvaluator()
         session.start_polling(triggers=[trigger], interval=0.02, evaluator=evaluator)
 

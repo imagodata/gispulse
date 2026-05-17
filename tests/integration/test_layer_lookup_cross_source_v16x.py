@@ -25,7 +25,7 @@ from gispulse.runtime.config_loader import (
     ValidateRuleConfigModel,
 )
 from gispulse.runtime.headless_runtime import build_runtime
-from persistence.gpkg_engine import GeoPackageEngine
+from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
 
 def _build_project_gpkg(path: Path) -> None:

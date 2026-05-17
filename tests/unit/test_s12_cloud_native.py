@@ -53,7 +53,7 @@ class TestGeoParquetRoundtrip:
     """read_geoparquet(write_geoparquet(gdf)) == gdf (geometries + attributes)."""
 
     def test_roundtrip_basic(self, sample_gdf: gpd.GeoDataFrame, tmp_path: Path) -> None:
-        from core.io.geoparquet import read_geoparquet, write_geoparquet
+        from gispulse.core.io.geoparquet import read_geoparquet, write_geoparquet
 
         out = str(tmp_path / "cities.parquet")
         write_geoparquet(sample_gdf, out)
@@ -68,7 +68,7 @@ class TestGeoParquetRoundtrip:
     def test_roundtrip_preserves_attributes(
         self, sample_gdf: gpd.GeoDataFrame, tmp_path: Path
     ) -> None:
-        from core.io.geoparquet import read_geoparquet, write_geoparquet
+        from gispulse.core.io.geoparquet import read_geoparquet, write_geoparquet
 
         out = str(tmp_path / "attrs.parquet")
         write_geoparquet(sample_gdf, out)
@@ -81,7 +81,7 @@ class TestGeoParquetRoundtrip:
     def test_roundtrip_geometry_types(
         self, sample_gdf: gpd.GeoDataFrame, tmp_path: Path
     ) -> None:
-        from core.io.geoparquet import read_geoparquet, write_geoparquet
+        from gispulse.core.io.geoparquet import read_geoparquet, write_geoparquet
 
         out = str(tmp_path / "geom.parquet")
         write_geoparquet(sample_gdf, out)
@@ -94,7 +94,7 @@ class TestGeoParquetRoundtrip:
     def test_write_compression_zstd(
         self, sample_gdf: gpd.GeoDataFrame, tmp_path: Path
     ) -> None:
-        from core.io.geoparquet import read_geoparquet, write_geoparquet
+        from gispulse.core.io.geoparquet import read_geoparquet, write_geoparquet
 
         out = str(tmp_path / "zstd.parquet")
         write_geoparquet(sample_gdf, out, compression="zstd")
@@ -106,7 +106,7 @@ class TestGeoParquetRoundtrip:
     def test_force_geopandas_backend(
         self, sample_gdf: gpd.GeoDataFrame, tmp_path: Path
     ) -> None:
-        from core.io.geoparquet import read_geoparquet, write_geoparquet
+        from gispulse.core.io.geoparquet import read_geoparquet, write_geoparquet
 
         out = str(tmp_path / "gpd_backend.parquet")
         write_geoparquet(sample_gdf, out)
@@ -115,14 +115,14 @@ class TestGeoParquetRoundtrip:
         assert len(result) == len(sample_gdf)
 
     def test_write_no_geometry_raises(self, tmp_path: Path) -> None:
-        from core.io.geoparquet import write_geoparquet
+        from gispulse.core.io.geoparquet import write_geoparquet
 
         gdf = gpd.GeoDataFrame({"a": [1, 2]})
         with pytest.raises(ValueError, match="geometry"):
             write_geoparquet(gdf, str(tmp_path / "no_geom.parquet"))
 
     def test_read_missing_file_raises(self) -> None:
-        from core.io.geoparquet import read_geoparquet
+        from gispulse.core.io.geoparquet import read_geoparquet
 
         with pytest.raises(FileNotFoundError):
             read_geoparquet("/nonexistent/path/data.parquet")
@@ -130,7 +130,7 @@ class TestGeoParquetRoundtrip:
     def test_auto_creates_parent_dir(
         self, sample_gdf: gpd.GeoDataFrame, tmp_path: Path
     ) -> None:
-        from core.io.geoparquet import read_geoparquet, write_geoparquet
+        from gispulse.core.io.geoparquet import read_geoparquet, write_geoparquet
 
         nested = str(tmp_path / "a" / "b" / "c" / "data.parquet")
         write_geoparquet(sample_gdf, nested)
@@ -146,7 +146,7 @@ class TestGeoParquetRoundtrip:
 
         # Re-import after env var change to pick up new constant
         import importlib
-        import core.io.geoparquet as mod
+        import gispulse.core.io.geoparquet as mod
         importlib.reload(mod)
 
         out = str(tmp_path / "threshold.parquet")
@@ -208,7 +208,7 @@ class TestSTACClientMocked:
 
     @pytest.fixture()
     def client(self) -> "STACClient":  # noqa: F821
-        from catalog.providers.stac_client import STACClient
+        from gispulse.catalog.providers.stac_client import STACClient
 
         return STACClient("https://fake-stac.example.com/api/stac/v1")
 
@@ -308,7 +308,7 @@ class TestSTACClientMocked:
 
     def test_known_catalogs_available(self) -> None:
         """KNOWN_CATALOGS should include Planetary Computer and Earth Search."""
-        from catalog.providers.stac_client import KNOWN_CATALOGS
+        from gispulse.catalog.providers.stac_client import KNOWN_CATALOGS
 
         assert "planetary_computer" in KNOWN_CATALOGS
         assert "earth_search" in KNOWN_CATALOGS

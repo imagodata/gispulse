@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.filter.expression import Dialect, FilterExpression, SpatialPredicate
-from core.filter.expression_converter import ExpressionConverter
+from gispulse.core.filter.expression import Dialect, FilterExpression, SpatialPredicate
+from gispulse.core.filter.expression_converter import ExpressionConverter
 
 
 # ---------------------------------------------------------------------------

@@ -39,7 +39,7 @@ def runner() -> CliRunner:
 @pytest.fixture()
 def fixture_gpkg(tmp_path: Path) -> Path:
     """GPKG with a tracked ``parcels`` table + a single pending change."""
-    from persistence.gpkg_engine import GeoPackageEngine
+    from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
     gpkg = tmp_path / "fixture.gpkg"
     engine = GeoPackageEngine(path=gpkg)
@@ -225,7 +225,7 @@ def test_list_handles_untracked_gpkg(
 ) -> None:
     """An empty GPKG (no GISPulse triggers installed) must exit 0 with
     a clear "not tracked" message rather than crashing."""
-    from persistence.gpkg_engine import GeoPackageEngine
+    from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
     raw = tmp_path / "untracked.gpkg"
     eng = GeoPackageEngine(path=raw)

@@ -8,13 +8,13 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from capabilities.strategy import (
+from gispulse.capabilities.strategy import (
     ExecutionContext,
     ExecutionStrategy,
     StrategyMode,
     select_strategy,
 )
-from persistence.engine import SpatialEngine
+from gispulse.persistence.engine import SpatialEngine
 
 
 # ---------------------------------------------------------------------------

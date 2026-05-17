@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover
     pytest.skip("respx not available", allow_module_level=True)
 
 
-from core.models import OGCSourceConfig
+from gispulse.core.models import OGCSourceConfig
 from gispulse.adapters.ogc.wfs_client import (
     DEFAULT_CACHE_TTL,
     DEFAULT_PAGE_SIZE,

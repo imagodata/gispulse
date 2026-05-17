@@ -2,8 +2,8 @@
 
 import pytest
 
-from catalog import registry
-from catalog.models import CatalogDomain, FluxEntry, FluxProtocol, OpenDataEntry
+from gispulse.catalog import registry
+from gispulse.catalog.models import CatalogDomain, FluxEntry, FluxProtocol, OpenDataEntry
 
 
 class TestEnrichedProviders:

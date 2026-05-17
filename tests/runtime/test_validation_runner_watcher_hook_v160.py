@@ -107,7 +107,7 @@ def _wait_until(predicate, timeout: float = 2.0, step: float = 0.02) -> bool:
 
 @pytest.fixture
 def watcher_with_runner():
-    from persistence.change_log_watcher import ChangeLogWatcher
+    from gispulse.persistence.change_log_watcher import ChangeLogWatcher
 
     engine = _FakeEngine()
     hub = _RecordingHub()
@@ -177,7 +177,7 @@ class TestWatcherValidationHook:
 
 class TestWatcherWithoutRunner:
     def test_default_no_runner_no_op(self) -> None:
-        from persistence.change_log_watcher import ChangeLogWatcher
+        from gispulse.persistence.change_log_watcher import ChangeLogWatcher
 
         engine = _FakeEngine()
         hub = _RecordingHub()

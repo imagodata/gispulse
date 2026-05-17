@@ -9,7 +9,7 @@ pytest.importorskip("networkx", reason="networkx not installed")
 import geopandas as gpd
 from shapely.geometry import LineString
 
-from capabilities.network import IsochroneCapability, ShortestPathCapability
+from gispulse.capabilities.network import IsochroneCapability, ShortestPathCapability
 
 
 @pytest.fixture(autouse=True)

@@ -13,7 +13,7 @@ import pytest
 import geopandas as gpd
 from shapely.geometry import Point, Polygon
 
-from capabilities.vector import (
+from gispulse.capabilities.vector import (
     AreaLengthCapability,
     BufferCapability,
     CentroidCapability,
@@ -204,7 +204,7 @@ class TestCrossLayerEdgeCases:
 
 class TestJobStatusEnum:
     def test_jobstatus_is_str(self):
-        from core.models import JobStatus
+        from gispulse.core.models import JobStatus
         assert isinstance(JobStatus.PENDING, str)
         assert JobStatus.PENDING == "pending"
         assert JobStatus.COMPLETED.value == "completed"

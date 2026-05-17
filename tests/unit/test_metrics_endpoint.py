@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gispulse.adapters.http.app import create_app
-from core.observability import MetricsCollector
+from gispulse.core.observability import MetricsCollector
 
 
 @pytest.fixture(autouse=True)

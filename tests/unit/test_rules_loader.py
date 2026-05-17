@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from rules.loader import load_rules
+from gispulse.rules.loader import load_rules
 
 
 @pytest.fixture

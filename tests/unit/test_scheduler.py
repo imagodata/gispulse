@@ -12,14 +12,14 @@ from uuid import uuid4
 
 import pytest
 
-from orchestration.job_queue import InMemoryJobQueue
-from orchestration.scheduler import (
+from gispulse.orchestration.job_queue import InMemoryJobQueue
+from gispulse.orchestration.scheduler import (
     PipelineScheduler,
     ScheduledPipeline,
     _compute_next_run,
     validate_cron_expression,
 )
-from persistence.schedule_repository import ScheduleRepository
+from gispulse.persistence.schedule_repository import ScheduleRepository
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +345,7 @@ class TestPipelineScheduler:
             env.pop("GISPULSE_LICENSE_KEY", None)
             with patch.dict(os.environ, env, clear=True):
                 scheduler = PipelineScheduler(job_queue=job_queue)
-                from persistence.tier import TierError
+                from gispulse.persistence.tier import TierError
                 with pytest.raises(TierError):
                     await scheduler.start()
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.plugin_model import AccessProtocol, AccessSpec, FetchMode, Payload
-from core.sources import ProtocolNotSupported, ProtocolRegistry
+from gispulse.core.plugin_model import AccessProtocol, AccessSpec, FetchMode, Payload
+from gispulse.core.sources import ProtocolNotSupported, ProtocolRegistry
 from gispulse.adapters.stac.stac_fetcher import (
     StacFetcher,
     _bbox_from_extent,
@@ -49,7 +49,7 @@ def mock_stac(monkeypatch: pytest.MonkeyPatch) -> list:
             return list(_ITEMS)
 
     monkeypatch.setattr(
-        "catalog.providers.stac_client.STACClient", _FakeClient
+        "gispulse.catalog.providers.stac_client.STACClient", _FakeClient
     )
     return calls
 
@@ -193,7 +193,7 @@ def test_register_stac_fetcher_is_idempotent() -> None:
 
 def test_stac_fetcher_self_registered_in_global_protocols() -> None:
     """Importing the module wired the fetcher into the shared registry."""
-    from core.sources import PROTOCOLS
+    from gispulse.core.sources import PROTOCOLS
 
     assert isinstance(PROTOCOLS.get_fetcher(AccessProtocol.STAC), StacFetcher)
 

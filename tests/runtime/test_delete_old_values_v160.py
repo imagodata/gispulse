@@ -123,7 +123,7 @@ def _make_trigger_with_predicate():
     only need ``conditions["predicate_ast"]`` to be non-None so the
     code path that reads ``old_values`` runs.
     """
-    from core.models import Trigger
+    from gispulse.core.models import Trigger
 
     return Trigger(
         name="t-delete",
@@ -134,7 +134,7 @@ def _make_trigger_with_predicate():
 
 @pytest.fixture
 def watcher_with_predicate():
-    from persistence.change_log_watcher import ChangeLogWatcher
+    from gispulse.persistence.change_log_watcher import ChangeLogWatcher
 
     engine = _FakeEngine()
     hub = _RecordingHub()
@@ -159,7 +159,7 @@ def watcher_with_predicate():
 
 class TestChangelogReaderTail:
     def test_old_values_in_tail_columns(self) -> None:
-        from persistence.changelog_reader import _TAIL_COLUMNS
+        from gispulse.persistence.changelog_reader import _TAIL_COLUMNS
 
         assert "old_values" in _TAIL_COLUMNS
 
@@ -233,8 +233,8 @@ class TestNoPredicateNoHydration:
     cost — and should also not bother hydrating old_values."""
 
     def test_skip_hydration_without_predicate(self) -> None:
-        from core.models import Trigger
-        from persistence.change_log_watcher import ChangeLogWatcher
+        from gispulse.core.models import Trigger
+        from gispulse.persistence.change_log_watcher import ChangeLogWatcher
 
         engine = _FakeEngine()
         hub = _RecordingHub()

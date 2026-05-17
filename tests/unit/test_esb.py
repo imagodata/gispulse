@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from shapely.geometry import Point, box
 
-from core.models import (
+from gispulse.core.models import (
     ActionDef,
     ActionType,
     AttrPredicate,

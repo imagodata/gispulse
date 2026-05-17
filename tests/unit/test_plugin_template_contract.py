@@ -14,8 +14,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from core.plugin_contracts import PluginHostContext
-from core import plugin_hub
+from gispulse.core.plugin_contracts import PluginHostContext
+from gispulse.core import plugin_hub
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -34,7 +34,7 @@ class _TemplateEntryPoint:
 
 
 def test_plugin_template_capability_uses_current_execute_signature() -> None:
-    from capabilities.registry import REGISTRY
+    from gispulse.capabilities.registry import REGISTRY
 
     source = (TEMPLATE / "gispulse_cap_example" / "capabilities.py").read_text(
         encoding="utf-8"

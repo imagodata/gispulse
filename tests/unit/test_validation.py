@@ -7,7 +7,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from core.models import (
+from gispulse.core.models import (
     AttrPredicate,
     GeomPredicate,
     Rule,
@@ -15,7 +15,7 @@ from core.models import (
     TriggerEvent,
     TriggerType,
 )
-from rules.validation import (
+from gispulse.rules.validation import (
     ValidationError,
     ValidationResult,
     validate_rule,
@@ -446,7 +446,7 @@ class TestRuleEngineValidationIntegration:
         )
 
     def test_engine_raises_value_error_for_unknown_capability(self):
-        from rules.engine import RuleEngine
+        from gispulse.rules.engine import RuleEngine
 
         engine = RuleEngine()
         rule = Rule(name="bad", capability="nonexistent", config={})
@@ -454,7 +454,7 @@ class TestRuleEngineValidationIntegration:
             engine.apply(rule, self._make_gdf())
 
     def test_engine_raises_value_error_for_missing_param(self):
-        from rules.engine import RuleEngine
+        from gispulse.rules.engine import RuleEngine
 
         engine = RuleEngine()
         rule = Rule(name="rp", capability="reproject", config={})  # missing target_crs
@@ -462,7 +462,7 @@ class TestRuleEngineValidationIntegration:
             engine.apply(rule, self._make_gdf())
 
     def test_engine_error_message_includes_field_name(self):
-        from rules.engine import RuleEngine
+        from gispulse.rules.engine import RuleEngine
 
         engine = RuleEngine()
         rule = Rule(name="rp", capability="reproject", config={})
@@ -471,7 +471,7 @@ class TestRuleEngineValidationIntegration:
         assert "config.target_crs" in str(exc_info.value)
 
     def test_engine_applies_valid_rule_without_error(self):
-        from rules.engine import RuleEngine
+        from gispulse.rules.engine import RuleEngine
 
         engine = RuleEngine()
         rule = Rule(name="buf", capability="buffer", config={"distance": 100.0})

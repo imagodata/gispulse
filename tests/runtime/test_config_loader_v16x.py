@@ -84,7 +84,7 @@ def _yaml_with_extensions(gpkg_path: Path, extra: str = "") -> str:
 
 @pytest.fixture()
 def fixture_gpkg(tmp_path: Path) -> Path:
-    from persistence.gpkg_engine import GeoPackageEngine
+    from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
     gpkg = tmp_path / "f.gpkg"
     eng = GeoPackageEngine(path=gpkg)

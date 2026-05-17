@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from orchestration.metering import InMemoryMetering, create_metering
+from gispulse.orchestration.metering import InMemoryMetering, create_metering
 
 
 @pytest.mark.asyncio
@@ -95,7 +95,7 @@ class TestInMemoryMeteringConcurrency:
 
 class TestFactory:
     def test_create_metering_returns_in_memory_without_redis(self, monkeypatch):
-        from core.config import settings
+        from gispulse.core.config import settings
 
         monkeypatch.setattr(settings.redis, "url", "")
         m = create_metering()
@@ -106,7 +106,7 @@ class TestFactory:
         settings mutation issue. RedisMetering.from_url() is lazy so no
         connection is opened synchronously."""
         try:
-            from orchestration.metering import RedisMetering
+            from gispulse.orchestration.metering import RedisMetering
             m = RedisMetering(redis_url="redis://localhost:6379")
         except ImportError:
             pytest.skip("redis package not installed")

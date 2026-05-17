@@ -16,7 +16,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point, box
 
-from persistence.gpkg_spatial import (
+from gispulse.persistence.gpkg_spatial import (
     _PREDICATE_MAP,
     _detect_geom_column,
     _rtree_exists,

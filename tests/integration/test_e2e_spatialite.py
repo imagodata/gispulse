@@ -18,11 +18,11 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import box
 
-from core.models import Trigger, TriggerEvent, TriggerType
-from persistence.spatialite_session import SpatiaLiteSession
-from persistence.session_provisioner import SessionProvisioner
-from rules.engine import RuleEngine
-from core.models import Rule
+from gispulse.core.models import Trigger, TriggerEvent, TriggerType
+from gispulse.persistence.spatialite_session import SpatiaLiteSession
+from gispulse.persistence.session_provisioner import SessionProvisioner
+from gispulse.rules.engine import RuleEngine
+from gispulse.core.models import Rule
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +274,7 @@ class TestTriggerCycle:
         self, parcels_gpkg, session_mem, insert_trigger
     ):
         """Les FiredTrigger sont accumulés dans session.fired_triggers."""
-        from rules.trigger_evaluator import TriggerEvaluator
+        from gispulse.rules.trigger_evaluator import TriggerEvaluator
 
         session_mem.load_gpkg(parcels_gpkg, layer="parcels")
         session_mem._triggers = [insert_trigger]
@@ -291,7 +291,7 @@ class TestTriggerCycle:
 
     def test_clear_fired(self, parcels_gpkg, session_mem, insert_trigger):
         """clear_fired() vide le registre des FiredTrigger."""
-        from rules.trigger_evaluator import TriggerEvaluator
+        from gispulse.rules.trigger_evaluator import TriggerEvaluator
 
         session_mem.load_gpkg(parcels_gpkg, layer="parcels")
         session_mem._triggers = [insert_trigger]
@@ -362,13 +362,13 @@ class TestFullE2ECycle:
 
             # 4. Insérer une nouvelle parcelle dans "result"
             #    (le SQLite trigger la capture dans _change_log)
-            from persistence.spatialite_session import _build_sqlite_triggers
+            from gispulse.persistence.spatialite_session import _build_sqlite_triggers
 
             for sql in _build_sqlite_triggers("result"):
                 s.conn.execute(sql)
             s.conn.commit()
 
-            from rules.trigger_evaluator import TriggerEvaluator
+            from gispulse.rules.trigger_evaluator import TriggerEvaluator
 
             s._triggers = [trigger]
             s._evaluator = TriggerEvaluator()
@@ -411,7 +411,7 @@ class TestFullE2ECycle:
         )
 
         # Sans PostGIS, le backend doit être SpatiaLite
-        from core.models import SessionBackend
+        from gispulse.core.models import SessionBackend
 
         if not dsn:
             assert session_model.backend == SessionBackend.SPATIALITE
@@ -472,7 +472,7 @@ class TestFullE2ECycle:
 class TestSessionProvisionerBackend:
     def test_auto_selects_spatialite_no_dsn(self):
         """backend='auto' sans base_dsn → SpatiaLite."""
-        from core.models import SessionBackend
+        from gispulse.core.models import SessionBackend
 
         p = SessionProvisioner(base_dsn="")
         s = p.create_session(backend="auto")
@@ -480,7 +480,7 @@ class TestSessionProvisionerBackend:
 
     def test_explicit_spatialite(self):
         """backend='spatialite' forcé."""
-        from core.models import SessionBackend
+        from gispulse.core.models import SessionBackend
 
         p = SessionProvisioner(base_dsn="postgresql://x/y")
         s = p.create_session(backend="spatialite")
@@ -488,7 +488,7 @@ class TestSessionProvisionerBackend:
 
     def test_explicit_postgis(self):
         """backend='postgis' forcé."""
-        from core.models import SessionBackend
+        from gispulse.core.models import SessionBackend
 
         p = SessionProvisioner(base_dsn="postgresql://host/db")
         s = p.create_session(backend="postgis")
@@ -496,7 +496,7 @@ class TestSessionProvisionerBackend:
 
     def test_auto_selects_postgis_with_dsn(self):
         """backend='auto' avec base_dsn → PostGIS."""
-        from core.models import SessionBackend
+        from gispulse.core.models import SessionBackend
 
         p = SessionProvisioner(base_dsn="postgresql://host/db")
         s = p.create_session(backend="auto")

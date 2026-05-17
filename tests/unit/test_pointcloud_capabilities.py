@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 from shapely.geometry import Point, Polygon
 
-from capabilities.pointcloud import (
+from gispulse.capabilities.pointcloud import (
     PointcloudFilterClassificationCapability,
     PointcloudGridSummaryCapability,
     PointcloudLoadLasCapability,

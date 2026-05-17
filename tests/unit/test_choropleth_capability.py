@@ -6,7 +6,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, Point, Polygon
 
-from capabilities.classification import (
+from gispulse.capabilities.classification import (
     ChoroplethCapability,
     ClassifyCapability,
     build_graduated_style_def,
@@ -115,7 +115,7 @@ class TestChoroplethCapability:
         assert "label_fmt" in schema["properties"]
 
     def test_choropleth_registered(self):
-        from capabilities.registry import get
+        from gispulse.capabilities.registry import get
         inst = get("choropleth")
         assert isinstance(inst, ChoroplethCapability)
 
@@ -182,7 +182,7 @@ class TestGraduatedStyleDefBuilder:
 
     def test_style_is_qml_compatible(self, polygons_gdf):
         """Output must consume cleanly through the QML converter."""
-        from persistence.style_converter import style_def_to_qml
+        from gispulse.persistence.style_converter import style_def_to_qml
         classified = ClassifyCapability().execute(
             polygons_gdf, field="price", method="jenks", bins=5, palette="YlOrRd",
         )
@@ -193,7 +193,7 @@ class TestGraduatedStyleDefBuilder:
 
     def test_style_is_sld_compatible(self, polygons_gdf):
         """Output must consume cleanly through the SLD converter."""
-        from persistence.sld_converter import style_def_to_sld
+        from gispulse.persistence.sld_converter import style_def_to_sld
         classified = ClassifyCapability().execute(
             polygons_gdf, field="price", method="jenks", bins=5, palette="YlOrRd",
         )

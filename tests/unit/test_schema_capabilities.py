@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from shapely.geometry import Point, Polygon
 
-from capabilities.schema import (
+from gispulse.capabilities.schema import (
     AddFieldCapability,
     AttributeJoinCapability,
     CastFieldCapability,

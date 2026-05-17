@@ -15,7 +15,7 @@ rasterstats = pytest.importorskip("rasterstats", reason="rasterstats not install
 import numpy as np
 from rasterio.transform import from_bounds
 
-from capabilities.raster import ChangeDetectionCapability, ZonalStatsCapability
+from gispulse.capabilities.raster import ChangeDetectionCapability, ZonalStatsCapability
 
 
 @pytest.fixture(autouse=True)

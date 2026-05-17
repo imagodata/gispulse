@@ -18,17 +18,17 @@ def test_plugin_api_core_imports_do_not_eagerly_import_source_clients() -> None:
 
 
 def test_plugin_api_reexports_curated_runtime_primitives() -> None:
-    from capabilities.base import Capability
-    from capabilities.registry import register
-    from catalog.models import CatalogEntry, FluxEntry
-    from core.crs import is_angular, suggest_metric_crs
-    from core.models import OGCSourceConfig
-    from core.pipeline import PipelineSpec, StepSpec
-    from core.plugin_contracts import PluginHostContext
+    from gispulse.capabilities.base import Capability
+    from gispulse.capabilities.registry import register
+    from gispulse.catalog.models import CatalogEntry, FluxEntry
+    from gispulse.core.crs import is_angular, suggest_metric_crs
+    from gispulse.core.models import OGCSourceConfig
+    from gispulse.core.pipeline import PipelineSpec, StepSpec
+    from gispulse.core.plugin_contracts import PluginHostContext
     from gispulse.adapters.apicarto import ApiCartoGeoJsonClient
     from gispulse.adapters.ogc.wfs_client import fetch_wfs
     from gispulse.plugins import api
-    from orchestration.pipeline_executor import PipelineExecutor
+    from gispulse.orchestration.pipeline_executor import PipelineExecutor
 
     assert api.Capability is Capability
     assert api.register_capability is register
@@ -46,14 +46,14 @@ def test_plugin_api_reexports_curated_runtime_primitives() -> None:
 
 
 def test_plugin_submodules_reexport_curated_runtime_primitives() -> None:
-    from catalog.models import CatalogEntry, FluxEntry
-    from core.crs import is_angular, suggest_metric_crs
-    from core.models import OGCSourceConfig
-    from core.pipeline import PipelineSpec, StepSpec
+    from gispulse.catalog.models import CatalogEntry, FluxEntry
+    from gispulse.core.crs import is_angular, suggest_metric_crs
+    from gispulse.core.models import OGCSourceConfig
+    from gispulse.core.pipeline import PipelineSpec, StepSpec
     from gispulse.adapters.apicarto import ApiCartoGeoJsonClient
     from gispulse.adapters.ogc.wfs_client import fetch_wfs
     from gispulse.plugins import pipeline, sources, spatial
-    from orchestration.pipeline_executor import PipelineExecutor
+    from gispulse.orchestration.pipeline_executor import PipelineExecutor
 
     assert pipeline.PipelineSpec is PipelineSpec
     assert pipeline.StepSpec is StepSpec
@@ -68,7 +68,7 @@ def test_plugin_submodules_reexport_curated_runtime_primitives() -> None:
 
 
 def test_get_catalog_entry_delegates_to_catalog_registry(monkeypatch) -> None:
-    from catalog.models import CatalogDomain, CatalogEntry
+    from gispulse.catalog.models import CatalogDomain, CatalogEntry
     from gispulse.plugins import sources
 
     expected = CatalogEntry(
@@ -90,7 +90,7 @@ def test_get_catalog_entry_delegates_to_catalog_registry(monkeypatch) -> None:
 
 
 def test_get_flux_entry_returns_only_flux_entries(monkeypatch) -> None:
-    from catalog.models import CatalogDomain, CatalogEntry, FluxEntry, FluxProtocol
+    from gispulse.catalog.models import CatalogDomain, CatalogEntry, FluxEntry, FluxProtocol
     from gispulse.plugins import sources
 
     flux = FluxEntry(

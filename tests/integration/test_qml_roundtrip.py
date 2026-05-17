@@ -25,7 +25,7 @@ from typing import Any
 import pytest
 
 _spec = importlib.util.spec_from_file_location(
-    "style_converter", Path(__file__).resolve().parents[2] / "persistence" / "style_converter.py"
+    "style_converter", Path(__file__).resolve().parents[2] / "src" / "gispulse" / "persistence" / "style_converter.py"
 )
 sc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sc)

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 
 
-from core.models import ChangeOperation, ChangeRecord, Trigger, TriggerEvent, TriggerType
-from rules.trigger_evaluator import TriggerEvaluator
+from gispulse.core.models import ChangeOperation, ChangeRecord, Trigger, TriggerEvent, TriggerType
+from gispulse.rules.trigger_evaluator import TriggerEvaluator
 
 
 def _trigger(name: str = "t1", conditions: dict | None = None, enabled: bool = True) -> Trigger:

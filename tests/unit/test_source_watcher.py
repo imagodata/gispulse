@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from persistence.source_watcher import (
+from gispulse.persistence.source_watcher import (
     SourceWatcherRegistry,
     interval_from_frequency,
 )
@@ -146,7 +146,7 @@ def test_poll_isolates_a_failing_source() -> None:
 
 
 def _broken_entry():
-    from persistence.source_watcher import _WatchEntry
+    from gispulse.persistence.source_watcher import _WatchEntry
 
     return _WatchEntry(source=BrokenSource(), entry_id="e", interval_s=3600.0,
                        last_revision="r0")

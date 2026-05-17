@@ -10,8 +10,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from persistence.auth_models import ApiKey, Organisation, User
-from persistence.auth_repository import (
+from gispulse.persistence.auth_models import ApiKey, Organisation, User
+from gispulse.persistence.auth_repository import (
     AuthRepository,
     generate_api_key,
     hash_api_key,

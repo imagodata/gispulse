@@ -12,7 +12,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point, Polygon
 
-from capabilities.validation import (
+from gispulse.capabilities.validation import (
     AttributeValidationCapability,
     CompletenessCheckCapability,
     DuplicateGeometryCapability,
@@ -525,18 +525,18 @@ class TestCompletenessCheck:
 
 class TestValidationRegistration:
     def test_topology_check_in_registry(self):
-        from capabilities.registry import REGISTRY
-        import capabilities.validation  # noqa: F401 — ensure module is loaded
+        from gispulse.capabilities.registry import REGISTRY
+        import gispulse.capabilities.validation  # noqa: F401 — ensure module is loaded
         assert "topology_check" in REGISTRY
 
     def test_duplicate_geometry_in_registry(self):
-        from capabilities.registry import REGISTRY
+        from gispulse.capabilities.registry import REGISTRY
         assert "duplicate_geometry" in REGISTRY
 
     def test_attribute_validation_in_registry(self):
-        from capabilities.registry import REGISTRY
+        from gispulse.capabilities.registry import REGISTRY
         assert "attribute_validation" in REGISTRY
 
     def test_completeness_check_in_registry(self):
-        from capabilities.registry import REGISTRY
+        from gispulse.capabilities.registry import REGISTRY
         assert "completeness_check" in REGISTRY

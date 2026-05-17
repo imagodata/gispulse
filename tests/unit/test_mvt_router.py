@@ -38,7 +38,7 @@ def _make_postgis_app():
     # across tests and broke test_default_gpkg in the full suite.
 
     from gispulse.adapters.http.app import create_app
-    from persistence.engine import SpatialEngine
+    from gispulse.persistence.engine import SpatialEngine
 
     app = create_app(mode="full")
 
@@ -157,7 +157,7 @@ class TestTilesEndpointValidation:
         """
         import os
         from gispulse.adapters.http.app import create_app
-        from persistence.engine import SpatialEngine
+        from gispulse.persistence.engine import SpatialEngine
 
         mock_engine = MagicMock(spec=SpatialEngine)
         mock_engine.backend_name = backend_name
@@ -204,7 +204,7 @@ class TestTilesEndpointValidation:
         """
         import os
         from gispulse.adapters.http.app import create_app
-        from persistence.engine import SpatialEngine
+        from gispulse.persistence.engine import SpatialEngine
 
         mock_engine = MagicMock(spec=SpatialEngine)
         mock_engine.backend_name = backend_name
@@ -228,7 +228,7 @@ class TestTilesEndpointValidation:
 
     def test_duckdb_backend_returns_501(self):
         """DuckDB backend cannot encode MVT — must return 501."""
-        from core.models import Dataset
+        from gispulse.core.models import Dataset
 
         app, _ = self._make_app_with_tiles("duckdb")
         ds = Dataset(name="test", source_path="/data/test.gpkg")
@@ -240,7 +240,7 @@ class TestTilesEndpointValidation:
 
     def test_postgis_empty_tile_returns_204(self):
         """PostGIS backend returning no tile data → 204 No Content."""
-        from core.models import Dataset
+        from gispulse.core.models import Dataset
 
         app, _ = self._make_app_with_tiles("postgis", execute_sql_return=[{"tile": None}])
         ds = Dataset(name="test_postgis", source_path="public.test_table")
@@ -252,7 +252,7 @@ class TestTilesEndpointValidation:
 
     def test_postgis_tile_returns_binary(self):
         """PostGIS backend returning tile bytes → 200 with MVT content-type."""
-        from core.models import Dataset
+        from gispulse.core.models import Dataset
 
         app, _ = self._make_app_with_tiles(
             "postgis", execute_sql_return=[{"tile": b"\x1a\x05fake_tile"}]
@@ -268,7 +268,7 @@ class TestTilesEndpointValidation:
 
     def test_tile_served_from_cache(self):
         """Second request for same tile uses cache (execute_sql called once)."""
-        from core.models import Dataset
+        from gispulse.core.models import Dataset
 
         _tile_cache.clear()
 

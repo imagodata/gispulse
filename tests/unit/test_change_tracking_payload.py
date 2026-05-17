@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from persistence.gpkg_schema import (
+from gispulse.persistence.gpkg_schema import (
     _build_change_triggers,
     _migrate_v1_to_v2,
     bootstrap_gpkg_project,
@@ -259,7 +259,7 @@ def test_bootstrap_upgrades_v1_gpkg_in_place(tmp_path: Path) -> None:
     # per-layer ``_gispulse_origin`` migration but doesn't change the
     # ``_gispulse_change_log`` shape, so the v1→v2 column-add behaviour
     # is unchanged.
-    from persistence.schema import SCHEMA_VERSION
+    from gispulse.persistence.schema import SCHEMA_VERSION
 
     conn = sqlite3.connect(str(path), isolation_level=None)
     bootstrap_gpkg_project(conn)

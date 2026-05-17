@@ -6,7 +6,7 @@ import pytest
 import geopandas as gpd
 from shapely.geometry import Point, Polygon
 
-from capabilities.vector import CalculateCapability, SpatialAggregateCapability
+from gispulse.capabilities.vector import CalculateCapability, SpatialAggregateCapability
 
 
 # ---------------------------------------------------------------------------

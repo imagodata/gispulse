@@ -1,7 +1,7 @@
 """Tests for the GIS catalog system."""
 
-from catalog import registry
-from catalog.models import CatalogDomain, ProjectionEntry, BasemapEntry, FluxEntry
+from gispulse.catalog import registry
+from gispulse.catalog.models import CatalogDomain, ProjectionEntry, BasemapEntry, FluxEntry
 
 
 GPU_FLUX_ENTRIES = {

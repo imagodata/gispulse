@@ -9,12 +9,12 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Polygon
 
-from capabilities.classification import (
+from gispulse.capabilities.classification import (
     ChoroplethCapability,
     ClassifyCategoricalCapability,
     HeadTailBreaksCapability,
 )
-from persistence.style_sidecar import write_style_sidecars
+from gispulse.persistence.style_sidecar import write_style_sidecars
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ class TestSidecarDirect:
 class TestSidecarViaWriteVector:
     def test_write_vector_creates_sidecars(self, polygons, tmp_path):
         """End-to-end: write_vector() must produce both the GPKG and sidecars."""
-        from persistence.io import write_vector
+        from gispulse.persistence.io import write_vector
 
         styled = ChoroplethCapability().execute(
             polygons, field="price", bins=5, palette="YlOrRd",
@@ -128,7 +128,7 @@ class TestSidecarViaWriteVector:
 
     def test_write_vector_opt_out(self, polygons, tmp_path):
         """write_style_sidecars=False suppresses sidecar emission."""
-        from persistence.io import write_vector
+        from gispulse.persistence.io import write_vector
 
         styled = ChoroplethCapability().execute(
             polygons, field="price", bins=5, palette="YlOrRd",
@@ -142,7 +142,7 @@ class TestSidecarViaWriteVector:
 
     def test_write_vector_plain_gdf_no_sidecars(self, polygons, tmp_path):
         """Output without classify metadata writes no sidecars."""
-        from persistence.io import write_vector
+        from gispulse.persistence.io import write_vector
 
         gpkg = tmp_path / "plain.gpkg"
         write_vector(polygons, str(gpkg))

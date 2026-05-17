@@ -7,9 +7,9 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from core.models import Rule
-from persistence.repository import InMemoryRepository
-from rules.engine import RuleEngine
+from gispulse.core.models import Rule
+from gispulse.persistence.repository import InMemoryRepository
+from gispulse.rules.engine import RuleEngine
 
 
 # ---------------------------------------------------------------------------

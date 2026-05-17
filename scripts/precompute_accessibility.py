@@ -45,14 +45,14 @@ import geopandas as gpd  # noqa: E402
 # The signature check is bypassed by GISPULSE_LICENCE_SKIP_VERIFY=1; the
 # payload itself is parsed normally.
 if not os.environ.get("GISPULSE_LICENSE_KEY"):
-    from persistence.tier import make_test_license_key  # noqa: E402
+    from gispulse.persistence.tier import make_test_license_key  # noqa: E402
 
     os.environ["GISPULSE_TIER"] = "pro"
     os.environ["GISPULSE_LICENSE_KEY"] = make_test_license_key("pro")
     os.environ["GISPULSE_LICENCE_SKIP_VERIFY"] = "1"
 
-from capabilities.network import IsochroneCapability  # noqa: E402
-from capabilities.vector.classify import ClassifyByRingCapability  # noqa: E402
+from gispulse.capabilities.network import IsochroneCapability  # noqa: E402
+from gispulse.capabilities.vector.classify import ClassifyByRingCapability  # noqa: E402
 
 OUT_DIR = ROOT / "docs-site" / "public" / "playground" / "data" / "accessibility"
 

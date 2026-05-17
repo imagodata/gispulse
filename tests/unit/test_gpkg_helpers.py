@@ -13,7 +13,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from persistence import gpkg as gpkg_mod
+from gispulse.persistence import gpkg as gpkg_mod
 
 
 @pytest.fixture

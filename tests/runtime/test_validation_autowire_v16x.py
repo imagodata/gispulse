@@ -32,7 +32,7 @@ from gispulse.runtime.headless_runtime import (
     build_runtime,
     resolve_validation_table,
 )
-from persistence.gpkg_engine import GeoPackageEngine
+from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
 
 # ---------------------------------------------------------------------------

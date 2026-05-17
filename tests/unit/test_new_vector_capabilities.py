@@ -16,8 +16,8 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, Point, Polygon
 
-from capabilities.registry import get as get_capability
-from capabilities.vector import (
+from gispulse.capabilities.registry import get as get_capability
+from gispulse.capabilities.vector import (
     BufferCapability,
     ConvexHullCapability,
     EnvelopeCapability,
@@ -25,9 +25,9 @@ from capabilities.vector import (
     NearestNeighborCapability,
     SimplifyCapability,
 )
-from core.predicates import GeomPredicate
-from rules.predicates import ShapelyPredicateEvaluator, _build_geom_sql
-from rules.validation import _validate_predicate
+from gispulse.core.predicates import GeomPredicate
+from gispulse.rules.predicates import ShapelyPredicateEvaluator, _build_geom_sql
+from gispulse.rules.validation import _validate_predicate
 
 
 # ---------------------------------------------------------------------------

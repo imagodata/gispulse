@@ -25,6 +25,7 @@ LEGACY_PATTERNS = (
 def test_app_py_has_no_legacy_enterprise_imports() -> None:
     app_py = (
         Path(__file__).resolve().parents[2]
+        / "src"
         / "gispulse"
         / "adapters"
         / "http"

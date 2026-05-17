@@ -10,10 +10,10 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from core.models import Dataset, Job, JobStatus
-from orchestration.job_queue import InMemoryJobQueue
-from orchestration.worker import JobWorker
-from persistence.repository import InMemoryRepository
+from gispulse.core.models import Dataset, Job, JobStatus
+from gispulse.orchestration.job_queue import InMemoryJobQueue
+from gispulse.orchestration.worker import JobWorker
+from gispulse.persistence.repository import InMemoryRepository
 
 
 # ---------------------------------------------------------------------------

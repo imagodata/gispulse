@@ -164,7 +164,7 @@ def test_watcher_skipped_for_unsupported_backend(tmp_path, monkeypatch) -> None:
     # surface so the lifespan guard skips watcher creation. We also
     # skip tier gating by piggy-backing on an unknown name (community
     # tier rejects only postgis/hybrid).
-    from persistence import engine_factory as ef
+    from gispulse.persistence import engine_factory as ef
 
     class _NoTrackingEngine:
         backend_name = "memory"

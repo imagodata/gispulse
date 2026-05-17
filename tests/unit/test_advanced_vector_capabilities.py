@@ -22,8 +22,8 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, MultiLineString, Point, Polygon
 
-from capabilities.registry import get as get_capability
-from capabilities.vector import (
+from gispulse.capabilities.registry import get as get_capability
+from gispulse.capabilities.vector import (
     ClipCapability,
     ConcaveHullCapability,
     DelaunayTriangulationCapability,
@@ -35,9 +35,9 @@ from capabilities.vector import (
     SnapToGridCapability,
     VoronoiPolygonsCapability,
 )
-from core.predicates import AttrPredicate
-from rules.predicates import _eval_attr
-from rules.validation import _validate_predicate
+from gispulse.core.predicates import AttrPredicate
+from gispulse.rules.predicates import _eval_attr
+from gispulse.rules.validation import _validate_predicate
 
 
 # ---------------------------------------------------------------------------

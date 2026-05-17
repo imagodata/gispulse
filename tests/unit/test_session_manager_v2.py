@@ -7,8 +7,8 @@ import pytest
 import geopandas as gpd
 from shapely.geometry import Point
 
-from core.pipeline import PipelineSpec, StepSpec
-from orchestration.session_manager import SessionManager
+from gispulse.core.pipeline import PipelineSpec, StepSpec
+from gispulse.orchestration.session_manager import SessionManager
 
 
 @pytest.fixture
@@ -139,23 +139,23 @@ class TestCapabilityTypedDicts:
     """Verify TypedDict definitions match capability schemas."""
 
     def test_imports(self):
-        from core.capability_params import (
+        from gispulse.core.capability_params import (
             PARAMS_TYPE_MAP,
         )
         assert len(PARAMS_TYPE_MAP) == 10
 
     def test_buffer_params_typing(self):
-        from core.capability_params import BufferParams
+        from gispulse.core.capability_params import BufferParams
         params: BufferParams = {"distance": 50.0}
         assert params["distance"] == 50.0
 
     def test_filter_params_typing(self):
-        from core.capability_params import FilterParams
+        from gispulse.core.capability_params import FilterParams
         params: FilterParams = {"expression": "area > 1000"}
         assert params["expression"] == "area > 1000"
 
     def test_spatial_join_params_typing(self):
-        from core.capability_params import SpatialJoinParams
+        from gispulse.core.capability_params import SpatialJoinParams
         params: SpatialJoinParams = {
             "ref_layer": "zones",
             "predicate": "intersects",
@@ -165,12 +165,12 @@ class TestCapabilityTypedDicts:
 
     def test_params_map_covers_main_capabilities(self):
         """All 5 main capabilities have TypedDict entries."""
-        from core.capability_params import PARAMS_TYPE_MAP
+        from gispulse.core.capability_params import PARAMS_TYPE_MAP
         for cap in ["filter", "buffer", "spatial_join", "dissolve", "centroid"]:
             assert cap in PARAMS_TYPE_MAP, f"{cap} not in PARAMS_TYPE_MAP"
 
     def test_calculate_params_typing(self):
-        from core.capability_params import CalculateParams
+        from gispulse.core.capability_params import CalculateParams
         params: CalculateParams = {
             "expressions": {"area_ha": "area_m2 / 10000"},
         }

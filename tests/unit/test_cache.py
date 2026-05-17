@@ -1,7 +1,7 @@
 """Tests for core.cache.BoundedLayerCache — LRU eviction, ordering."""
 from __future__ import annotations
 
-from core.cache import BoundedLayerCache
+from gispulse.core.cache import BoundedLayerCache
 
 
 class TestBoundedLayerCacheBasic:

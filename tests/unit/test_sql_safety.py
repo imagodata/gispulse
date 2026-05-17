@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.sql_safety import (
+from gispulse.core.sql_safety import (
     SAFE_IDENT_RE,
     SQL_BLOCKLIST,
     slug_identifier,

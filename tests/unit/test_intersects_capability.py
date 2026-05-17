@@ -4,7 +4,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point, Polygon
 
-from capabilities.vector import IntersectsCapability
+from gispulse.capabilities.vector import IntersectsCapability
 
 
 @pytest.fixture

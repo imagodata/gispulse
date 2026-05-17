@@ -11,7 +11,7 @@ from typing import get_type_hints
 
 import pytest
 
-from core.capability_params import (
+from gispulse.core.capability_params import (
     PARAMS_TYPE_MAP,
     AreaLengthParams,
     BufferParams,
@@ -167,7 +167,7 @@ class TestRegistryAlignment:
     TypedDict key must exist in the registry."""
 
     def test_every_mapped_name_exists_in_registry(self):
-        from capabilities import registry
+        from gispulse.capabilities import registry
 
         registry._ensure_defaults_loaded()
         registered = set(registry.REGISTRY.keys())
@@ -191,8 +191,8 @@ class TestPlumbingNotRequired:
     """
 
     def test_no_capability_requires_plumbing_key(self):
-        from capabilities import registry
-        from rules.validation import _PLUMBING_KEYS
+        from gispulse.capabilities import registry
+        from gispulse.rules.validation import _PLUMBING_KEYS
 
         registry._ensure_defaults_loaded()
 

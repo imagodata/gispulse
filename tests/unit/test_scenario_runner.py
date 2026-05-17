@@ -6,11 +6,11 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from core.models import Job, JobStatus, Rule, Scenario
-from orchestration.runner import JobRunner
-from orchestration.scenario_runner import ScenarioRunner
-from persistence.repository import InMemoryRepository
-from rules.engine import RuleEngine
+from gispulse.core.models import Job, JobStatus, Rule, Scenario
+from gispulse.orchestration.runner import JobRunner
+from gispulse.orchestration.scenario_runner import ScenarioRunner
+from gispulse.persistence.repository import InMemoryRepository
+from gispulse.rules.engine import RuleEngine
 
 
 # ---------------------------------------------------------------------------

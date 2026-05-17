@@ -10,7 +10,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from persistence.io import (
+from gispulse.persistence.io import (
     dataset_from_file,
     detect_format,
     read_vector,

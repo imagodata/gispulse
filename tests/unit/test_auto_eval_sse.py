@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 
-from core.models import (
+from gispulse.core.models import (
     ChangeOperation,
     ChangeRecord,
     FiredTrigger,
@@ -14,7 +14,7 @@ from core.models import (
     TriggerEvent,
     TriggerType,
 )
-from rules.trigger_evaluator import TriggerEvaluator
+from gispulse.rules.trigger_evaluator import TriggerEvaluator
 
 
 # ---------------------------------------------------------------------------

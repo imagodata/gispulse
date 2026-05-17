@@ -18,9 +18,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core import plugin_hub
+from gispulse.core import plugin_hub
 from gispulse.adapters.http.auth import _resolve_user_from_session
-from persistence.auth_models import User
+from gispulse.persistence.auth_models import User
 
 
 @pytest.fixture(autouse=True)

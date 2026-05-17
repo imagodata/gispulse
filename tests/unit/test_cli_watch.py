@@ -31,7 +31,7 @@ def runner(monkeypatch: pytest.MonkeyPatch) -> CliRunner:
 @pytest.fixture()
 def tracked_gpkg(tmp_path: Path) -> Path:
     """GPKG with a tracked ``parcels`` layer (triggers installed)."""
-    from persistence.gpkg_engine import GeoPackageEngine
+    from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
     path = tmp_path / "watch.gpkg"
     engine = GeoPackageEngine(path=path)

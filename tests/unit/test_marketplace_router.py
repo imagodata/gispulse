@@ -107,7 +107,7 @@ class TestListPlugins:
     def _hub_with(records):
         from types import SimpleNamespace
 
-        from core.plugin_hub import PluginHub
+        from gispulse.core.plugin_hub import PluginHub
 
         return patch.object(
             PluginHub, "get", classmethod(lambda cls: SimpleNamespace(records=records))
@@ -116,7 +116,7 @@ class TestListPlugins:
     @staticmethod
     def _record(name, dist, *, tier="community", trust="community", state="active",
                 detail=""):
-        from core.plugin_model import (
+        from gispulse.core.plugin_model import (
             PluginKind,
             PluginRecord,
             PluginState,

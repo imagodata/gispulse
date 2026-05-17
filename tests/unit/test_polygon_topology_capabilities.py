@@ -6,7 +6,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Polygon
 
-from capabilities.polygon_topology import (
+from gispulse.capabilities.polygon_topology import (
     FixGapsCapability,
     FixOverlapsCapability,
     RemoveSliversCapability,

@@ -55,7 +55,7 @@ def _compiled(
 
 class TestTagDispatch:
     def test_tag_failure_calls_dispatcher(self) -> None:
-        from core.graph import ActionType
+        from gispulse.core.graph import ActionType
 
         evaluator = lambda sql, params: [(True,)]  # always fail
         dispatcher = MagicMock()

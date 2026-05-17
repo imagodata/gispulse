@@ -7,7 +7,7 @@ Pin the full surface so regressions are caught.
 from __future__ import annotations
 
 
-from core.pipeline_schema import (
+from gispulse.core.pipeline_schema import (
     SCHEMA_V1,
     SCHEMA_V2,
     _pick_schema,

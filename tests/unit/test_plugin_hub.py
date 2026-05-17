@@ -12,9 +12,9 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import APIRouter, FastAPI
 
-from core import plugin_hub
-from core.plugin_hub import _version_satisfies, _check_protocol_version
-from core.plugin_contracts import LicenceState, PluginHostContext, PROTOCOL_VERSION
+from gispulse.core import plugin_hub
+from gispulse.core.plugin_hub import _version_satisfies, _check_protocol_version
+from gispulse.core.plugin_contracts import LicenceState, PluginHostContext, PROTOCOL_VERSION
 from gispulse.adapters.http.app import _create_plugin_router
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from persistence.engine_factory import (
+from gispulse.persistence.engine_factory import (
     _BACKENDS,
     create_spatial_engine,
     register_engine_backend,

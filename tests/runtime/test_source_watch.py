@@ -94,7 +94,7 @@ def test_parse_source_uri_invalid(bad: str) -> None:
 
 
 def test_resolve_via_registry() -> None:
-    from core.sources import SOURCES
+    from gispulse.core.sources import SOURCES
 
     src = FakeSource("demo", ["r1"])
     SOURCES.register(src)
@@ -107,7 +107,7 @@ def test_resolve_via_registry() -> None:
 
 
 def test_resolve_via_registry_unknown_source() -> None:
-    from core.sources import SOURCES
+    from gispulse.core.sources import SOURCES
 
     SOURCES.clear()
     with pytest.raises(KeyError, match="no data source named 'ghost'"):

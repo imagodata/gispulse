@@ -20,10 +20,10 @@ from shapely.geometry import (
     Polygon,
 )
 
-from capabilities.schema import AttributeJoinCapability
-from capabilities.selection import TopNCapability
-from capabilities.transforms import AddMCapability, AddZCapability
-from capabilities.vector import (
+from gispulse.capabilities.schema import AttributeJoinCapability
+from gispulse.capabilities.selection import TopNCapability
+from gispulse.capabilities.transforms import AddMCapability, AddZCapability
+from gispulse.capabilities.vector import (
     ForceGeometryTypeCapability,
     SinglepartsToMultipartCapability,
 )

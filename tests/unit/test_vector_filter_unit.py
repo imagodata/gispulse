@@ -14,8 +14,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from capabilities.strategy import ExecutionContext, StrategyMode
-from capabilities.vector.filter import (
+from gispulse.capabilities.strategy import ExecutionContext, StrategyMode
+from gispulse.capabilities.vector.filter import (
     FilterCapability,
     _apply_predicate_geopandas,
     _buffer_geom,

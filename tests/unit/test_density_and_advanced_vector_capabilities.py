@@ -6,16 +6,16 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, Point, Polygon
 
-from capabilities.density import (
+from gispulse.capabilities.density import (
     GridCreateCapability,
     HexGridCreateCapability,
     KDEHeatmapCapability,
 )
-from capabilities.network import (
+from gispulse.capabilities.network import (
     MinimumSpanningTreeCapability,
     ODMatrixCapability,
 )
-from capabilities.vector import (
+from gispulse.capabilities.vector import (
     AlphaShapeCapability,
     ChaikinSmoothCapability,
     LineLocatePointCapability,

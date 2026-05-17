@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from persistence.audit import AuditEntry, AuditLogger, AuditQuery
+from gispulse.persistence.audit import AuditEntry, AuditLogger, AuditQuery
 
 
 # ---------------------------------------------------------------------------
@@ -240,14 +240,14 @@ class TestMiddlewareHelpers:
 class TestTierGating:
     def test_audit_requires_pro(self):
         """check_tier('pro') should raise for community tier."""
-        from persistence.tier import TierError, check_tier
+        from gispulse.persistence.tier import TierError, check_tier
 
         with patch.dict("os.environ", {"GISPULSE_TIER": "community"}, clear=False):
             with pytest.raises(TierError, match="Pro"):
                 check_tier("pro")
 
     def test_audit_passes_pro(self):
-        from persistence.tier import check_tier
+        from gispulse.persistence.tier import check_tier
 
         with patch.dict(
             "os.environ",

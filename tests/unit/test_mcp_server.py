@@ -14,7 +14,7 @@ fastmcp = pytest.importorskip("fastmcp")
 # Only import after the skip guard so the module-level ImportError in
 # server.py is not triggered in environments without fastmcp.
 from gispulse.adapters.mcp import server as mcp_server  # noqa: E402
-from core import plugin_hub  # noqa: E402
+from gispulse.core import plugin_hub  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

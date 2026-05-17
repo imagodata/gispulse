@@ -14,7 +14,7 @@ rasterio = pytest.importorskip("rasterio", reason="rasterio not installed")
 import numpy as np
 from rasterio.transform import from_origin
 
-from persistence.raster_io import (
+from gispulse.persistence.raster_io import (
     RASTER_DRIVERS,
     RASTER_WRITABLE,
     dataset_from_raster,

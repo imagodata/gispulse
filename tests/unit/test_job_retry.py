@@ -17,8 +17,8 @@ from fastapi.testclient import TestClient
 
 from gispulse.adapters.http.app import create_app
 from gispulse.adapters.http.routers.jobs_router import recover_stale_jobs, _MAX_JOB_ATTEMPTS
-from core.models import Job, JobStatus
-from persistence.repository import InMemoryRepository
+from gispulse.core.models import Job, JobStatus
+from gispulse.persistence.repository import InMemoryRepository
 
 
 # ---------------------------------------------------------------------------

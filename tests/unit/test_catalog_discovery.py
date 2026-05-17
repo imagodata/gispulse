@@ -11,14 +11,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from catalog.registry import (
+from gispulse.catalog.registry import (
     PROVIDERS,
     _CATALOG_PROVIDER_GROUP,
     _discover_providers,
     register_provider,
 )
-from core import plugin_hub
-from core.plugin_model import PluginKind, PluginRecord, PluginState
+from gispulse.core import plugin_hub
+from gispulse.core.plugin_model import PluginKind, PluginRecord, PluginState
 
 
 @pytest.fixture(autouse=True)

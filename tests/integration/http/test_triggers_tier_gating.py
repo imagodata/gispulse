@@ -221,26 +221,26 @@ class TestEnforceFeatureGate:
     """Direct unit test for ``persistence.tier.enforce_feature``."""
 
     def test_local_triggers_allowed_in_community(self, monkeypatch):
-        from persistence.tier import enforce_feature
+        from gispulse.persistence.tier import enforce_feature
 
         _community(monkeypatch)
         # Should not raise.
         enforce_feature("local_triggers")
 
     def test_local_triggers_allowed_in_pro(self):
-        from persistence.tier import enforce_feature
+        from gispulse.persistence.tier import enforce_feature
 
         # Default test tier == pro (community features inherited).
         enforce_feature("local_triggers")
 
     def test_esb_triggers_blocked_in_community(self, monkeypatch):
-        from persistence.tier import TierError, enforce_feature
+        from gispulse.persistence.tier import TierError, enforce_feature
 
         _community(monkeypatch)
         with pytest.raises(TierError):
             enforce_feature("esb_triggers")
 
     def test_esb_triggers_allowed_in_pro(self):
-        from persistence.tier import enforce_feature
+        from gispulse.persistence.tier import enforce_feature
 
         enforce_feature("esb_triggers")

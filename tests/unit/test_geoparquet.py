@@ -15,7 +15,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point, Polygon
 
-from core.io.geoparquet import (
+from gispulse.core.io.geoparquet import (
     DUCKDB_THRESHOLD,
     _read_via_geopandas,
     _should_use_duckdb,
@@ -162,7 +162,7 @@ class TestShouldUseDuckdb:
     def test_threshold_boundary(self, monkeypatch, tmp_path, sample_gdf):
         """Force threshold=3 so our 5-row file triggers DuckDB."""
         monkeypatch.setattr(
-            "core.io.geoparquet.DUCKDB_THRESHOLD", 3
+            "gispulse.core.io.geoparquet.DUCKDB_THRESHOLD", 3
         )
         path = str(tmp_path / "mid.parquet")
         sample_gdf.to_parquet(path)

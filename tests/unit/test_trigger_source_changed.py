@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from core.models import ChangeRecord, Trigger, TriggerEvent, TriggerType
-from rules.trigger_evaluator import TriggerEvaluator
+from gispulse.core.models import ChangeRecord, Trigger, TriggerEvent, TriggerType
+from gispulse.rules.trigger_evaluator import TriggerEvaluator
 
 
 def _record(new_values: dict) -> ChangeRecord:

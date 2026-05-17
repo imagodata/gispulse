@@ -13,8 +13,8 @@ if str(_PKG) not in sys.path:
 
 from gispulse_src_cadastre.source import CadastreSource  # noqa: E402
 
-from core.plugin_model import AccessProtocol, FetchMode, Payload, SourceDomain, SourceResult  # noqa: E402
-from core.sources import DataSource, ProtocolRegistry  # noqa: E402
+from gispulse.core.plugin_model import AccessProtocol, FetchMode, Payload, SourceDomain, SourceResult  # noqa: E402
+from gispulse.core.sources import DataSource, ProtocolRegistry  # noqa: E402
 
 
 class FakeWFS:

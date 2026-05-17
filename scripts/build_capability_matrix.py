@@ -33,7 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from capabilities import registry  # noqa: E402
+from gispulse.capabilities import registry  # noqa: E402
 
 CAPABILITIES_ROOT = ROOT / "capabilities"
 TESTS_ROOT = ROOT / "tests"

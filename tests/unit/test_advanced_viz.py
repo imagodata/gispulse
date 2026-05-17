@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 from shapely.geometry import Point
 
-from capabilities.classification import (
+from gispulse.capabilities.classification import (
     BivariateChoroplethCapability,
     ContinuousRampCapability,
     GraduatedSizeCapability,
@@ -99,7 +99,7 @@ class TestGraduatedSize:
         assert "marker_size" not in out.columns
 
     def test_registered(self):
-        from capabilities.registry import get
+        from gispulse.capabilities.registry import get
         assert isinstance(get("graduated_size"), GraduatedSizeCapability)
 
 
@@ -145,7 +145,7 @@ class TestHeadTailBreaks:
         assert breaks == sorted(breaks)
 
     def test_registered(self):
-        from capabilities.registry import get
+        from gispulse.capabilities.registry import get
         assert isinstance(get("head_tail_breaks"), HeadTailBreaksCapability)
 
 
@@ -224,7 +224,7 @@ class TestContinuousRamp:
         assert style["domain"] == [1.0, 3.0]
 
     def test_registered(self):
-        from capabilities.registry import get
+        from gispulse.capabilities.registry import get
         assert isinstance(get("continuous_ramp"), ContinuousRampCapability)
 
 
@@ -322,5 +322,5 @@ class TestBivariate:
         assert pd.isna(out["bi_class"].iloc[1])  # NaN in y
 
     def test_registered(self):
-        from capabilities.registry import get
+        from gispulse.capabilities.registry import get
         assert isinstance(get("bivariate_choropleth"), BivariateChoroplethCapability)

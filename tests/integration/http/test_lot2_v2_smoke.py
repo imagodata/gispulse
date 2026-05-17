@@ -899,8 +899,8 @@ async def test_p04_volumetry_10k_inserts(tmp_data_dir: Path, tmp_path: Path) -> 
 
 
 def test_p04a_stuck_backlog_resolved(tmp_path: Path) -> None:
-    from persistence.gpkg_engine import GeoPackageEngine
-    from persistence.change_log_watcher import ChangeLogWatcher
+    from gispulse.persistence.gpkg_engine import GeoPackageEngine
+    from gispulse.persistence.change_log_watcher import ChangeLogWatcher
 
     src = tmp_path / "backlog.gpkg"
     _make_gpkg(src, layer="parcels", n=1)

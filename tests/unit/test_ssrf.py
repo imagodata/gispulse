@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.ssrf import SSRFError, guard_outbound_url, is_blocked_address
+from gispulse.core.ssrf import SSRFError, guard_outbound_url, is_blocked_address
 
 
 # ---------------------------------------------------------------------------
@@ -76,8 +76,8 @@ def test_guard_rejects_url_without_hostname() -> None:
 
 
 def test_dispatch_fetch_blocks_private_endpoint() -> None:
-    from core.plugin_model import AccessProtocol, AccessSpec, FetchMode, Payload, SourceResult
-    from core.sources import ProtocolRegistry
+    from gispulse.core.plugin_model import AccessProtocol, AccessSpec, FetchMode, Payload, SourceResult
+    from gispulse.core.sources import ProtocolRegistry
 
     called: list = []
 
@@ -102,8 +102,8 @@ def test_dispatch_fetch_blocks_private_endpoint() -> None:
 
 
 def test_dispatch_fetch_allows_public_endpoint() -> None:
-    from core.plugin_model import AccessProtocol, AccessSpec, FetchMode, Payload, SourceResult
-    from core.sources import ProtocolRegistry
+    from gispulse.core.plugin_model import AccessProtocol, AccessSpec, FetchMode, Payload, SourceResult
+    from gispulse.core.sources import ProtocolRegistry
 
     class FakeWFS:
         protocol = AccessProtocol.WFS

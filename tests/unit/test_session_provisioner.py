@@ -5,8 +5,8 @@ import pytest
 from unittest.mock import AsyncMock
 from datetime import datetime, timezone
 
-from core.models import SessionBackend, SessionStatus
-from persistence.session_provisioner import SessionProvisioner
+from gispulse.core.models import SessionBackend, SessionStatus
+from gispulse.persistence.session_provisioner import SessionProvisioner
 
 
 class TestSessionCreation:
@@ -53,7 +53,7 @@ class TestSessionCreation:
         assert p.get("nonexistent") is None
 
     def test_list_active_only_returns_active(self):
-        from core.models import SessionStatus
+        from gispulse.core.models import SessionStatus
         p = SessionProvisioner()
         s1 = p.create_session()
         s1.status = SessionStatus.ACTIVE

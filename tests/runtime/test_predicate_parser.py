@@ -282,7 +282,7 @@ class TestRoundTrip:
             n.value = 2  # type: ignore[misc]
 
     def test_to_core_predicate_basic(self) -> None:
-        from core.predicates import AttrPredicate
+        from gispulse.core.predicates import AttrPredicate
 
         n = parse_predicate("status == 'pending'")
         core = to_core_predicate(n)
@@ -292,7 +292,7 @@ class TestRoundTrip:
         assert core.value == "pending"
 
     def test_to_core_predicate_compound(self) -> None:
-        from core.predicates import CompoundPredicate
+        from gispulse.core.predicates import CompoundPredicate
 
         n = parse_predicate("a == 1 AND b == 2")
         core = to_core_predicate(n)

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from core.plugin_model import (
+from gispulse.core.plugin_model import (
     AccessProtocol,
     AccessSpec,
     FetchMode,
     Payload,
 )
-from core.sources import ProtocolNotSupported, ProtocolRegistry
+from gispulse.core.sources import ProtocolNotSupported, ProtocolRegistry
 from gispulse.adapters.ogc.wfs_fetcher import (
     WfsFetcher,
     _bbox_from_extent,
@@ -141,7 +141,7 @@ def test_register_wfs_fetcher_is_idempotent() -> None:
 
 def test_wfs_fetcher_self_registered_in_global_protocols() -> None:
     """Importing the module wired the fetcher into the shared registry."""
-    from core.sources import PROTOCOLS
+    from gispulse.core.sources import PROTOCOLS
 
     assert isinstance(PROTOCOLS.get_fetcher(AccessProtocol.WFS), WfsFetcher)
 
@@ -242,7 +242,7 @@ def test_register_core_ogc_fetchers_registers_both() -> None:
 
 
 def test_ogc_features_fetcher_self_registered() -> None:
-    from core.sources import PROTOCOLS
+    from gispulse.core.sources import PROTOCOLS
     from gispulse.adapters.ogc.wfs_fetcher import OgcFeaturesFetcher
 
     assert isinstance(

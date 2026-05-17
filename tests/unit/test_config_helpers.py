@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-from core.config import (
+from gispulse.core.config import (
     Settings,
     _deep_merge,
     _find_profile_toml,
@@ -19,7 +19,7 @@ from core.config import (
     get_settings,
     settings,
 )
-import core.config as cfg_mod
+import gispulse.core.config as cfg_mod
 
 
 # ---------------------------------------------------------------------------

@@ -32,7 +32,7 @@ def client() -> TestClient:
     os.environ["GISPULSE_STORAGE"] = "memory"
     app = create_app()
     # Provide a mock spatial engine so _get_filter_service() doesn't 500
-    from persistence.engine import SpatialEngine
+    from gispulse.persistence.engine import SpatialEngine
     mock_engine = MagicMock(spec=SpatialEngine)
     mock_engine.backend_name = "duckdb"
     app.state.spatial_engine = mock_engine

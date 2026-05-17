@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from core import plugin_hub
-from core.plugin_hub import PluginHub
-from core.plugin_model import PluginKind, PluginState
+from gispulse.core import plugin_hub
+from gispulse.core.plugin_hub import PluginHub
+from gispulse.core.plugin_model import PluginKind, PluginState
 
 
 class FakeEP:

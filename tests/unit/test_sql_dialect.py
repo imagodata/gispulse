@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from persistence.sql_dialect import (
+from gispulse.persistence.sql_dialect import (
     DuckDBDialect,
     PostGISDialect,
     SpatiaLiteDialect,

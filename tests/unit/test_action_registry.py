@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from gispulse.adapters.esb.action_dispatcher import ActionDispatcher, TriggerContext
-from core.models import ActionDef, ActionType, EvalResult, Trigger
+from gispulse.core.models import ActionDef, ActionType, EvalResult, Trigger
 
 
 @pytest.fixture()

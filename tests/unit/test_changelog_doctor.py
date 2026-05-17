@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from persistence.changelog_doctor import (
+from gispulse.persistence.changelog_doctor import (
     GPKG_APP_ID,
     STATUS_FAIL,
     STATUS_FIXED,
@@ -18,7 +18,7 @@ from persistence.changelog_doctor import (
     health_score,
     run_doctor,
 )
-from persistence.gpkg_schema import bootstrap_gpkg_project, install_change_tracking
+from gispulse.persistence.gpkg_schema import bootstrap_gpkg_project, install_change_tracking
 
 
 # ---------------------------------------------------------------------------

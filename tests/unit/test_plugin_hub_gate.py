@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from core import plugin_hub
-from core.plugin_contracts import LicenceState
-from core.plugin_hub import PluginHub
-from core.plugin_model import (
+from gispulse.core import plugin_hub
+from gispulse.core.plugin_contracts import LicenceState
+from gispulse.core.plugin_hub import PluginHub
+from gispulse.core.plugin_model import (
     Origin,
     PluginKind,
     PluginRecord,

@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from capabilities.palettes import (
+from gispulse.capabilities.palettes import (
     get_palette,
     list_palettes,
     palette_kind,

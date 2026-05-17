@@ -12,10 +12,10 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from core.models import Project, Trigger, TriggerEvent, TriggerType
-from persistence.engine import SpatialEngine
-from persistence.engine_factory import create_spatial_engine
-from persistence.tier import TierError, check_tier, enforce_engine_tier, get_current_tier
+from gispulse.core.models import Project, Trigger, TriggerEvent, TriggerType
+from gispulse.persistence.engine import SpatialEngine
+from gispulse.persistence.engine_factory import create_spatial_engine
+from gispulse.persistence.tier import TierError, check_tier, enforce_engine_tier, get_current_tier
 
 
 # ------------------------------------------------------------------
@@ -27,20 +27,20 @@ class TestDuckDBSpatialEngine:
     """Verify DuckDBSession satisfies the SpatialEngine interface."""
 
     def test_is_spatial_engine(self):
-        from persistence.duckdb_engine import DuckDBSession
+        from gispulse.persistence.duckdb_engine import DuckDBSession
 
         engine = DuckDBSession()
         assert isinstance(engine, SpatialEngine)
 
     def test_backend_name(self):
-        from persistence.duckdb_engine import DuckDBSession
+        from gispulse.persistence.duckdb_engine import DuckDBSession
 
         engine = DuckDBSession()
         assert engine.backend_name == "duckdb"
         assert engine.is_persistent is False
 
     def test_open_close_lifecycle(self):
-        from persistence.duckdb_engine import DuckDBSession
+        from gispulse.persistence.duckdb_engine import DuckDBSession
 
         engine = DuckDBSession()
         engine.open()
@@ -48,13 +48,13 @@ class TestDuckDBSpatialEngine:
         engine.close()
 
     def test_context_manager(self):
-        from persistence.duckdb_engine import DuckDBSession
+        from gispulse.persistence.duckdb_engine import DuckDBSession
 
         with DuckDBSession() as engine:
             assert engine.backend_name == "duckdb"
 
     def test_register_and_sql_to_gdf(self):
-        from persistence.duckdb_engine import DuckDBSession
+        from gispulse.persistence.duckdb_engine import DuckDBSession
         import pandas as pd
 
         # DuckDB cannot register GeoDataFrames with geometry columns directly,
@@ -66,14 +66,14 @@ class TestDuckDBSpatialEngine:
             assert len(result) == 2
 
     def test_execute_sql(self):
-        from persistence.duckdb_engine import DuckDBSession
+        from gispulse.persistence.duckdb_engine import DuckDBSession
 
         with DuckDBSession() as engine:
             rows = engine.execute_sql("SELECT 1 AS n")
             assert rows == [{"n": 1}]
 
     def test_load_write_roundtrip(self, tmp_path: Path):
-        from persistence.duckdb_engine import DuckDBSession
+        from gispulse.persistence.duckdb_engine import DuckDBSession
 
         gdf = gpd.GeoDataFrame(
             {"val": [10, 20]},
@@ -107,7 +107,7 @@ class TestEngineFactory:
         assert engine.backend_name == "duckdb"
 
     def test_postgis_without_dsn_raises(self):
-        from persistence.tier import make_test_license_key
+        from gispulse.persistence.tier import make_test_license_key
         env = {"GISPULSE_DSN": "", "GISPULSE_TIER": "pro", "GISPULSE_LICENCE_SKIP_VERIFY": "true", "GISPULSE_LICENSE_KEY": make_test_license_key("pro")}
         with patch.dict(os.environ, env, clear=False):
             with pytest.raises(ValueError, match="DSN"):
@@ -192,7 +192,7 @@ class TestTierGating:
             enforce_engine_tier("duckdb")  # should not raise
 
     def test_enterprise_allows_everything(self):
-        from persistence.tier import make_test_license_key
+        from gispulse.persistence.tier import make_test_license_key
         env = {"GISPULSE_TIER": "enterprise", "GISPULSE_LICENCE_SKIP_VERIFY": "true", "GISPULSE_LICENSE_KEY": make_test_license_key("enterprise")}
         with patch.dict(os.environ, env, clear=False):
             enforce_engine_tier("duckdb")

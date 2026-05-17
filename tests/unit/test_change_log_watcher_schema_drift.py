@@ -22,8 +22,8 @@ from typing import Any
 
 import pytest
 
-from persistence.change_log_watcher import ChangeLogWatcher
-from persistence.gpkg_schema import (
+from gispulse.persistence.change_log_watcher import ChangeLogWatcher
+from gispulse.persistence.gpkg_schema import (
     bootstrap_gpkg_project,
     install_change_tracking,
 )

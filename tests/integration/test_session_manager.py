@@ -20,8 +20,8 @@ from shapely.geometry import Point, box
 from typer.testing import CliRunner
 
 from gispulse.cli import app
-from core.models import Rule
-from orchestration.session_manager import PipelineResult, SessionManager
+from gispulse.core.models import Rule
+from gispulse.orchestration.session_manager import PipelineResult, SessionManager
 
 runner = CliRunner()
 
@@ -317,7 +317,7 @@ class TestSessionManagerDuckDBMode:
         self, sample_gpkg: Path, filter_rules_list: list[Rule], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Verify DuckDB session lifecycle: open() and close() are both called."""
-        from persistence import duckdb_engine as duckdb_mod
+        from gispulse.persistence import duckdb_engine as duckdb_mod
 
         open_calls: list[str] = []
         close_calls: list[str] = []
@@ -346,8 +346,8 @@ class TestSessionManagerDuckDBMode:
         self, sample_gpkg: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Verify DuckDB session is closed even when rule application raises."""
-        from persistence import duckdb_engine as duckdb_mod
-        from rules import engine as engine_mod
+        from gispulse.persistence import duckdb_engine as duckdb_mod
+        from gispulse.rules import engine as engine_mod
 
         close_calls: list[str] = []
         original_close = duckdb_mod.DuckDBSession.close
