@@ -2,10 +2,10 @@
 
 The OSS ``gispulse/adapters/http/app.py`` must NOT import enterprise-only
 modules directly. Admin and billing routers live in ``gispulse-enterprise``
-and are mounted by ``PluginHub`` via the ``gispulse.routers`` entry-points.
+and are mounted by ``ExtensionHub`` via the ``gispulse.routers`` entry-points.
 
 Direct legacy imports are silently swallowed by ``except ImportError`` and
-break tests with 404/401 because the PluginHub graceful-skip path requires
+break tests with 404/401 because the ExtensionHub graceful-skip path requires
 ``app.state.auth_repo`` / ``app.state.oidc_provider`` to be wired — which
 never happens when the legacy import path is taken instead.
 
@@ -35,5 +35,5 @@ def test_app_py_has_no_legacy_enterprise_imports() -> None:
     found = [pat for pat in LEGACY_PATTERNS if pat in src]
     assert not found, (
         f"Legacy enterprise imports re-introduced in app.py: {found}. "
-        "Use PluginHub entry-points (gispulse.routers) — see docs/PLUGIN_CONTRACT.md."
+        "Use ExtensionHub entry-points (gispulse.routers) — see docs/PLUGIN_CONTRACT.md."
     )

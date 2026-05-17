@@ -91,7 +91,7 @@ def test_plugin_tool_registered(monkeypatch):
         return []
 
     monkeypatch.setattr(plugin_hub, "entry_points", fake_entry_points)
-    plugin_hub.PluginHub.reset()
+    plugin_hub.ExtensionHub.reset()
 
     server = mcp_server.create_mcp_server()
     tools = asyncio.run(server.list_tools())
@@ -99,7 +99,7 @@ def test_plugin_tool_registered(monkeypatch):
 
     assert "plugin_ping" in tool_names
 
-    plugin_hub.PluginHub.reset()
+    plugin_hub.ExtensionHub.reset()
 
 
 # ---------------------------------------------------------------------------

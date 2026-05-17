@@ -71,7 +71,7 @@ def _get_auth_repo(request: Request) -> AuthRepository | None:
 async def _resolve_user_from_session(request: Request) -> User | None:
     """Attempt to resolve a user from a session cookie via plugin AuthProviders.
 
-    Iterates ``PluginHub.auth_providers`` (e.g. the ``oidc`` provider shipped
+    Iterates ``ExtensionHub.auth_providers`` (e.g. the ``oidc`` provider shipped
     by ``gispulse-enterprise``); the first provider that returns claims wins.
     Returns ``None`` when no provider is registered, none accept the request,
     no auth repository is configured, or the resolved user is inactive.
@@ -79,9 +79,9 @@ async def _resolve_user_from_session(request: Request) -> User | None:
     A provider raising during ``authenticate`` is treated as a soft failure
     so API key auth can still take over.
     """
-    from gispulse.core.plugin_hub import PluginHub
+    from gispulse.core.plugin_hub import ExtensionHub
 
-    providers = PluginHub.get().auth_providers
+    providers = ExtensionHub.get().auth_providers
     if not providers:
         return None
 

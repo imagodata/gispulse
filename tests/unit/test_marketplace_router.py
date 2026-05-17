@@ -101,16 +101,16 @@ def client():
 
 
 class TestListPlugins:
-    """GET /marketplace/plugins — now sourced from the unified PluginHub (#181)."""
+    """GET /marketplace/plugins — now sourced from the unified ExtensionHub (#181)."""
 
     @staticmethod
     def _hub_with(records):
         from types import SimpleNamespace
 
-        from gispulse.core.plugin_hub import PluginHub
+        from gispulse.core.plugin_hub import ExtensionHub
 
         return patch.object(
-            PluginHub, "get", classmethod(lambda cls: SimpleNamespace(records=records))
+            ExtensionHub, "get", classmethod(lambda cls: SimpleNamespace(records=records))
         )
 
     @staticmethod

@@ -25,7 +25,7 @@ Datasets / pipelines (read-only — no FS writes, no session state):
   validate_pipeline(path)      -> schema-validate a pipeline JSON file
 
 Plugins:
-  list_plugins()               -> PluginHub inventory records
+  list_plugins()               -> ExtensionHub inventory records
 
 Resources
 ---------
@@ -53,7 +53,7 @@ except ImportError as exc:  # pragma: no cover
 from gispulse.app import GISPulseApp
 from gispulse.catalog.models import CatalogDomain
 from gispulse.core.logging import get_logger
-from gispulse.core.plugin_hub import PluginHub
+from gispulse.core.plugin_hub import ExtensionHub
 
 log = get_logger(__name__)
 
@@ -95,8 +95,8 @@ def register_builtin_mcp_surface(server: Any) -> None:
 
 
 def register_plugin_mcp_surface(server: Any) -> None:
-    """Install MCP tools/resources provided through PluginHub entry-points."""
-    hub = PluginHub.get()
+    """Install MCP tools/resources provided through ExtensionHub entry-points."""
+    hub = ExtensionHub.get()
     for factory in hub.mcp_tools:
         try:
             factory.register(server)
@@ -282,7 +282,7 @@ def validate_pipeline(path: str) -> dict[str, Any]:
 
 
 def list_plugins() -> list[dict[str, Any]]:
-    """List the plugins discovered by the unified PluginHub.
+    """List the plugins discovered by the unified ExtensionHub.
 
     Returns:
         One dict per plugin record — sources, capabilities, sinks,

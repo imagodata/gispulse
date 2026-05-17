@@ -102,19 +102,19 @@ def _record_package(rec: Any) -> str:
 
 @router.get("/plugins", summary="List installed plugins")
 def list_installed_plugins() -> list[dict[str, Any]]:
-    """Return metadata for all installed plugins from the unified PluginHub.
+    """Return metadata for all installed plugins from the unified ExtensionHub.
 
     Each entry carries the hub's classification — ``kind`` / ``tier`` /
     ``trust`` / ``origin`` / ``state`` — so the Portal UI can surface
     tier-gated (``locked``) plugins with an upgrade prompt. Curated
     registry metadata enriches the descriptive fields.
     """
-    from gispulse.core.plugin_hub import PluginHub
+    from gispulse.core.plugin_hub import ExtensionHub
 
     registry_plugins = {p["package"]: p for p in _load_registry_plugins()}
 
     enriched = []
-    for rec in PluginHub.get().records:
+    for rec in ExtensionHub.get().records:
         package = _record_package(rec)
         registry_entry = registry_plugins.get(package, {})
         state = rec.state.value

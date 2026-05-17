@@ -62,11 +62,11 @@ _CATALOG_PROVIDER_GROUP = "gispulse.catalog_providers"
 
 
 def _discover_providers() -> list[dict[str, str]]:
-    """Register catalog-provider plugins discovered by the PluginHub.
+    """Register catalog-provider plugins discovered by the ExtensionHub.
 
-    Issue #193 — the :class:`~core.plugin_hub.PluginHub` owns the single
+    Issue #193 — the :class:`~core.plugin_hub.ExtensionHub` owns the single
     ``gispulse.catalog_providers`` entry-point scan; this function no
-    longer scans a second time, it *consumes* ``PluginHub.records``.
+    longer scans a second time, it *consumes* ``ExtensionHub.records``.
 
     Each catalog-provider record is an ``EXTENSION`` whose loaded ``obj``
     is the plugin's register callable — invoking it calls
@@ -79,10 +79,10 @@ def _discover_providers() -> list[dict[str, str]]:
     """
     loaded: list[dict[str, str]] = []
     try:
-        from gispulse.core.plugin_hub import PluginHub
+        from gispulse.core.plugin_hub import ExtensionHub
         from gispulse.core.plugin_model import PluginState
 
-        hub = PluginHub.get()
+        hub = ExtensionHub.get()
     except Exception:
         return loaded
 

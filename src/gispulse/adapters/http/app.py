@@ -598,9 +598,9 @@ def create_app(
     # mode — including ``portal`` — so production deployments stay
     # protected regardless of how the app was created. Routers stay
     # mode-gated below; only middleware applies universally.
-    from gispulse.core.plugin_hub import PluginHub
+    from gispulse.core.plugin_hub import ExtensionHub
 
-    hub = PluginHub.get()
+    hub = ExtensionHub.get()
     app.state.plugin_hub = hub
     plugin_context = PluginHostContext(
         app=app,
@@ -862,7 +862,7 @@ def create_app(
         app.include_router(marketplace_router)
 
         # Admin (RBAC) and Billing (Stripe) routers ship in the gispulse-enterprise
-        # plugin and are mounted by the PluginHub block below via
+        # plugin and are mounted by the ExtensionHub block below via
         # ``gispulse.routers`` entry-points — no legacy try/except needed.
 
         from gispulse.adapters.http.routers.ogc_features_router import router as ogc_features_router

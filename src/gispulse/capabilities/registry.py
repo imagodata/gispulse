@@ -88,20 +88,20 @@ def list_all() -> list[dict]:
 
 
 def _discover_plugins() -> list[dict[str, str]]:
-    """Register capability plugins discovered by the unified PluginHub.
+    """Register capability plugins discovered by the unified ExtensionHub.
 
     Issue #180 — end of the double discovery: the hub
-    (:class:`core.plugin_hub.PluginHub`) owns entry-point scanning for
+    (:class:`core.plugin_hub.ExtensionHub`) owns entry-point scanning for
     all eleven groups. Here we simply invoke the ``register()`` callable
     of every ACTIVE capability record so the capabilities land in
     :data:`REGISTRY`. Records the hub marked FAILED were already logged
     there and surface as errors in the returned report.
     """
-    from gispulse.core.plugin_hub import PluginHub
+    from gispulse.core.plugin_hub import ExtensionHub
     from gispulse.core.plugin_model import PluginKind, PluginState
 
     results: list[dict[str, str]] = []
-    for rec in PluginHub.get().records_by_kind(PluginKind.CAPABILITY):
+    for rec in ExtensionHub.get().records_by_kind(PluginKind.CAPABILITY):
         module = getattr(rec.entry_point, "value", rec.name)
         if rec.state is not PluginState.ACTIVE:
             results.append(

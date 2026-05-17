@@ -10,7 +10,7 @@ models, on every surface.
 :class:`GISPulseApp` is the Chantier B remedy of the v1.8.0 "Foundations"
 refonte: a Gang-of-Four *façade* over ``capabilities``, ``core`` /
 ``orchestration``, ``catalog``, the templates directory, the
-:class:`~gispulse.core.plugin_hub.PluginHub` and the headless trigger
+:class:`~gispulse.core.plugin_hub.ExtensionHub` and the headless trigger
 runtime. It wires each subsystem once and exposes coarse, surface-agnostic
 use-cases. The delivery surfaces are meant to become *thin* adapters over
 this object — input parsing and output formatting only, no business logic.
@@ -246,11 +246,11 @@ class GISPulseApp:
     # ------------------------------------------------------------------
     def list_plugins(self) -> "list[PluginRecord]":
         """Return the inventory records discovered by the unified
-        :class:`~gispulse.core.plugin_hub.PluginHub` — sources,
+        :class:`~gispulse.core.plugin_hub.ExtensionHub` — sources,
         capabilities, sinks, templates and extensions."""
-        from gispulse.core.plugin_hub import PluginHub
+        from gispulse.core.plugin_hub import ExtensionHub
 
-        return list(PluginHub.get().records)
+        return list(ExtensionHub.get().records)
 
     # ------------------------------------------------------------------
     # Trigger runtime (CDC / watch)

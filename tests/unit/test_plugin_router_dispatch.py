@@ -34,7 +34,7 @@ def ctx(app: FastAPI) -> PluginHostContext:
         app=app,
         settings=MagicMock(),
         logger=MagicMock(),
-        plugin_hub=ph.PluginHub(),
+        plugin_hub=ph.ExtensionHub(),
     )
 
 

@@ -2,7 +2,7 @@
 
 Discovers plugins from Python entry-point groups (see
 ``core.plugin_contracts`` for the contract spec) and exposes them to
-the host application through a single lazy singleton :class:`PluginHub`.
+the host application through a single lazy singleton :class:`ExtensionHub`.
 
 The OSS engine starts with sensible defaults so that a stand-alone
 ``pip install gispulse`` works without any plugin: ``NoOpLicenceProvider``
@@ -207,15 +207,15 @@ def _features_for_tier(tier: str) -> frozenset[str]:
 # ---------------------------------------------------------------------------
 
 
-class PluginHub:
+class ExtensionHub:
     """Lazy singleton aggregating discovered plugins.
 
-    Use :meth:`PluginHub.get` to obtain the shared instance. Tests can
-    call :meth:`PluginHub.reset` to force a fresh discovery (e.g. after
+    Use :meth:`ExtensionHub.get` to obtain the shared instance. Tests can
+    call :meth:`ExtensionHub.reset` to force a fresh discovery (e.g. after
     monkey-patching ``importlib.metadata.entry_points``).
     """
 
-    _instance: ClassVar["PluginHub | None"] = None
+    _instance: ClassVar["ExtensionHub | None"] = None
     _lock: ClassVar[Lock] = Lock()
 
     routers: dict[str, RouterFactory]
@@ -248,7 +248,7 @@ class PluginHub:
     # ------------------------------------------------------------------ API
 
     @classmethod
-    def get(cls) -> "PluginHub":
+    def get(cls) -> "ExtensionHub":
         with cls._lock:
             if cls._instance is None:
                 cls._instance = cls._discover()
@@ -262,7 +262,7 @@ class PluginHub:
     # ------------------------------------------------------------------ discovery
 
     @classmethod
-    def _discover(cls) -> "PluginHub":
+    def _discover(cls) -> "ExtensionHub":
         hub = cls()
         hub._load_routers()
         hub._load_middleware()
@@ -454,6 +454,13 @@ class PluginHub:
             if obj is None:
                 continue
             self.mcp_resources.append(obj)
+
+
+# Transitional back-compat alias (v1.8.0 ExtensionHub rename, Chantier C).
+# ``PluginHub`` was renamed to :class:`ExtensionHub`; the old name keeps
+# out-of-tree consumers (gispulse-enterprise, third-party tooling) working
+# until they migrate. Removed in v1.9.0.
+PluginHub = ExtensionHub
 
 
 # ---------------------------------------------------------------------------

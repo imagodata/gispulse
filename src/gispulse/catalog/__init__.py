@@ -16,7 +16,7 @@ def _auto_register():
 
 _auto_register()
 
-# Register third-party catalog providers discovered by the PluginHub (#193).
+# Register third-party catalog providers discovered by the ExtensionHub (#193).
 from gispulse.catalog.registry import _discover_providers  # noqa: E402
 
 _discover_providers()

@@ -1,4 +1,4 @@
-"""Unit tests for the PluginHub tier/trust activation gate (issue #182)."""
+"""Unit tests for the ExtensionHub tier/trust activation gate (issue #182)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import pytest
 
 from gispulse.core import plugin_hub
 from gispulse.core.plugin_contracts import LicenceState
-from gispulse.core.plugin_hub import PluginHub
+from gispulse.core.plugin_hub import ExtensionHub
 from gispulse.core.plugin_model import (
     Origin,
     PluginKind,
@@ -45,9 +45,9 @@ class FakeLicence:
 
 @pytest.fixture(autouse=True)
 def _reset_hub():
-    PluginHub.reset()
+    ExtensionHub.reset()
     yield
-    PluginHub.reset()
+    ExtensionHub.reset()
 
 
 def _record(name="x", kind=PluginKind.CAPABILITY, **kw) -> PluginRecord:
@@ -65,7 +65,7 @@ def test_resolve_external_plugin_from_registry(monkeypatch) -> None:
         "_curated_registry",
         lambda: {"gispulse-cap-ftth": {"tier": Tier.PRO, "trust": Trust.VERIFIED}},
     )
-    hub = PluginHub()
+    hub = ExtensionHub()
     rec = _record(entry_point=FakeEP("ftth", dist="gispulse-cap-ftth"))
     hub._resolve(rec)
     assert rec.origin is Origin.EXTERNAL
@@ -75,7 +75,7 @@ def test_resolve_external_plugin_from_registry(monkeypatch) -> None:
 
 def test_resolve_first_party_distribution(monkeypatch) -> None:
     monkeypatch.setattr(plugin_hub, "_curated_registry", dict)
-    hub = PluginHub()
+    hub = ExtensionHub()
     rec = _record("admin", PluginKind.EXTENSION, entry_point=FakeEP("admin", dist="gispulse-enterprise"))
     hub._resolve(rec)
     assert rec.origin is Origin.INTERNAL
@@ -84,7 +84,7 @@ def test_resolve_first_party_distribution(monkeypatch) -> None:
 
 def test_resolve_unknown_plugin_keeps_community_defaults(monkeypatch) -> None:
     monkeypatch.setattr(plugin_hub, "_curated_registry", dict)
-    hub = PluginHub()
+    hub = ExtensionHub()
     rec = _record(entry_point=FakeEP("rando", dist="gispulse-cap-rando"))
     hub._resolve(rec)
     assert rec.trust is Trust.COMMUNITY
@@ -97,7 +97,7 @@ def test_resolve_unknown_plugin_keeps_community_defaults(monkeypatch) -> None:
 
 
 def test_gate_locks_pro_plugin_under_community_licence() -> None:
-    hub = PluginHub()
+    hub = ExtensionHub()
     hub._licence_tier = Tier.COMMUNITY
     rec = _record(tier_required=Tier.PRO)
     assert hub._gate(rec) is False
@@ -105,13 +105,13 @@ def test_gate_locks_pro_plugin_under_community_licence() -> None:
 
 
 def test_gate_allows_when_licence_tier_sufficient() -> None:
-    hub = PluginHub()
+    hub = ExtensionHub()
     hub._licence_tier = Tier.ENTERPRISE
     assert hub._gate(_record(tier_required=Tier.PRO)) is True
 
 
 def test_gate_allows_community_plugin_on_community_licence() -> None:
-    hub = PluginHub()
+    hub = ExtensionHub()
     hub._licence_tier = Tier.COMMUNITY
     assert hub._gate(_record(tier_required=Tier.COMMUNITY)) is True
 
@@ -123,14 +123,14 @@ def test_gate_allows_community_plugin_on_community_licence() -> None:
 
 def test_gate_allows_unverified_by_default(monkeypatch) -> None:
     monkeypatch.delenv("GISPULSE_PLUGINS_ALLOW_UNVERIFIED", raising=False)
-    hub = PluginHub()
+    hub = ExtensionHub()
     hub._licence_tier = Tier.COMMUNITY
     assert hub._gate(_record(kind=PluginKind.SOURCE, trust=Trust.COMMUNITY)) is True
 
 
 def test_gate_blocks_unverified_when_disabled(monkeypatch) -> None:
     monkeypatch.setenv("GISPULSE_PLUGINS_ALLOW_UNVERIFIED", "false")
-    hub = PluginHub()
+    hub = ExtensionHub()
     hub._licence_tier = Tier.COMMUNITY
     rec = _record(kind=PluginKind.SOURCE, trust=Trust.COMMUNITY)
     assert hub._gate(rec) is False
@@ -139,7 +139,7 @@ def test_gate_blocks_unverified_when_disabled(monkeypatch) -> None:
 
 def test_gate_keeps_verified_plugin_when_unverified_disabled(monkeypatch) -> None:
     monkeypatch.setenv("GISPULSE_PLUGINS_ALLOW_UNVERIFIED", "false")
-    hub = PluginHub()
+    hub = ExtensionHub()
     hub._licence_tier = Tier.COMMUNITY
     assert hub._gate(_record(kind=PluginKind.SOURCE, trust=Trust.VERIFIED)) is True
 
@@ -162,7 +162,7 @@ def test_discover_locks_pro_plugin_under_community(monkeypatch) -> None:
         "entry_points",
         lambda group: [ep] if group == "gispulse.capabilities" else [],
     )
-    hub = PluginHub()
+    hub = ExtensionHub()
     hub.licence_provider = FakeLicence("community")
     hub._discover_records()
 
@@ -186,7 +186,7 @@ def test_discover_activates_pro_plugin_under_enterprise(monkeypatch) -> None:
         "entry_points",
         lambda group: [ep] if group == "gispulse.capabilities" else [],
     )
-    hub = PluginHub()
+    hub = ExtensionHub()
     hub.licence_provider = FakeLicence("enterprise")
     hub._discover_records()
 
@@ -206,7 +206,7 @@ def test_protocol_mismatch_warns_but_still_activates(monkeypatch) -> None:
         "entry_points",
         lambda group: [ep] if group == "gispulse.protocols" else [],
     )
-    hub = PluginHub()
+    hub = ExtensionHub()
     hub.licence_provider = FakeLicence("community")
     hub._discover_records()
     assert hub.records[0].state is PluginState.ACTIVE
