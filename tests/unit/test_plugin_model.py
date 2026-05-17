@@ -44,7 +44,7 @@ def test_protocol_version_is_shared_with_contracts() -> None:
 @pytest.mark.parametrize(
     ("enum", "size"),
     [
-        (PluginKind, 5),
+        (PluginKind, 6),
         (Origin, 2),
         (Trust, 3),
         (PluginState, 4),

@@ -196,11 +196,40 @@ class GISPulseApp:
     def list_templates(self) -> list[dict]:
         """List the built-in pipeline templates.
 
+        Sourced from the ``template-pack`` data packs discovered by the
+        :class:`~gispulse.core.plugin_hub.ExtensionHub` (v1.8.0 Chantier
+        C). Falls back to a direct scan of the bundled ``templates/``
+        directory when no template-pack manifest is present.
+
         Returns:
-            One dict per template with ``name`` (the file stem),
-            ``title`` and ``description`` keys. Empty when the bundled
-            ``templates/`` directory is not present (e.g. a trimmed wheel).
+            One dict per template with ``name`` (the stem used to fetch
+            it), ``title``, ``description`` and ``steps`` keys.
         """
+        from gispulse.core.plugin_hub import ExtensionHub
+
+        packs = ExtensionHub.get().data_pack_manifests("template-pack")
+        if packs:
+            entries: list[dict] = []
+            for pack in packs:
+                for entry in pack.entries:
+                    name = entry.get("name")
+                    if not name:
+                        continue
+                    entries.append(
+                        {
+                            "name": name,
+                            "title": entry.get("title", name),
+                            "description": entry.get("description", ""),
+                            "steps": entry.get("steps", 0),
+                        }
+                    )
+            return entries
+        return self._scan_templates_dir()
+
+    @staticmethod
+    def _scan_templates_dir() -> list[dict]:
+        """Fallback: scan ``templates/*.json`` directly when no
+        template-pack manifest is available (e.g. a trimmed wheel)."""
         if not _TEMPLATES_DIR.is_dir():
             return []
         entries: list[dict] = []
@@ -215,6 +244,7 @@ class GISPulseApp:
                     "name": tpl_path.stem,
                     "title": meta.get("name", tpl_path.stem),
                     "description": meta.get("description", ""),
+                    "steps": len(meta.get("steps", [])),
                 }
             )
         return entries
@@ -246,11 +276,35 @@ class GISPulseApp:
     # ------------------------------------------------------------------
     def list_plugins(self) -> "list[PluginRecord]":
         """Return the inventory records discovered by the unified
-        :class:`~gispulse.core.plugin_hub.ExtensionHub` — sources,
-        capabilities, sinks, templates and extensions."""
+        :class:`~gispulse.core.plugin_hub.ExtensionHub` — code plugins
+        (sources, capabilities, sinks, extensions) and data packs."""
         from gispulse.core.plugin_hub import ExtensionHub
 
         return list(ExtensionHub.get().records)
+
+    def list_data_packs(self) -> list[dict]:
+        """Return the declarative data packs known to the ExtensionHub.
+
+        Data packs are the *data regime* of the hub (v1.8.0 Chantier C):
+        manifest-described bundles of templates / catalog sources /
+        basemaps / projections. Each dict carries ``name``, ``content``,
+        ``version``, ``display_name``, ``description``, ``tier`` and the
+        ``entry_count``.
+        """
+        from gispulse.core.plugin_hub import ExtensionHub
+
+        return [
+            {
+                "name": m.name,
+                "content": m.content,
+                "version": m.version,
+                "display_name": m.display_name,
+                "description": m.description,
+                "tier": m.tier.value,
+                "entry_count": len(m.entries),
+            }
+            for m in ExtensionHub.get().data_pack_manifests()
+        ]
 
     # ------------------------------------------------------------------
     # Trigger runtime (CDC / watch)

@@ -30,13 +30,22 @@ PROTOCOL_VERSION = "1.1"
 
 
 class PluginKind(str, Enum):
-    """The five roles a plugin can play in the GISPulse runtime."""
+    """The roles a plugin can play in the GISPulse runtime.
+
+    The first five are *code plugins* — Python entry-points loaded into
+    the process. ``DATA_PACK`` is the *data regime* added by the v1.8.0
+    ExtensionHub refonte (Chantier C): a declarative manifest that ships
+    data (templates, catalog sources, basemaps, projections) and never
+    any code. The pack's content type is carried by
+    :attr:`DataPackManifest.content`.
+    """
 
     SOURCE = "source"          # Extract — yields data into the ETL graph
     CAPABILITY = "capability"  # Transform — operates on a dataset
     SINK = "sink"              # Load — writes data to a destination
     PROTOCOL = "protocol"      # Transport adapter (fetch / write)
     EXTENSION = "extension"    # Extends the host FastAPI app
+    DATA_PACK = "data-pack"    # Declarative data bundle — no code
 
 
 class Origin(str, Enum):
@@ -203,6 +212,68 @@ class PluginManifest:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+# Recognised data-pack content types. Open set — a new content type is a
+# new value and needs no contract change, mirroring the SourceDomain axiom.
+DATA_PACK_CONTENTS: frozenset[str] = frozenset(
+    {"template-pack", "source-catalog", "basemap-pack", "projection-pack"}
+)
+
+
+@dataclass(frozen=True)
+class DataPackManifest:
+    """Declarative manifest of a *data pack* — the data regime of the
+    ExtensionHub (v1.8.0 Chantier C).
+
+    A data pack ships *data*, never code: pipeline templates, catalog
+    sources, basemaps or projections. It is described by a YAML/JSON
+    manifest and discovered without importing anything — so its trust is
+    trivially ``verified`` and tier gating is fully data-driven.
+
+    ``content`` discriminates the payload (one of
+    :data:`DATA_PACK_CONTENTS`); ``entries`` carries the content-specific
+    declarative records.
+    """
+
+    name: str
+    content: str
+    version: str = "0.0.0"
+    display_name: str = ""
+    description: str = ""
+    tier: Tier = Tier.COMMUNITY
+    entries: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "DataPackManifest":
+        """Parse a manifest mapping. Raises :class:`ValueError` on a
+        missing/empty ``name`` or an unknown ``content`` type."""
+        name = str(raw.get("name", "")).strip()
+        if not name:
+            raise ValueError("data pack manifest requires a non-empty 'name'")
+        content = str(raw.get("content", "")).strip()
+        if content not in DATA_PACK_CONTENTS:
+            raise ValueError(
+                f"data pack {name!r}: unknown content {content!r}; "
+                f"expected one of {sorted(DATA_PACK_CONTENTS)}"
+            )
+        tier_raw = raw.get("tier", "community")
+        try:
+            tier = Tier(str(tier_raw).lower())
+        except ValueError:
+            tier = Tier.COMMUNITY
+        entries = list(raw.get("entries", []) or [])
+        return cls(
+            name=name,
+            content=content,
+            version=str(raw.get("version", "0.0.0")),
+            display_name=str(raw.get("display_name", "") or name),
+            description=str(raw.get("description", "")),
+            tier=tier,
+            entries=entries,
+            metadata=dict(raw.get("metadata", {}) or {}),
+        )
+
+
 @dataclass(frozen=True)
 class AccessSpec:
     """How to reach one catalog entry — dispatched to a protocol adapter."""
@@ -328,6 +399,8 @@ __all__ = [
     "ENTRYPOINT_GROUPS",
     "tier_satisfies",
     "PluginManifest",
+    "DATA_PACK_CONTENTS",
+    "DataPackManifest",
     "AccessSpec",
     "SourceResult",
     "WriteSpec",

@@ -146,7 +146,10 @@ def test_get_runs_discovery_and_reset_clears_records(monkeypatch) -> None:
         monkeypatch, {"gispulse.protocols": [FakeEP("stac", object)]}
     )
     hub = ExtensionHub.get()
-    assert [r.name for r in hub.records] == ["stac"]
+    # Entry-point discovery yields the patched protocol record; the
+    # bundled templates data pack is discovered alongside it.
+    record_names = [r.name for r in hub.records]
+    assert "stac" in record_names
 
     ExtensionHub.reset()
     assert ExtensionHub._instance is None

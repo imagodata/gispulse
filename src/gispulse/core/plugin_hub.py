@@ -36,6 +36,7 @@ from gispulse.core.plugin_contracts import (
 )
 from gispulse.core.plugin_model import (
     ENTRYPOINT_GROUPS,
+    DataPackManifest,
     Origin,
     PluginKind,
     PluginRecord,
@@ -73,9 +74,22 @@ _FIRST_PARTY_DISTRIBUTIONS: frozenset[str] = frozenset(
     {"gispulse", "gispulse-enterprise"}
 )
 
+# Repo root — ``src/gispulse/core/plugin_hub.py`` -> parents[3].
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
 # Curated marketplace registry — the tier/trust authority for external
 # plugins. Versioned in the OSS repo, hence tamper-evident.
-_REGISTRY_PATH = Path(__file__).resolve().parents[3] / "marketplace" / "registry.json"
+_REGISTRY_PATH = _REPO_ROOT / "marketplace" / "registry.json"
+
+# Bundled first-party data packs — declarative manifests shipped in the
+# OSS tree. The v1.9.0 worldwide aggregator adds source-catalog packs.
+_BUNDLED_DATA_PACK_MANIFESTS: tuple[Path, ...] = (
+    _REPO_ROOT / "templates" / "manifest.yml",
+)
+
+# Env var pointing at a directory of extra data-pack manifests
+# (``*.yml`` / ``*.yaml`` / ``*.json``) — the user-dir discovery channel.
+_DATA_PACKS_DIR_ENV = "GISPULSE_DATA_PACKS_DIR"
 
 
 def _tier_from_str(value: object) -> Tier:
@@ -274,6 +288,7 @@ class ExtensionHub:
         hub._load_mcp_tools()
         hub._load_mcp_resources()
         hub._discover_records()
+        hub._discover_data_packs()
         log.info(
             "plugin_hub_initialized",
             routers=sorted(hub.routers),
@@ -286,6 +301,7 @@ class ExtensionHub:
             mcp_tools=[p.name for p in hub.mcp_tools],
             mcp_resources=[p.name for p in hub.mcp_resources],
             plugin_records=len(hub.records),
+            data_packs=len(hub.records_by_kind(PluginKind.DATA_PACK)),
         )
         return hub
 
@@ -389,6 +405,76 @@ class ExtensionHub:
         """Return the inventory records of a given :class:`PluginKind`."""
         return [r for r in self.records if r.kind is kind]
 
+    # ------------------------------------------------------- data-pack regime
+
+    def _discover_data_packs(self) -> None:
+        """Discover declarative data packs — the data regime of the hub.
+
+        The v1.8.0 ExtensionHub refonte (Chantier C) adds a second
+        discovery regime alongside Python entry-points: declarative
+        YAML/JSON manifests that ship *data* (templates, catalog sources,
+        basemaps, projections) and never code. Scans the bundled
+        first-party manifests plus any manifest files under the
+        ``GISPULSE_DATA_PACKS_DIR`` directory.
+
+        Each manifest becomes a :class:`~core.plugin_model.PluginRecord`
+        of kind :attr:`~core.plugin_model.PluginKind.DATA_PACK` in the
+        single unified inventory. No code is imported, so a data pack
+        never reaches ``FAILED`` — trust is trivially ``verified`` and
+        tier gating is fully data-driven; a malformed manifest is logged
+        and skipped.
+        """
+        for path, origin in _data_pack_manifest_paths():
+            raw = _read_manifest(path)
+            if raw is None:
+                continue
+            try:
+                manifest = DataPackManifest.from_dict(raw)
+            except ValueError as exc:
+                log.warning(
+                    "data_pack_manifest_invalid", path=str(path), error=str(exc)
+                )
+                continue
+            rec = PluginRecord(
+                name=manifest.name,
+                kind=PluginKind.DATA_PACK,
+                origin=origin,
+                trust=Trust.VERIFIED,
+                tier_required=manifest.tier,
+                obj=manifest,
+            )
+            if tier_satisfies(self._licence_tier, manifest.tier):
+                rec.state = PluginState.ACTIVE
+            else:
+                rec.state = PluginState.LOCKED
+                rec.detail = (
+                    f"requires the '{manifest.tier.value}' tier "
+                    f"(licence: '{self._licence_tier.value}')"
+                )
+            self.records.append(rec)
+
+    def data_pack_manifests(
+        self, content: str | None = None
+    ) -> list[DataPackManifest]:
+        """Return the manifests of every ACTIVE data pack.
+
+        Args:
+            content: Optional content-type filter (e.g. ``"template-pack"``).
+        """
+        out: list[DataPackManifest] = []
+        for rec in self.records:
+            if rec.kind is not PluginKind.DATA_PACK:
+                continue
+            if rec.state is not PluginState.ACTIVE:
+                continue
+            manifest = rec.obj
+            if not isinstance(manifest, DataPackManifest):
+                continue
+            if content is not None and manifest.content != content:
+                continue
+            out.append(manifest)
+        return out
+
     def _load_routers(self) -> None:
         for ep in _eps("gispulse.routers"):
             obj = _safe_load(ep, "router")
@@ -466,6 +552,57 @@ PluginHub = ExtensionHub
 # ---------------------------------------------------------------------------
 # Helpers (kept module-private)
 # ---------------------------------------------------------------------------
+
+
+def _data_pack_manifest_paths() -> list[tuple[Path, Origin]]:
+    """Locate every data-pack manifest file, paired with its origin.
+
+    Bundled first-party manifests come first (``Origin.INTERNAL``);
+    manifests under ``GISPULSE_DATA_PACKS_DIR`` follow as
+    ``Origin.EXTERNAL``. Missing files / directories are silently
+    skipped — discovery must never hard-fail.
+    """
+    paths: list[tuple[Path, Origin]] = [
+        (p, Origin.INTERNAL) for p in _BUNDLED_DATA_PACK_MANIFESTS if p.is_file()
+    ]
+    user_dir = os.environ.get(_DATA_PACKS_DIR_ENV, "").strip()
+    if user_dir:
+        root = Path(user_dir).expanduser()
+        if root.is_dir():
+            for pattern in ("*.yml", "*.yaml", "*.json"):
+                for p in sorted(root.glob(pattern)):
+                    paths.append((p, Origin.EXTERNAL))
+    return paths
+
+
+def _read_manifest(path: Path) -> dict[str, Any] | None:
+    """Read a data-pack manifest file as a mapping.
+
+    JSON is always supported; YAML requires PyYAML. A parse error or a
+    non-mapping top level is logged and yields ``None``.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        log.warning("data_pack_manifest_unreadable", path=str(path), error=str(exc))
+        return None
+    try:
+        if path.suffix.lower() in {".yml", ".yaml"}:
+            import yaml  # type: ignore[import-untyped]
+
+            raw = yaml.safe_load(text)
+        else:
+            raw = json.loads(text)
+    except ImportError:
+        log.warning("data_pack_yaml_unavailable", path=str(path))
+        return None
+    except Exception as exc:  # noqa: BLE001 — isolate a bad manifest file
+        log.warning("data_pack_manifest_parse_failed", path=str(path), error=str(exc))
+        return None
+    if not isinstance(raw, dict):
+        log.warning("data_pack_manifest_not_a_mapping", path=str(path))
+        return None
+    return raw
 
 
 def _eps(group: str):
