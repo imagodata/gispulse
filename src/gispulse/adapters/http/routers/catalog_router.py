@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from gispulse import get_app
 from gispulse.catalog.models import CatalogDomain, FluxEntry, FluxProtocol, OpenDataEntry
 from gispulse.catalog import registry as catalog_registry
 from gispulse.adapters.http.schemas import CatalogImportRequest
@@ -39,7 +40,7 @@ def list_projections(
 ):
     tag_list = [t.strip() for t in tags.split(",")] if tags else None
     return _serialize(
-        catalog_registry.search(
+        get_app().browse_catalog(
             domain=CatalogDomain.PROJECTION,
             search=search,
             tags=tag_list,
@@ -58,7 +59,7 @@ def list_basemaps(
 ):
     tag_list = [t.strip() for t in tags.split(",")] if tags else None
     return _serialize(
-        catalog_registry.search(
+        get_app().browse_catalog(
             domain=CatalogDomain.BASEMAP,
             search=search,
             tags=tag_list,
@@ -78,7 +79,7 @@ def list_flux(
     offset: int = Query(0, ge=0),
 ):
     tag_list = [t.strip() for t in tags.split(",")] if tags else None
-    entries = catalog_registry.search(
+    entries = get_app().browse_catalog(
         domain=CatalogDomain.FLUX,
         search=search,
         tags=tag_list,
@@ -101,7 +102,7 @@ def list_opendata(
 ):
     tag_list = [t.strip() for t in tags.split(",")] if tags else None
     return _serialize(
-        catalog_registry.search(
+        get_app().browse_catalog(
             domain=CatalogDomain.OPENDATA,
             search=search,
             tags=tag_list,
@@ -122,7 +123,7 @@ def search_all(
     """Cross-domain full-text search."""
     cat_domain = CatalogDomain(domain) if domain else None
     return _serialize(
-        catalog_registry.search(
+        get_app().browse_catalog(
             domain=cat_domain,
             search=q,
             limit=limit,
@@ -134,7 +135,7 @@ def search_all(
 @router.get("/entry/{entry_id:path}")
 def get_entry(entry_id: str):
     """Get a single catalog entry by full ID."""
-    entry = catalog_registry.get_entry(entry_id)
+    entry = get_app().get_catalog_entry(entry_id)
     if not entry:
         raise HTTPException(404, f"Entry '{entry_id}' not found")
     return asdict(entry)
@@ -154,7 +155,7 @@ async def import_catalog_entry(body: CatalogImportRequest, request: Request):
     - **opendata with download_url**: downloads the file
     - **flux (WMS/WMTS/TMS/XYZ)**: returns metadata for adding as external layer (no download)
     """
-    entry = catalog_registry.get_entry(body.entry_id)
+    entry = get_app().get_catalog_entry(body.entry_id)
     if not entry:
         raise HTTPException(404, f"Catalog entry '{body.entry_id}' not found")
 
@@ -200,7 +201,7 @@ async def import_catalog_entry(body: CatalogImportRequest, request: Request):
 
         if wfs_flux_id:
             # Redirect to the linked WFS flux entry
-            flux_entry = catalog_registry.get_entry(wfs_flux_id)
+            flux_entry = get_app().get_catalog_entry(wfs_flux_id)
             if flux_entry and isinstance(flux_entry, FluxEntry):
                 return await _import_wfs_flux(
                     flux_entry, bbox, body.crs, body.max_features,

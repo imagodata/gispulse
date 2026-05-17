@@ -429,9 +429,9 @@ def validate(
 @app.command()
 def capabilities() -> None:
     """List available capabilities."""
-    from gispulse.capabilities.registry import list_all
+    from gispulse import get_app
 
-    caps = list_all()
+    caps = get_app().list_capabilities()
     typer.echo(f"{len(caps)} capability(ies):")
     for cap in caps:
         schema = cap.get("schema", {})

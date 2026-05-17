@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from gispulse.capabilities import registry
+from gispulse import get_app
 from gispulse.adapters.http.routers.portal_sql_router import (
     _check_admin_key,
     _validate_sql_readonly,
@@ -36,7 +36,7 @@ def list_capabilities() -> list[CapabilityInfo]:
             description=item["description"],
             json_schema=item["schema"],
         )
-        for item in registry.list_all()
+        for item in get_app().list_capabilities()
     ]
 
 
@@ -47,21 +47,16 @@ def get_capability(name: str) -> CapabilityInfo:
     Raises:
         404: If no capability with the given name is registered.
     """
-    # Ensure defaults are loaded
-    registry._ensure_defaults_loaded()
-
-    if name not in registry.REGISTRY:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Capability '{name}' not found.",
-        )
-
-    cls = registry.REGISTRY[name]
-    instance = cls()
-    return CapabilityInfo(
-        name=cls.name,
-        description=cls.description,
-        json_schema=instance.get_schema(),
+    for item in get_app().list_capabilities():
+        if item["name"] == name:
+            return CapabilityInfo(
+                name=item["name"],
+                description=item["description"],
+                json_schema=item["schema"],
+            )
+    raise HTTPException(
+        status_code=404,
+        detail=f"Capability '{name}' not found.",
     )
 
 
