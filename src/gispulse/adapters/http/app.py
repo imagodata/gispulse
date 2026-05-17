@@ -44,6 +44,7 @@ from gispulse.adapters.http.routers.scenarios_router import router as scenarios_
 from gispulse.adapters.http.routers.sessions_router import router as sessions_router
 from gispulse.adapters.http.routers.schedules_router import router as schedules_router
 from gispulse.adapters.http.routers.system_router import router as system_router
+from gispulse.adapters.http.routers.templates_router import router as templates_router
 from gispulse.adapters.http.routers.triggers_router import router as triggers_router
 from gispulse.adapters.http.routers.watchers_router import router as watchers_router
 from gispulse.adapters.http.routers.relations_router import router as relations_router
@@ -808,6 +809,7 @@ def create_app(
         app.include_router(jobs_router)
         app.include_router(scenarios_router)
         app.include_router(capabilities_router)
+        app.include_router(templates_router)
         app.include_router(marketplace_router)
         app.include_router(relations_router)
         app.include_router(filter_router)
@@ -839,6 +841,7 @@ def create_app(
         write_protected = {"dependencies": [Depends(validate_api_key), Depends(require_scope("write"))]}
 
         app.include_router(capabilities_router, **read_protected)
+        app.include_router(templates_router, **read_protected)
         app.include_router(rules_router, **write_protected)
         app.include_router(jobs_router, **protected)
         app.include_router(datasets_router, **protected)
