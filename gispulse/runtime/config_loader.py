@@ -54,10 +54,14 @@ from typing import TYPE_CHECKING, Any, Iterable, Literal
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from core.logging import get_logger
+
 if TYPE_CHECKING:  # pragma: no cover
     from core.graph import ActionDef
     from core.models import Trigger
 
+
+log = get_logger(__name__)
 
 CONFIG_VERSION = 1
 
@@ -625,7 +629,29 @@ def parse_config_text(
     except Exception as exc:  # ValidationError or others
         raise ConfigError(f"invalid config schema: {exc}") from exc
 
+    _warn_dialect_drift(config, source)
     return config
+
+
+def _warn_dialect_drift(config: GISPulseConfig, source: str) -> None:
+    """Emit a ``dialect_drift`` warning per PostGIS-only construct (#146).
+
+    ADR 0001 makes DuckDB-spatial the contract dialect. A ``run_sql`` /
+    ``predicate`` using a PostGIS-only construct loads fine but fails at
+    the first tick — so we surface it here, at config-load time, unless
+    the config pins ``engine: postgis`` (in which case the constructs
+    are legitimate and :func:`scan_for_dialect_drift` returns nothing).
+    """
+    from gispulse.runtime.dialect_scanner import scan_for_dialect_drift
+
+    for finding in scan_for_dialect_drift(config):
+        log.warning(
+            "dialect_drift",
+            source=source,
+            construct=finding.construct,
+            location=finding.location,
+            hint=finding.hint,
+        )
 
 
 # ---------------------------------------------------------------------------
