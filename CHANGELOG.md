@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0]
+
+The "Wiring the ETL platform" release. EPIC #175 (PR #189) landed the unified plugin model as a *skeleton*; v1.7.0 makes it work end to end — a data source can be declared, fetched over the network through a protocol registry, and watched for freshness so an external revision fires a trigger. GISPulse gains an "Extract" stage alongside its existing local-CDC triggers.
+
+### Added
+
+- **Unified plugin model + `PluginHub`.** Five plugin kinds (`source`, `capability`, `sink`, `protocol`, `extension`), entry-point discovery across every group, and a `discover → resolve → gate → activate` lifecycle with tier/trust gating from the curated `marketplace/registry.json`. (EPIC #175, PR #189)
+- **`source_changed` triggers.** A trigger may declare `on: {source_changed: <source>://<entry>, frequency: …}` instead of a `table` — it fires when an external source publishes a new revision rather than on a local DML edit. (#195)
+- **`SourceWatcherRegistry` wired into `gispulse watch`.** The watch runtime polls each watched source's `revision()` token at the `frequency` cadence and dispatches `source.changed` events through the trigger evaluator. (#197)
+- **Core transport fetchers in the `ProtocolRegistry`.** `WfsFetcher` + `OgcFeaturesFetcher` (#192, PR #209) and `StacFetcher` + `RestGeoJsonFetcher` (#192, PR #211) absorb the WFS / OGC API Features / STAC / REST-GeoJSON clients as `Fetcher` adapters, so a `DeclarativeSource.fetch()` dispatches real network calls. `gispulse.adapters` registers all four deterministically.
+- **`gispulse-src-cadastre` and `gispulse-src-ign` source plugins.** The first `gispulse-src-*` pilots — French cadastre (IGN Parcellaire Express) and IGN reference data (BD TOPO + ADMIN EXPRESS, with a `geofla` alias). (#184, #194)
+- **`gispulse mcp`.** A CLI launcher starting the GISPulse MCP server over stdio for LLM agents. (#201)
+- **PostGIS dialect-drift scanner.** Loader-time warning when a `run_sql` string uses PostGIS-only constructs that will not run on the DuckDB-spatial contract dialect. (#146)
+- **ETL documentation.** A Source Plugin Authoring Guide (`docs/SOURCE_PLUGIN_GUIDE.md`), a "watch an external source" walkthrough (FR + EN), a `source_changed` section in `docs/TRIGGERS_GUIDE.md`, and a runnable `examples/triggers/source_changed_cadastre.yaml`. (#200)
+
+### Changed
+
+- **Catalog discovery consumes `PluginHub.records`.** `catalog/registry.py` no longer runs its own `gispulse.catalog_providers` entry-point scan — the hub owns the single scan and catalog-provider plugins become `EXTENSION` records in the unified inventory. `/catalog/*` is functionally unchanged. (#193)
+- **`gispulse-src-cadastre.revision()` is a real probe.** The hardcoded `_MILLESIME` is gone; freshness is read from an `HTTP HEAD` `ETag` / `Last-Modified` against the Géoplateforme WFS `GetCapabilities`. (#198)
+
+### Fixed
+
+- **SSRF guard on `ProtocolRegistry.dispatch_fetch()`.** Every fetch endpoint is validated through the shared `core.ssrf` guard before dispatch, so a declared source — or a third-party plugin — cannot steer a fetch at an internal address. (#199)
+- **`test_p02` file-lock flake.** The known sqlite3 / pyogrio file-lock race is marked `flaky` and retried via `pytest-rerunfailures` instead of failing CI intermittently. (#191)
+
 ## [1.6.2] - 2026-05-07
 
 The "Format Frontier" release — DuckDB Spatial as the universal CDC substrate. Adds two new engines (`spatialite`, `duckdb_diff`), brings DML detection to seven file formats (GPKG, SpatiaLite, GeoJSON, FlatGeobuf, Shapefile, KML, CSV+WKT) — five of which had no native trigger surface — and closes EPIC #139 (DML semantics ADRs + WAL connection safety).

@@ -1,0 +1,79 @@
+# GISPulse — `source_changed` trigger example (v1.7.0)
+#
+# FR : Surveille une source de données EXTERNE (le cadastre IGN) et
+#      déclenche une action quand un nouveau millésime est publié —
+#      sans édition locale, sans plugin SIG.
+#
+#          gispulse triggers validate --config examples/triggers/source_changed_cadastre.yaml
+#          gispulse watch ./project.gpkg --rules examples/triggers/source_changed_cadastre.yaml
+#
+#      Prérequis : le plugin source `gispulse-src-cadastre` doit être
+#      installé (`pip install gispulse-src-cadastre`) — il enregistre la
+#      source `cadastre://` interrogée ci-dessous dans `core.sources.SOURCES`.
+#
+# EN : Watches an EXTERNAL data source (the IGN cadastre) and fires an
+#      action when a new revision is published — no local edit, no GIS
+#      plugin. Requires the `gispulse-src-cadastre` source plugin.
+#
+# Voir / See : docs/TRIGGERS_GUIDE.md → "Source-watched triggers"
+#              docs-site/guide/walkthroughs/watch-external-source.md
+
+version: 1
+
+# FR : Un trigger `source_changed` ne touche aucune couche locale, mais
+#      le schéma v1 exige toujours une clé `gpkg:` — la base de projet où
+#      atterriraient d'éventuels triggers DML. Adapter le chemin.
+# EN : A `source_changed` trigger touches no local layer, yet the v1
+#      schema still requires a `gpkg:` key — the project database where
+#      any DML triggers would live. Adjust the path.
+gpkg: ./project.gpkg
+
+triggers:
+
+  # ------------------------------------------------------------------
+  # Source-watched trigger — fires on a new cadastre revision
+  # ------------------------------------------------------------------
+  # FR : `SourceWatcherRegistry` interroge `DataSource.revision()` du
+  #      cadastre à la cadence déduite de `frequency`. Quand le jeton de
+  #      révision change (nouveau millésime Parcellaire Express), le
+  #      trigger se déclenche. Aucun `table` / `when` / `predicate` : ce
+  #      trigger ne surveille pas une couche locale.
+  # EN : `SourceWatcherRegistry` polls the cadastre `DataSource.revision()`
+  #      at the cadence derived from `frequency`. When the revision token
+  #      changes (a new Parcellaire Express vintage), the trigger fires.
+  #      No `table` / `when` / `predicate`: it watches no local layer.
+  - name: refresh_on_new_cadastre
+    on:
+      # FR : URI `<source>://<entry>` — résolu contre `core.sources.SOURCES`.
+      # EN : `<source>://<entry>` URI — resolved against `core.sources.SOURCES`.
+      source_changed: cadastre://parcelles
+      # FR : Cadence de sondage `revision()`. Labels reconnus : temps-reel,
+      #      quotidien, hebdomadaire, mensuel, trimestriel, annuel,
+      #      pluriannuel. Un label inconnu retombe sur l'intervalle défaut.
+      # EN : `revision()` poll cadence. Recognised labels above; an
+      #      unknown label falls back to the default interval.
+      frequency: mensuel
+    actions:
+      # FR : Trace l'événement dans le journal du runtime.
+      # EN : Records the event in the runtime log.
+      - type: log_event
+      # FR : Notifie un système tiers du nouveau millésime.
+      # EN : Notifies a downstream system of the new vintage.
+      - type: webhook
+        url: https://example.com/hooks/cadastre-updated
+
+# FR : Allowlist webhook — bloque les domaines non listés (défense en
+#      profondeur, en plus du SSRF guard du client webhook).
+# EN : Webhook allowlist — blocks domains not listed here (defense in
+#      depth, on top of the webhook client SSRF guard).
+security:
+  webhook_allowlist:
+    - example.com
+
+# FR : `poll_interval_ms` ne cadence que les triggers DML sur la base
+#      locale. Le watcher de sources, lui, suit le `frequency` ci-dessus.
+# EN : `poll_interval_ms` only paces local DML triggers. The source
+#      watcher follows the `frequency` set above.
+runtime:
+  poll_interval_ms: 1000
+  max_batch: 200
