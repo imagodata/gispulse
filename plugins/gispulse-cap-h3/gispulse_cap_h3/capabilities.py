@@ -5,13 +5,13 @@ from __future__ import annotations
 import geopandas as gpd
 from shapely.geometry import Polygon
 
-from capabilities.base import Capability
-from capabilities.registry import register
+from gispulse.plugins.api import Capability
+from gispulse.plugins.api import register_capability as register
 
 
 def _h3_available() -> bool:
     try:
-        import h3
+        import h3  # noqa: F401 — availability probe, not a real use
         return True
     except ImportError:
         return False

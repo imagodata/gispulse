@@ -89,6 +89,8 @@ class TriggerType(str, Enum):
     API = "api"
     ESB_EVENT = "esb_event"
     WEBHOOK_IN = "webhook_in"
+    # --- External-source freshness (issue #186) ---
+    SOURCE_CHANGED = "source_changed"
 
 
 class ChangeOperation(str, Enum):

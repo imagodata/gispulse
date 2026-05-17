@@ -101,21 +101,71 @@ def client():
 
 
 class TestListPlugins:
+    """GET /marketplace/plugins — now sourced from the unified PluginHub (#181)."""
+
+    @staticmethod
+    def _hub_with(records):
+        from types import SimpleNamespace
+
+        from core.plugin_hub import PluginHub
+
+        return patch.object(
+            PluginHub, "get", classmethod(lambda cls: SimpleNamespace(records=records))
+        )
+
+    @staticmethod
+    def _record(name, dist, *, tier="community", trust="community", state="active",
+                detail=""):
+        from core.plugin_model import (
+            PluginKind,
+            PluginRecord,
+            PluginState,
+            Tier,
+            Trust,
+        )
+        from types import SimpleNamespace
+
+        return PluginRecord(
+            name=name,
+            kind=PluginKind.CAPABILITY,
+            tier_required=Tier(tier),
+            trust=Trust(trust),
+            state=PluginState(state),
+            detail=detail,
+            entry_point=SimpleNamespace(dist=SimpleNamespace(name=dist)),
+        )
+
     def test_empty(self, client):
-        with patch("capabilities.registry.list_plugins", return_value=[]):
+        with self._hub_with([]):
             resp = client.get("/marketplace/plugins")
         assert resp.status_code == 200
         assert resp.json() == []
 
     def test_with_plugins(self, client):
-        plugins = [{"name": "ftth", "module": "gispulse_cap_ftth.register"}]
-        with patch("capabilities.registry.list_plugins", return_value=plugins):
+        rec = self._record("ftth", "gispulse-cap-ftth", tier="pro", trust="verified")
+        with self._hub_with([rec]):
             resp = client.get("/marketplace/plugins")
         assert resp.status_code == 200
-        assert len(resp.json()) == 1
         data = resp.json()[0]
         assert data["id"] == "gispulse-cap-ftth"
+        assert data["kind"] == "capability"
+        assert data["tier"] == "pro"
+        assert data["trust"] == "verified"
         assert data["enabled"] is True
+        assert data["locked"] is False
+
+    def test_locked_plugin_is_flagged(self, client):
+        rec = self._record(
+            "ftth", "gispulse-cap-ftth", tier="pro", state="locked",
+            detail="requires the 'pro' tier",
+        )
+        with self._hub_with([rec]):
+            resp = client.get("/marketplace/plugins")
+        data = resp.json()[0]
+        assert data["state"] == "locked"
+        assert data["locked"] is True
+        assert data["enabled"] is False
+        assert "pro" in data["detail"]
 
 
 class TestGetPluginDetails:

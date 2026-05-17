@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -45,6 +48,44 @@ jobs:
         with:
           name: coverage-report
           path: coverage.xml
+
+  plugins:
+    # Issue #185 — bundled plugins are first-class: install each one for
+    # real and assert the PluginHub discovers them without a FAILED record.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install the engine
+        run: pip install -e ".[dev,api]"
+
+      - name: Install every bundled plugin
+        run: |
+          for plugin in plugins/*/; do
+            echo "::group::install ${plugin}"
+            pip install -e "${plugin}"
+            echo "::endgroup::"
+          done
+
+      - name: Lint the bundled plugins
+        run: ruff check plugins/
+
+      - name: Verify plugins are discovered without failure
+        run: python scripts/check_plugins.py
+
+      - name: Run plugin + gate tests
+        run: >
+          pytest -v
+          tests/unit/test_plugin_discovery.py
+          tests/unit/test_plugin_sdk_exports.py
+          tests/unit/test_plugin_hub_records.py
+          tests/unit/test_plugin_hub_gate.py
+          tests/unit/test_src_cadastre.py
 
   capability-matrix-drift:
     runs-on: ubuntu-latest

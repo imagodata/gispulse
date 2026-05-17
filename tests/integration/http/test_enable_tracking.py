@@ -163,11 +163,15 @@ class TestEnableTrackingEndpoint:
         assert resp.status_code == 200
         assert resp.json()["tracking_enabled"] is False
 
-    def test_enable_tracking_unsupported_format_returns_400(
+    def test_enable_tracking_geojson_uses_file_blob_cdc(
         self, app_client, tmp_path
     ) -> None:
+        # Since v1.6.1 (#157) GeoJSON is trackable: enable_tracking routes
+        # it to the ``duckdb_diff`` file-blob CDC engine instead of
+        # rejecting it. Previously this asserted a 400
+        # ``tracking_unsupported_format`` — that contract changed when the
+        # DuckDB-diff engine was wired through the endpoint.
         client, tmp = app_client
-        # GeoJSON file uploaded via the upload endpoint
         geojson_path = tmp / "x.geojson"
         geojson_path.write_text(
             json.dumps(
@@ -191,13 +195,10 @@ class TestEnableTrackingEndpoint:
         ds = up.json()
 
         resp = client.post(f"/datasets/{ds['id']}/enable_tracking")
-        assert resp.status_code == 400
+        assert resp.status_code == 200, resp.text
         body = resp.json()
-        # The global error handler now passes through structured detail
-        # ``HTTPException(detail={"error": {"code": "...", "message": ...}})``
-        # so the contract is: top-level ``error.code`` is the stable
-        # machine-readable token clients dispatch on.
-        assert body["error"]["code"] == "tracking_unsupported_format", body
+        assert body["tracking_enabled"] is True
+        assert body["layers_tracked"], body
 
     def test_enable_tracking_404_unknown_dataset(self, app_client) -> None:
         client, _ = app_client

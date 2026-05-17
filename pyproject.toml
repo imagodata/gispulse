@@ -89,7 +89,9 @@ line-length = 100
 "capabilities/postgis_sql.py" = ["E402", "F401"]
 "capabilities/registry.py" = ["E402"]
 "rules/predicates.py" = ["E402", "F401"]
-"plugins/**/*.py" = ["F401"]
+# NB: the blanket "plugins/**/*.py" = ["F401"] ignore was removed in #185 —
+# bundled plugins are now first-class, linted and CI-installed. Their
+# register() hooks carry an explicit `# noqa: F401` where needed.
 # Optional-feature workers / routers register handlers after a runtime
 # import check; module-level imports below the guard are intentional.
 "gispulse/adapters/esb/workers/base_worker.py" = ["E402"]

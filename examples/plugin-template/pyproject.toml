@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Example GISPulse capability plugin"
 requires-python = ">=3.10"
 dependencies = [
+    "gispulse",
     "fastapi>=0.100,<1.0",
     "geopandas>=0.14",
 ]
@@ -18,3 +19,7 @@ example = "gispulse_cap_example:register"
 
 [project.entry-points."gispulse.routers"]
 example = "gispulse_cap_example.routers:ExampleRouterFactory"
+
+[tool.gispulse.plugin]
+kind = "capability"
+protocol = ">=1.0,<2.0"

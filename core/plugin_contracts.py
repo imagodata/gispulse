@@ -26,13 +26,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+# Single source of truth lives in ``core.plugin_model`` (epic #175).
+# Re-exported (redundant alias) so existing importers of
+# ``core.plugin_contracts`` — notably ``core.plugin_hub`` — keep working.
+from core.plugin_model import PROTOCOL_VERSION as PROTOCOL_VERSION
+
 if TYPE_CHECKING:
     from fastapi import APIRouter, FastAPI
-
-# Bumped MAJOR on breaking change, MINOR on additive change. Plugins
-# declare ``requires_protocol = ">=1.0,<2.0"`` and the hub warns on
-# mismatch.
-PROTOCOL_VERSION = "1.1"
 
 
 # ---------------------------------------------------------------------------

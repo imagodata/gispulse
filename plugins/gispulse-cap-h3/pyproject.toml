@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 license = "AGPL-3.0-or-later"
 authors = [{ name = "GISPulse", email = "dev@gispulse.io" }]
 dependencies = [
+    "gispulse",
     "geopandas>=0.14",
     "shapely>=2.0",
     "h3>=3.7",
@@ -17,3 +18,7 @@ dependencies = [
 
 [project.entry-points."gispulse.capabilities"]
 h3_analysis = "gispulse_cap_h3:register"
+
+[tool.gispulse.plugin]
+kind = "capability"
+protocol = ">=1.0,<2.0"
