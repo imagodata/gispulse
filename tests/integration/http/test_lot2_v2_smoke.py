@@ -433,6 +433,13 @@ async def test_p01_ws_accepts_in_dev_default(tmp_data_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+# Known file-lock race (#191): the test reaches into a GPKG with raw
+# sqlite3 while the server still holds a pyogrio handle on it, so SQLite
+# occasionally reports "file is not a database" on CI (~50 % per matrix
+# leg). It is a test-harness race, not a product regression — the
+# ``_connect_with_retry`` helper already absorbs most of it; the rerun
+# marker covers the residual window.
+@pytest.mark.flaky(reruns=2, reruns_delay=1)
 @pytest.mark.asyncio
 async def test_p02_enable_tracking_full_lifecycle(tmp_data_dir: Path, tmp_path: Path) -> None:
     import websockets
