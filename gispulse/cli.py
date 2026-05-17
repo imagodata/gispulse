@@ -1539,6 +1539,15 @@ from gispulse.cli_portal import cmd_portal  # noqa: E402
 app.command(name="portal")(cmd_portal)
 
 
+# ---------------------------------------------------------------------------
+# mcp — Model Context Protocol server for LLM agents (v1.7.0 #201)
+# ---------------------------------------------------------------------------
+
+from gispulse.cli_mcp import cmd_mcp  # noqa: E402
+
+app.command(name="mcp")(cmd_mcp)
+
+
 def main() -> None:
     from gispulse._pyogrio_warnings import silence_gispulse_extension_warnings
 
