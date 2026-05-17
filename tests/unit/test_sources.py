@@ -74,7 +74,7 @@ class FakeCadastre(DeclarativeSource):
             SourceEntryRef(
                 id="parcelles",
                 name="Parcelles cadastrales",
-                access=AccessSpec(protocol=AccessProtocol.WFS, endpoint="https://ign/wfs"),
+                access=AccessSpec(protocol=AccessProtocol.WFS, endpoint="https://93.184.216.34/wfs"),
                 revision_token="2026-01",
             ),
         ]
@@ -132,9 +132,9 @@ def test_register_rejects_duplicate_without_override() -> None:
 
 
 def test_dispatch_fetch_resolves_and_runs(registry: ProtocolRegistry) -> None:
-    access = AccessSpec(protocol=AccessProtocol.WFS, endpoint="https://ign/wfs")
+    access = AccessSpec(protocol=AccessProtocol.WFS, endpoint="https://93.184.216.34/wfs")
     result = registry.dispatch_fetch(access, mode=FetchMode.REFERENCE)
-    assert result.data == "rows@https://ign/wfs"
+    assert result.data == "rows@https://93.184.216.34/wfs"
     assert result.mode is FetchMode.REFERENCE
 
 
@@ -171,7 +171,7 @@ def test_declarative_source_fetch_delegates(registry: ProtocolRegistry) -> None:
     src = FakeCadastre(registry=registry)
     result = src.fetch("parcelles")
     assert result.payload is Payload.VECTOR
-    assert result.data == "rows@https://ign/wfs"
+    assert result.data == "rows@https://93.184.216.34/wfs"
 
 
 def test_declarative_source_revision_returns_token(registry: ProtocolRegistry) -> None:

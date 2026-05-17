@@ -150,7 +150,15 @@ class ProtocolRegistry:
         extent: Any | None = None,
         mode: FetchMode = FetchMode.MATERIALIZE,
     ) -> SourceResult:
-        """Resolve ``access.protocol`` to a fetcher and run it."""
+        """Resolve ``access.protocol`` to a fetcher and run it.
+
+        The endpoint is SSRF-checked first (issue #199): a declared
+        source — or a third-party plugin — must not steer a fetch at an
+        internal address. Non-HTTP endpoints (file paths) are left alone.
+        """
+        from core.ssrf import guard_outbound_url
+
+        guard_outbound_url(getattr(access, "endpoint", None))
         return self.get_fetcher(access.protocol).fetch(access, extent=extent, mode=mode)
 
     def dispatch_write(self, result: SourceResult, spec: WriteSpec) -> WriteReport:
