@@ -60,6 +60,11 @@ _EXTENSION_GROUPS: tuple[str, ...] = (
     "gispulse.lifecycle",
     "gispulse.mcp_tools",
     "gispulse.mcp_resources",
+    # Discovery-only — catalog providers extend the GIS catalog subsystem.
+    # The hub owns the single entry-point scan (issue #193); the records
+    # are consumed by ``catalog.registry``. The v1.8 ExtensionHub refonte
+    # promotes these to a first-class ``data-pack`` kind.
+    "gispulse.catalog_providers",
 )
 
 # Distributions shipped by GISPulse itself — their plugins are trusted
@@ -287,11 +292,11 @@ class PluginHub:
     # ---------------------------------------------------- unified inventory
 
     def _discover_records(self) -> None:
-        """Build the unified plugin inventory across all 11 entry-point groups.
+        """Build the unified plugin inventory across every entry-point group.
 
         Each entry-point becomes a :class:`~core.plugin_model.PluginRecord`
         and runs the ``discover → resolve → gate → activate`` cycle. The
-        nine host-extension sub-groups collapse to
+        host-extension sub-groups collapse to
         :attr:`~core.plugin_model.PluginKind.EXTENSION`; capabilities /
         data_sources / data_sinks / protocols map to their own kind.
 

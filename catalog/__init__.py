@@ -16,7 +16,7 @@ def _auto_register():
 
 _auto_register()
 
-# Discover third-party catalog providers via entry-points
+# Register third-party catalog providers discovered by the PluginHub (#193).
 from catalog.registry import _discover_providers  # noqa: E402
 
 _discover_providers()
