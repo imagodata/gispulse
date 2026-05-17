@@ -28,6 +28,7 @@ This module is **additive**: the existing ``adapters/http/app.py`` and
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -44,6 +45,10 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 # ``src/gispulse/app.py`` so ``parents[2]`` is the repo root. This mirrors
 # the resolution used by ``cli.py`` (``template`` sub-command).
 _TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
+
+# A template name is a bare file stem — used to gate the ``/templates/{name}``
+# path parameter against traversal before it is joined to a filesystem path.
+_SAFE_TEMPLATE_NAME = re.compile(r"[A-Za-z0-9_-]+")
 
 
 class GISPulseApp:
@@ -252,15 +257,31 @@ class GISPulseApp:
     def get_template(self, name: str) -> dict:
         """Return the raw JSON of a built-in template by name (file stem).
 
+        ``name`` reaches this method straight from an HTTP path parameter
+        (the ``/templates/{name}`` route), so it is validated against a
+        strict ``[A-Za-z0-9_-]`` charset before being joined to a path —
+        no separators, no ``..``, no path traversal.
+
         Raises:
-            FileNotFoundError: If no template matches ``name``.
+            FileNotFoundError: If ``name`` is unsafe or no template matches.
         """
-        tpl_path = _TEMPLATES_DIR / f"{name}.json"
-        if not tpl_path.exists():
+
+        def _unknown() -> FileNotFoundError:
             available = ", ".join(t["name"] for t in self.list_templates())
-            raise FileNotFoundError(
+            return FileNotFoundError(
                 f"Unknown template {name!r}. Available: {available or 'none'}"
             )
+
+        if not _SAFE_TEMPLATE_NAME.fullmatch(name or ""):
+            raise _unknown()
+        tpl_path = _TEMPLATES_DIR / f"{name}.json"
+        # Defence in depth: the resolved path must stay inside _TEMPLATES_DIR.
+        try:
+            tpl_path.resolve().relative_to(_TEMPLATES_DIR.resolve())
+        except ValueError:
+            raise _unknown() from None
+        if not tpl_path.is_file():
+            raise _unknown()
         return json.loads(tpl_path.read_text(encoding="utf-8"))
 
     def instantiate_template(self, name: str) -> "PipelineSpec":

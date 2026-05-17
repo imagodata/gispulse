@@ -111,6 +111,22 @@ class TestTemplates:
         with pytest.raises(FileNotFoundError):
             gispulse.GISPulseApp().get_template("__no_such_template__")
 
+    @pytest.mark.parametrize(
+        "evil",
+        [
+            "../pyproject",
+            "../../etc/passwd",
+            "foo/bar",
+            "foo\\bar",
+            ".",
+            "",
+        ],
+    )
+    def test_get_template_rejects_path_traversal(self, evil: str) -> None:
+        # ``name`` comes straight from the /templates/{name} HTTP route.
+        with pytest.raises(FileNotFoundError):
+            gispulse.GISPulseApp().get_template(evil)
+
     def test_instantiate_template_parses_a_spec(self) -> None:
         from gispulse.core.pipeline import PipelineSpec
 
