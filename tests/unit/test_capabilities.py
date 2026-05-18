@@ -6,8 +6,8 @@ import pytest
 import geopandas as gpd
 from shapely.geometry import Point, Polygon
 
-from capabilities.registry import get, list_all, REGISTRY
-from capabilities.vector import (
+from gispulse.capabilities.registry import get, list_all, REGISTRY
+from gispulse.capabilities.vector import (
     AreaLengthCapability,
     BufferCapability,
     CentroidCapability,
@@ -253,8 +253,8 @@ class TestFilterCapability:
 
     def test_invalid_spatial_predicate_raises_duckdb(self):
         """DuckDB strategy: invalid predicate raises with valid list (no silent INTERSECTS fallback)."""
-        from capabilities.strategy import ExecutionContext
-        from capabilities.vector.filter import _FilterDuckDBStrategy
+        from gispulse.capabilities.strategy import ExecutionContext
+        from gispulse.capabilities.vector.filter import _FilterDuckDBStrategy
 
         ctx = ExecutionContext(
             engine=type("E", (), {"backend_name": "duckdb"})(),
@@ -267,8 +267,8 @@ class TestFilterCapability:
 
     def test_invalid_spatial_predicate_raises_postgis(self):
         """PostGIS strategy: invalid predicate raises with valid list (no silent INTERSECTS fallback)."""
-        from capabilities.strategy import ExecutionContext
-        from capabilities.vector.filter import _FilterPostGISStrategy
+        from gispulse.capabilities.strategy import ExecutionContext
+        from gispulse.capabilities.vector.filter import _FilterPostGISStrategy
 
         ctx = ExecutionContext(
             engine=type("E", (), {"backend_name": "postgis"})(),
@@ -495,8 +495,8 @@ class TestSpatialJoinCapability:
 
 class TestCrossLayerEngine:
     def test_engine_resolves_ref_layer(self, polygon_gdf):
-        from core.models import Rule
-        from rules.engine import RuleEngine
+        from gispulse.core.models import Rule
+        from gispulse.rules.engine import RuleEngine
 
         ref = gpd.GeoDataFrame(
             {"zone": ["flood"]},
@@ -518,8 +518,8 @@ class TestCrossLayerEngine:
         assert len(result) >= 1
 
     def test_engine_no_resolver_raises(self, polygon_gdf):
-        from core.models import Rule
-        from rules.engine import RuleEngine
+        from gispulse.core.models import Rule
+        from gispulse.rules.engine import RuleEngine
 
         rule = Rule(
             name="test_intersects",
@@ -531,8 +531,8 @@ class TestCrossLayerEngine:
             engine.apply(rule, polygon_gdf)
 
     def test_apply_all_with_resolver(self, polygon_gdf):
-        from core.models import Rule
-        from rules.engine import RuleEngine
+        from gispulse.core.models import Rule
+        from gispulse.rules.engine import RuleEngine
 
         ref = gpd.GeoDataFrame(
             {"risk": ["high"]},

@@ -6,7 +6,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, Polygon
 
-from capabilities.vector import (
+from gispulse.capabilities.vector import (
     DensifyVerticesCapability,
     ExtractSegmentsCapability,
     ExtractVerticesCapability,

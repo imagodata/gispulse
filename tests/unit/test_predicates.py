@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.models import AttrPredicate, CompoundPredicate, GeomPredicate
-from rules.predicates import PredicateEvaluator
+from gispulse.core.models import AttrPredicate, CompoundPredicate, GeomPredicate
+from gispulse.rules.predicates import PredicateEvaluator
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +161,7 @@ class TestGeomPredicateNoConn:
 
 class TestBuildGeomSQL:
     def test_intersects_sql(self):
-        from rules.predicates import _build_geom_sql
+        from gispulse.rules.predicates import _build_geom_sql
         pred = GeomPredicate(op="intersects", ref_table="public.zones_n2000")
         sql, params = _build_geom_sql(pred, "POINT(2 48)", srid=4326)
         assert "ST_Intersects" in sql
@@ -170,7 +170,7 @@ class TestBuildGeomSQL:
         assert params["srid"] == 4326
 
     def test_within_with_filter(self):
-        from rules.predicates import _build_geom_sql
+        from gispulse.rules.predicates import _build_geom_sql
         pred = GeomPredicate(
             op="within",
             ref_table="public.communes",
@@ -181,7 +181,7 @@ class TestBuildGeomSQL:
         assert "dept_code = 35" in sql
 
     def test_distance_lt(self):
-        from rules.predicates import _build_geom_sql
+        from gispulse.rules.predicates import _build_geom_sql
         pred = GeomPredicate(op="distance_lt", ref_table="public.routes", distance=50.0)
         sql, params = _build_geom_sql(pred, "POINT(2 48)")
         assert "ST_Distance" in sql
@@ -189,33 +189,33 @@ class TestBuildGeomSQL:
         assert params["distance"] == 50.0
 
     def test_distance_gt_requires_distance(self):
-        from rules.predicates import _build_geom_sql
+        from gispulse.rules.predicates import _build_geom_sql
         pred = GeomPredicate(op="distance_gt", ref_table="public.routes", distance=None)
         with pytest.raises(ValueError, match="requires 'distance'"):
             _build_geom_sql(pred, "POINT(2 48)")
 
     def test_buffer_applied(self):
-        from rules.predicates import _build_geom_sql
+        from gispulse.rules.predicates import _build_geom_sql
         pred = GeomPredicate(op="intersects", ref_table="public.zones", buffer_m=100.0)
         sql, params = _build_geom_sql(pred, "POINT(2 48)")
         assert "ST_Buffer" in sql
         assert params["buffer_m"] == 100.0
 
     def test_unknown_op_raises(self):
-        from rules.predicates import _build_geom_sql
+        from gispulse.rules.predicates import _build_geom_sql
         pred = GeomPredicate(op="intersects", ref_table="t")  # type: ignore
         pred.op = "banana"  # type: ignore
         with pytest.raises(ValueError, match="Unknown GeomPredicate op"):
             _build_geom_sql(pred, "POINT(0 0)")
 
     def test_unsafe_ref_table_rejected(self):
-        from rules.predicates import _build_geom_sql
+        from gispulse.rules.predicates import _build_geom_sql
         pred = GeomPredicate(op="intersects", ref_table="t; DROP TABLE --")
         with pytest.raises(ValueError, match="(Unsafe|Invalid) SQL"):
             _build_geom_sql(pred, "POINT(0 0)")
 
     def test_unsafe_ref_filter_rejected(self):
-        from rules.predicates import _build_geom_sql
+        from gispulse.rules.predicates import _build_geom_sql
         pred = GeomPredicate(
             op="intersects",
             ref_table="public.zones",

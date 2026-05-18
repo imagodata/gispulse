@@ -21,7 +21,7 @@ rasterstats = pytest.importorskip("rasterstats", reason="rasterstats not install
 import numpy as np
 from rasterio.transform import from_bounds
 
-from capabilities.raster import (
+from gispulse.capabilities.raster import (
     ChangeDetectionCapability,
     NdviCapability,
     RasterClipCapability,
@@ -29,7 +29,7 @@ from capabilities.raster import (
     RasterReprojectCapability,
     ZonalStatsCapability,
 )
-from persistence.tier import TierError
+from gispulse.persistence.tier import TierError
 
 
 # ---------------------------------------------------------------------------

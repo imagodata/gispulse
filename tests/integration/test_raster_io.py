@@ -9,7 +9,7 @@ rasterio = pytest.importorskip("rasterio", reason="rasterio not installed")
 
 from rasterio.transform import from_bounds  # noqa: E402
 
-from persistence.raster_io import (  # noqa: E402
+from gispulse.persistence.raster_io import (  # noqa: E402
     dataset_from_raster,
     detect_raster_format,
     read_raster,

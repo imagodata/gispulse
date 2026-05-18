@@ -118,14 +118,18 @@ class TestGracefulDegrade:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """``--dev`` allows fallback to ``<repo>/portal/dist`` when package missing."""
-        # Ensure gispulse_portal is unimportable by clearing any cached entry.
+        # Force gispulse_portal to be unimportable — a ``None`` entry in
+        # ``sys.modules`` makes ``import gispulse_portal`` raise ImportError,
+        # which holds even in dev envs where the package is pip-installed.
         import sys
 
-        monkeypatch.delitem(sys.modules, "gispulse_portal", raising=False)
+        monkeypatch.setitem(sys.modules, "gispulse_portal", None)
 
         # Patch __file__ so the resolver computes a tmp_path-relative dist.
-        fake_pkg_root = tmp_path / "gispulse"
-        fake_pkg_root.mkdir()
+        # Mirror the v1.8.0 src-layout (<repo>/src/gispulse/cli_portal.py) so
+        # ``Path(__file__).parents[2]`` resolves back to the repo root.
+        fake_pkg_root = tmp_path / "src" / "gispulse"
+        fake_pkg_root.mkdir(parents=True)
         fake_dist = tmp_path / "portal" / "dist"
         fake_dist.mkdir(parents=True)
         (fake_dist / "index.html").write_text("<html></html>")

@@ -48,8 +48,8 @@ def test_api_exports_manifest_and_contracts() -> None:
 
 
 def test_api_symbols_are_the_core_objects() -> None:
-    from core.plugin_model import PluginManifest, SourceResult
-    from core.sources import DataSource
+    from gispulse.core.plugin_model import PluginManifest, SourceResult
+    from gispulse.core.sources import DataSource
     from gispulse.plugins import api
 
     assert api.PluginManifest is PluginManifest

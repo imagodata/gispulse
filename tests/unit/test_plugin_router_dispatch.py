@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import APIRouter, FastAPI
 
-from core.plugin_contracts import PluginHostContext
+from gispulse.core.plugin_contracts import PluginHostContext
 from gispulse.adapters.http.app import _create_plugin_router, _plugin_factory_wants_context
 
 
@@ -28,13 +28,13 @@ def app() -> FastAPI:
 
 @pytest.fixture()
 def ctx(app: FastAPI) -> PluginHostContext:
-    from core import plugin_hub as ph
+    from gispulse.core import plugin_hub as ph
 
     return PluginHostContext(
         app=app,
         settings=MagicMock(),
         logger=MagicMock(),
-        plugin_hub=ph.PluginHub(),
+        plugin_hub=ph.ExtensionHub(),
     )
 
 

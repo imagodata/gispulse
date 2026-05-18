@@ -11,7 +11,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point, box
 
-from persistence.gpkg_engine import GeoPackageEngine
+from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
 
 @pytest.fixture

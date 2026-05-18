@@ -31,15 +31,15 @@ jobs:
         run: ruff check .
 
       - name: Run unit tests
-        run: pytest tests/unit/ -v --cov=gispulse --cov=core --cov=capabilities --cov=rules --cov=persistence --cov=adapters --cov=orchestration --cov=catalog --cov-report=term-missing --cov-report=xml:coverage.xml
+        run: pytest tests/unit/ -v --cov=gispulse --cov-report=term-missing --cov-report=xml:coverage.xml
 
       - name: Run integration tests (excluding PostGIS)
-        run: pytest tests/integration/ -v --ignore=tests/integration/test_postgis.py --cov=gispulse --cov=core --cov=capabilities --cov=rules --cov=persistence --cov=adapters --cov=orchestration --cov=catalog --cov-report=term-missing --cov-append
+        run: pytest tests/integration/ -v --ignore=tests/integration/test_postgis.py --cov=gispulse --cov-report=term-missing --cov-append
 
       - name: Type check with mypy (core modules)
         run: |
           pip install mypy types-requests
-          mypy core/ capabilities/ rules/ --ignore-missing-imports --no-error-summary || true
+          mypy src/gispulse/core src/gispulse/capabilities src/gispulse/rules --ignore-missing-imports --no-error-summary || true
         continue-on-error: true
 
       - name: Upload coverage report

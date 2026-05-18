@@ -15,7 +15,7 @@ def register() -> None:
     ``core.sources.SOURCES`` registry so the source watcher (#197) can
     resolve ``ign://<entry>`` URIs declared in ``triggers.yaml``.
     """
-    from core.sources import SOURCES
+    from gispulse.core.sources import SOURCES
     from gispulse_src_ign.source import IgnSource
 
     SOURCES.register(IgnSource())

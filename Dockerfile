@@ -1,18 +1,10 @@
-# NB: the portal frontend lives in the sibling repository
-# imagodata/gispulse-portal and is built/published independently. The
-# OSS Docker image therefore ships only the Python engine + the embedded
-# viewer; portal artefacts are consumed from the sibling repo at runtime.
+# GISPulse OSS Docker image — the Python engine + HTTP API.
+#
+# The portal frontend lives in the sibling repository
+# imagodata/gispulse-portal and is built/published independently; the OSS
+# image ships only the Python engine and consumes portal artefacts from
+# that repo at runtime.
 
-# ---- Stage 1: Build viewer frontend ----
-FROM node:20-slim AS viewer-build
-WORKDIR /app/viewer
-COPY viewer/package.json viewer/package-lock.json ./
-RUN npm ci --ignore-scripts
-COPY viewer/ .
-COPY design-system/ /app/design-system/
-RUN npm run build
-
-# ---- Stage 2: Python runtime ----
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -22,14 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY pyproject.toml .
-RUN pip install --no-cache-dir ".[postgis,api,sso,network]"
-
+# Copy the full source first: the v1.8.0 src/ layout means the package
+# must be present for `pip install .` to discover and install it into
+# site-packages (the runtime imports `gispulse` from there, not from /app).
 COPY . .
-
-# Copy built viewer frontend from build stage. Portal frontend is shipped
-# separately from the imagodata/gispulse-portal repo.
-COPY --from=viewer-build /app/viewer/dist /app/viewer/dist
+RUN pip install --no-cache-dir ".[postgis,api,sso,network]"
 
 # Run as non-root user for security
 RUN useradd -m -u 1000 -s /bin/bash appuser && chown -R appuser:appuser /app

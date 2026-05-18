@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from shapely.geometry import Point
 
-from capabilities.classification import (
+from gispulse.capabilities.classification import (
     ClassifyCategoricalCapability,
     NormalizeCapability,
 )
@@ -108,8 +108,8 @@ class TestClassifyCategorical:
 
     def test_qml_sld_compatible_output(self, ftth_gdf):
         """Style attrs consumable by both QML and SLD converters."""
-        from persistence.sld_converter import style_def_to_sld
-        from persistence.style_converter import style_def_to_qml
+        from gispulse.persistence.sld_converter import style_def_to_sld
+        from gispulse.persistence.style_converter import style_def_to_qml
         out = ClassifyCategoricalCapability().execute(ftth_gdf, field="status", palette="Set2")
         style = out.attrs["gispulse_style"]
         qml = style_def_to_qml(style, geom_type="point")
@@ -136,7 +136,7 @@ class TestClassifyCategorical:
         assert "max_categories" in schema["properties"]
 
     def test_registered(self):
-        from capabilities.registry import get
+        from gispulse.capabilities.registry import get
         inst = get("classify_categorical")
         assert isinstance(inst, ClassifyCategoricalCapability)
 
@@ -230,13 +230,13 @@ class TestNormalize:
         assert "denom_field" in schema["properties"]
 
     def test_registered(self):
-        from capabilities.registry import get
+        from gispulse.capabilities.registry import get
         inst = get("normalize")
         assert isinstance(inst, NormalizeCapability)
 
     def test_chain_into_classify(self, pop_gdf):
         """Common pipeline: normalize → choropleth."""
-        from capabilities.classification import ChoroplethCapability
+        from gispulse.capabilities.classification import ChoroplethCapability
         normalized = NormalizeCapability().execute(
             pop_gdf, field="pop", method="log1p", out_field="pop_log",
         )

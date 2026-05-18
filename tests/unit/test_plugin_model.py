@@ -6,7 +6,7 @@ import dataclasses
 
 import pytest
 
-from core.plugin_model import (
+from gispulse.core.plugin_model import (
     ENTRYPOINT_GROUPS,
     PROTOCOL_VERSION,
     AccessProtocol,
@@ -36,7 +36,7 @@ from core.plugin_model import (
 
 
 def test_protocol_version_is_shared_with_contracts() -> None:
-    from core import plugin_contracts
+    from gispulse.core import plugin_contracts
 
     assert plugin_contracts.PROTOCOL_VERSION is PROTOCOL_VERSION
 
@@ -44,7 +44,7 @@ def test_protocol_version_is_shared_with_contracts() -> None:
 @pytest.mark.parametrize(
     ("enum", "size"),
     [
-        (PluginKind, 5),
+        (PluginKind, 6),
         (Origin, 2),
         (Trust, 3),
         (PluginState, 4),

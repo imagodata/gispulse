@@ -10,7 +10,7 @@ import re
 import sqlite3
 
 
-from persistence.schema import (
+from gispulse.persistence.schema import (
     BOOL_COLUMNS,
     DATETIME_COLUMNS,
     JSON_COLUMNS,

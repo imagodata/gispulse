@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from persistence.gpkg_connection import DEFAULT_BUSY_TIMEOUT_MS, connect_gpkg
+from gispulse.persistence.gpkg_connection import DEFAULT_BUSY_TIMEOUT_MS, connect_gpkg
 
 
 @pytest.fixture

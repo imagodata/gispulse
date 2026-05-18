@@ -42,9 +42,9 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from core.models import ChangeOperation
-from persistence.duckdb_diff_engine import DuckDBDiffEngine
-from persistence.file_blob_cdc import (
+from gispulse.core.models import ChangeOperation
+from gispulse.persistence.duckdb_diff_engine import DuckDBDiffEngine
+from gispulse.persistence.file_blob_cdc import (
     FileBlobChangeDetector,
     _resolve_companion_paths,
 )

@@ -15,8 +15,8 @@ from uuid import uuid4
 import pytest
 
 from gispulse.adapters.esb.action_dispatcher import ActionDispatcher, TriggerContext
-from core.graph import ActionDef, ActionType, EvalResult, Transition
-from core.models import Trigger
+from gispulse.core.graph import ActionDef, ActionType, EvalResult, Transition
+from gispulse.core.models import Trigger
 
 
 # ---------------------------------------------------------------------------

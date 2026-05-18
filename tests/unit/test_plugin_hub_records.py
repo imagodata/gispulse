@@ -1,12 +1,12 @@
-"""Unit tests for the PluginHub unified inventory (issue #177)."""
+"""Unit tests for the ExtensionHub unified inventory (issue #177)."""
 
 from __future__ import annotations
 
 import pytest
 
-from core import plugin_hub
-from core.plugin_hub import PluginHub
-from core.plugin_model import PluginKind, PluginState
+from gispulse.core import plugin_hub
+from gispulse.core.plugin_hub import ExtensionHub
+from gispulse.core.plugin_model import PluginKind, PluginState
 
 
 class FakeEP:
@@ -30,9 +30,9 @@ def _patch_entry_points(monkeypatch, groups: dict[str, list]) -> None:
 
 @pytest.fixture(autouse=True)
 def _reset_hub():
-    PluginHub.reset()
+    ExtensionHub.reset()
     yield
-    PluginHub.reset()
+    ExtensionHub.reset()
 
 
 # --------------------------------------------------------------------------
@@ -52,7 +52,7 @@ def test_inventory_maps_each_group_to_its_kind(monkeypatch) -> None:
             "gispulse.protocols": [FakeEP("wfs", object)],
         },
     )
-    hub = PluginHub()
+    hub = ExtensionHub()
     hub._discover_records()
 
     by_name = {r.name: r for r in hub.records}
@@ -66,7 +66,7 @@ def test_inventory_maps_each_group_to_its_kind(monkeypatch) -> None:
 
 def test_inventory_empty_when_no_entry_points(monkeypatch) -> None:
     _patch_entry_points(monkeypatch, {})
-    hub = PluginHub()
+    hub = ExtensionHub()
     hub._discover_records()
     assert hub.records == []
 
@@ -81,7 +81,7 @@ def test_loadable_entry_point_becomes_active(monkeypatch) -> None:
     _patch_entry_points(
         monkeypatch, {"gispulse.data_sources": [FakeEP("ok", lambda: sentinel)]}
     )
-    hub = PluginHub()
+    hub = ExtensionHub()
     hub._discover_records()
 
     rec = hub.records[0]
@@ -104,7 +104,7 @@ def test_failing_entry_point_is_isolated_as_failed(monkeypatch) -> None:
             ]
         },
     )
-    hub = PluginHub()
+    hub = ExtensionHub()
     hub._discover_records()
 
     states = {r.name: r for r in hub.records}
@@ -127,7 +127,7 @@ def test_records_by_kind_filters(monkeypatch) -> None:
             "gispulse.routers": [FakeEP("admin", object)],
         },
     )
-    hub = PluginHub()
+    hub = ExtensionHub()
     hub._discover_records()
 
     sources = hub.records_by_kind(PluginKind.SOURCE)
@@ -145,10 +145,13 @@ def test_get_runs_discovery_and_reset_clears_records(monkeypatch) -> None:
     _patch_entry_points(
         monkeypatch, {"gispulse.protocols": [FakeEP("stac", object)]}
     )
-    hub = PluginHub.get()
-    assert [r.name for r in hub.records] == ["stac"]
+    hub = ExtensionHub.get()
+    # Entry-point discovery yields the patched protocol record; the
+    # bundled templates data pack is discovered alongside it.
+    record_names = [r.name for r in hub.records]
+    assert "stac" in record_names
 
-    PluginHub.reset()
-    assert PluginHub._instance is None
-    hub2 = PluginHub.get()
+    ExtensionHub.reset()
+    assert ExtensionHub._instance is None
+    hub2 = ExtensionHub.get()
     assert hub2 is not hub

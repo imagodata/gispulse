@@ -22,8 +22,8 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from persistence.change_log_watcher import ChangeLogWatcher
-from persistence.duckdb_diff_engine import DuckDBDiffEngine
+from gispulse.persistence.change_log_watcher import ChangeLogWatcher
+from gispulse.persistence.duckdb_diff_engine import DuckDBDiffEngine
 
 
 def _bump_mtime(path: Path) -> None:
@@ -186,7 +186,7 @@ class TestWithTriggerEvaluator:
     def test_trigger_eval_called_with_change_record(
         self, initial_geojson: Path
     ) -> None:
-        from core.models import ChangeRecord, Trigger, TriggerEvent, TriggerType
+        from gispulse.core.models import ChangeRecord, Trigger, TriggerEvent, TriggerType
 
         # Simple trigger that matches every DATA_CHANGED on ``places``
         trigger = Trigger(

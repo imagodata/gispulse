@@ -19,7 +19,7 @@ from gispulse.adapters.esb.state_store import (
     PostgresStateStore,
     StateStore,
 )
-from core.models import ObjectState, SpatialState, Transition
+from gispulse.core.models import ObjectState, SpatialState, Transition
 
 
 # ---------------------------------------------------------------------------

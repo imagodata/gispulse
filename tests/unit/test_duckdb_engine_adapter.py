@@ -11,7 +11,7 @@ from __future__ import annotations
 import duckdb
 import pytest
 
-from persistence.duckdb_engine_adapter import DuckDBSpatialEngine
+from gispulse.persistence.duckdb_engine_adapter import DuckDBSpatialEngine
 
 
 # ---------------------------------------------------------------------------

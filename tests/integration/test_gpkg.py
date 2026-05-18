@@ -11,7 +11,7 @@ from shapely.geometry import Point, Polygon
 # fiona est une dépendance optionnelle — skip le module entier si absent
 pytest.importorskip("fiona", reason="fiona not installed")
 
-from persistence.gpkg import (  # noqa: E402
+from gispulse.persistence.gpkg import (  # noqa: E402
     dataset_from_gpkg,
     list_layers,
     read_gpkg,

@@ -1,0 +1,137 @@
+# GISPulse data pack — bundled pipeline templates.
+#
+# The first reference data pack of the v1.8.0 ExtensionHub data regime
+# (Chantier C). A data pack ships *data*, never code: this manifest
+# declares the built-in pipeline templates so the ExtensionHub can
+# inventory them as a first-class DATA_PACK record. The template JSON
+# files live next to this manifest in templates/.
+
+name: gispulse-templates
+content: template-pack
+version: 1.8.0
+display_name: "GISPulse built-in pipeline templates"
+description: "Curated, ready-to-run pipeline templates bundled with GISPulse OSS."
+tier: community
+entries:
+  - name: agriculture_rpg_bcae
+    title: "agriculture_rpg_bcae"
+    description: "Controle de conformite BCAE (Bonnes Conditions Agricoles Environnementales) des parcelles PAC — verification bandes tampons cours d'eau, haies preservees, couverture minimale et zones humides."
+    steps: 11
+    domain: "agriculture"
+    file: agriculture_rpg_bcae.json
+  - name: batiment_dpe_priorisation
+    title: "batiment_dpe_priorisation"
+    description: "Priorisation des batiments residentiels pour programmes de renovation energetique — croisement passoires thermiques BDNB avec precarite INSEE FILOSOFI, dispositifs ANAH et proprietaires MAJIC."
+    steps: 12
+    domain: "batiment_renovation"
+    file: batiment_dpe_priorisation.json
+  - name: cadastre_topology_cleanup
+    title: "cadastre_topology_cleanup"
+    description: "Pipeline de nettoyage topologique d'une coverage polygonale (cadastre, PLU, ilots RPG, OCS GE). Repare les geometries invalides, aligne les frontieres partagees sur une grille commune, comble les petits gaps, resout les overlaps et retire les slivers. A lancer avant toute analyse stricte."
+    steps: 8
+    domain: "preparation"
+    file: cadastre_topology_cleanup.json
+  - name: energie_solaire_toiture
+    title: "energie_solaire_toiture"
+    description: "Estimation du potentiel solaire photovoltaique des toitures — statistiques zonales d'irradiation raster PVGIS sur emprises bati, filtrage par orientation/pente, calcul de puissance et production annuelles."
+    steps: 12
+    domain: "energie"
+    file: energie_solaire_toiture.json
+  - name: environmental_monitoring
+    title: "environmental_monitoring"
+    description: ""
+    steps: 6
+    file: environmental_monitoring.json
+  - name: environnement_iota_loi_eau
+    title: "environnement_iota_loi_eau"
+    description: "Pre-diagnostic IOTA (Installations, Ouvrages, Travaux, Activites) loi sur l'eau — analyse d'impact d'un projet sur les zones humides, cours d'eau et masses d'eau DCE pour determiner le regime (declaration/autorisation)."
+    steps: 11
+    domain: "environnement"
+    file: environnement_iota_loi_eau.json
+  - name: environnement_tvb_ruptures
+    title: "environnement_tvb_ruptures"
+    description: "Trame Verte et Bleue — identification des reservoirs de biodiversite (ZNIEFF/Natura 2000), generation de corridors potentiels par buffer, detection des ruptures par les infrastructures routieres/ferroviaires."
+    steps: 11
+    domain: "environnement"
+    file: environnement_tvb_ruptures.json
+  - name: foncier_dvf_marche
+    title: "foncier_dvf_marche"
+    description: ""
+    steps: 7
+    file: foncier_dvf_marche.json
+  - name: foncier_parcelles_vacantes
+    title: "foncier_parcelles_vacantes"
+    description: "Detection des parcelles vacantes / friches urbaines mobilisables pour renaturation ZAN ou operations d'amenagement — croisement cadastre x fichiers fonciers x PLU x DVF."
+    steps: 10
+    domain: "foncier"
+    file: foncier_parcelles_vacantes.json
+  - name: ftth_demande_hotspots
+    title: "ftth_demande_hotspots"
+    description: "Detection des hotspots de demande FTTH / marche adressable par clustering density-based (HDBSCAN) sur les prises eligibles. Dessine une enveloppe concave par grappe et agrege la demande + distance au NRO le plus proche, pour prioriser les zones de deploiement."
+    steps: 9
+    domain: "ftth"
+    file: ftth_demande_hotspots.json
+  - name: ftth_network_analysis
+    title: "ftth_network_analysis"
+    description: ""
+    steps: 5
+    file: ftth_network_analysis.json
+  - name: mobilite_accessibilite_services
+    title: "mobilite_accessibilite_services"
+    description: "Accessibilite aux services — isochrones 15/30 min en voiture depuis des points d'interet (gares, centres-bourgs), croisement avec population INSEE pour calcul du taux de couverture et identification des zones blanches."
+    steps: 9
+    domain: "mobilite"
+    file: mobilite_accessibilite_services.json
+  - name: reseau_topology_prep
+    title: "reseau_topology_prep"
+    description: "Preparation d'un graphe lineaire propre (FTTH, routes, hydro, reseau electrique) avant analyse reseau (shortest_path, isochrone, connectivity_check). Rapproche les endpoints, prolonge les dangles, noude au niveau des intersections, retire duplicats et pseudo-nodes."
+    steps: 8
+    domain: "preparation"
+    file: reseau_topology_prep.json
+  - name: retail_huff_chalandise
+    title: "retail_huff_chalandise"
+    description: "Modele de Huff de zones de chalandise — isochrones drive-time depuis magasins, calcul des parts de marche par IRIS selon attractivite (surface commerciale / distance^beta) et identification des whitespace."
+    steps: 13
+    domain: "retail_geomarketing"
+    file: retail_huff_chalandise.json
+  - name: risques_ppri_exposition
+    title: "risques_ppri_exposition"
+    description: "Diagnostic d'exposition au risque inondation — croisement du bati et de la population avec les zonages PPRI (rouge/bleu), calcul du nombre de logements, habitants et etablissements sensibles exposes."
+    steps: 10
+    domain: "risques_naturels"
+    file: risques_ppri_exposition.json
+  - name: sante_apl_deserts
+    title: "sante_apl_deserts"
+    description: "Calcul de l'Accessibilite Potentielle Localisee (APL) medecins generalistes a l'echelle communale — methode DREES adaptee : offre ETP ponderee / demande populationnelle dans isochrone 20 min, identification des deserts medicaux."
+    steps: 10
+    domain: "sante"
+    file: sante_apl_deserts.json
+  - name: securite_sdis_couverture
+    title: "securite_sdis_couverture"
+    description: "Analyse SDACR de couverture operationnelle SDIS — generation d'isochrones 10/20/30 min depuis les centres de secours, croisement avec la population INSEE et identification des zones blanches."
+    steps: 10
+    domain: "securite_civile"
+    file: securite_sdis_couverture.json
+  - name: securite_sdis_thiessen
+    title: "securite_sdis_thiessen"
+    description: "Zones de premier appel (Thiessen/Voronoi) autour des Centres d'Incendie et de Secours (CIS). Decoupe le departement par CIS geographiquement le plus proche, croise avec la population INSEE et les ERP sensibles pour dimensionner les ressources. Complement theorique aux isochrones reseau (SDACR)."
+    steps: 10
+    domain: "securite_civile"
+    file: securite_sdis_thiessen.json
+  - name: urbanisme_permis_conformite
+    title: "urbanisme_permis_conformite"
+    description: "Instruction rapide d'un permis de construire — croisement de la parcelle du petitionnaire avec le zonage PLU applicable, les servitudes, les risques et les perimetres ABF pour fiche d'analyse automatique."
+    steps: 11
+    domain: "urbanisme"
+    file: urbanisme_permis_conformite.json
+  - name: urbanisme_zan_bilan
+    title: "urbanisme_zan_bilan"
+    description: "Bilan ZAN (Zero Artificialisation Nette) d'une commune — calcul du solde entre surfaces artificialisees et renaturees entre deux millesimes OCS GE, ventile par grande categorie."
+    steps: 11
+    domain: "urbanisme"
+    file: urbanisme_zan_bilan.json
+  - name: validation_plu_cnig
+    title: "validation_plu_cnig"
+    description: ""
+    steps: 5
+    file: validation_plu_cnig.json

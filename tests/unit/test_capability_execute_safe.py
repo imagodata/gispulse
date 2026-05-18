@@ -18,7 +18,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from capabilities.base import Capability, UnknownParameterError
+from gispulse.capabilities.base import Capability, UnknownParameterError
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +131,7 @@ def test_execute_safe_via_real_capability_top_n(gdf):
     """Smoke-test against a registered capability to make sure the
     introspection works on real signatures (not just the test fixture).
     """
-    from capabilities.selection import TopNCapability
+    from gispulse.capabilities.selection import TopNCapability
 
     gdf_pop = gdf.copy()
     gdf_pop["population"] = [1000, 2000]

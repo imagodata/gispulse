@@ -27,8 +27,8 @@ from typing import Any
 
 import pytest
 
-from persistence.change_log_watcher import ChangeLogWatcher
-from persistence.gpkg_schema import bootstrap_gpkg_project, install_change_tracking
+from gispulse.persistence.change_log_watcher import ChangeLogWatcher
+from gispulse.persistence.gpkg_schema import bootstrap_gpkg_project, install_change_tracking
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +160,7 @@ class TestVolume:
         ceiling is what we think it is — if Marco changes the defaults
         without thinking, this catches it.
         """
-        from persistence.change_log_watcher import ChangeLogWatcher as _W
+        from gispulse.persistence.change_log_watcher import ChangeLogWatcher as _W
         import inspect
         sig = inspect.signature(_W.__init__)
         assert sig.parameters["poll_interval"].default == 0.2, (

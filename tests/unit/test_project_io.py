@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from persistence.gpkg_schema import bootstrap_gpkg_project
-from persistence.project_io import (
+from gispulse.persistence.gpkg_schema import bootstrap_gpkg_project
+from gispulse.persistence.project_io import (
     _strip_defaults,
     _to_dict,
     export_project,
@@ -68,7 +68,7 @@ def populated_gpkg(tmp_path) -> Path:
 class TestToDict:
     def test_serialises_uuid_as_string(self):
         from uuid import uuid4
-        from core.models import Rule
+        from gispulse.core.models import Rule
 
         rule = Rule(id=uuid4(), name="r")
         d = _to_dict(rule)

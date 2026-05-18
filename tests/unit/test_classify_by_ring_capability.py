@@ -7,9 +7,9 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point, Polygon
 
-import capabilities  # noqa: F401 — register everything
-from capabilities.registry import get as get_capability
-from capabilities.vector import ClassifyByRingCapability
+import gispulse.capabilities as capabilities  # noqa: F401 — register everything
+from gispulse.capabilities.registry import get as get_capability
+from gispulse.capabilities.vector import ClassifyByRingCapability
 
 
 def _ring(size: float, budget: float) -> gpd.GeoDataFrame:

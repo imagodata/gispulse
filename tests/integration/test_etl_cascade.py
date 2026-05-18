@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import pytest
 
-from core.plugin_model import (
+from gispulse.core.plugin_model import (
     AccessProtocol,
     AccessSpec,
     FetchMode,
@@ -25,9 +25,9 @@ from core.plugin_model import (
     WriteReport,
     WriteSpec,
 )
-from core.sources import DeclarativeSink, DeclarativeSource, ProtocolRegistry, SourceEntryRef
-from core.models import ChangeRecord, Trigger, TriggerEvent, TriggerType
-from rules.trigger_evaluator import (
+from gispulse.core.sources import DeclarativeSink, DeclarativeSource, ProtocolRegistry, SourceEntryRef
+from gispulse.core.models import ChangeRecord, Trigger, TriggerEvent, TriggerType
+from gispulse.rules.trigger_evaluator import (
     MAX_CASCADE_DEPTH,
     CascadeDepthExceeded,
     TriggerEvaluator,

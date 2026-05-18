@@ -16,13 +16,13 @@ from uuid import uuid4
 
 import pytest
 
-from core.models import Job, JobStatus
-from orchestration.job_queue import (
+from gispulse.core.models import Job, JobStatus
+from gispulse.orchestration.job_queue import (
     InMemoryJobQueue,
     _deserialize_job,
     _serialize_job,
 )
-from orchestration.metering import InMemoryMetering
+from gispulse.orchestration.metering import InMemoryMetering
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +260,7 @@ class TestInMemoryMetering:
 class TestJobQueueFactory:
     def test_no_redis_returns_in_memory(self, monkeypatch):
         monkeypatch.delenv("GISPULSE_REDIS_URL", raising=False)
-        from orchestration.job_queue_factory import create_job_queue
+        from gispulse.orchestration.job_queue_factory import create_job_queue
 
         queue = create_job_queue()
         assert isinstance(queue, InMemoryJobQueue)
@@ -273,10 +273,10 @@ class TestJobQueueFactory:
         """
         monkeypatch.setenv("GISPULSE_REDIS_URL", "redis://localhost:6379/0")
         try:
-            from orchestration.job_queue_factory import create_job_queue
+            from gispulse.orchestration.job_queue_factory import create_job_queue
 
             queue = create_job_queue()
-            from orchestration.job_queue import RedisJobQueue
+            from gispulse.orchestration.job_queue import RedisJobQueue
             assert isinstance(queue, RedisJobQueue)
         except ImportError:
             pytest.skip("redis package not installed")
@@ -285,7 +285,7 @@ class TestJobQueueFactory:
 class TestMeteringFactory:
     def test_no_redis_returns_in_memory(self, monkeypatch):
         monkeypatch.delenv("GISPULSE_REDIS_URL", raising=False)
-        from orchestration.metering import create_metering
+        from gispulse.orchestration.metering import create_metering
 
         meter = create_metering()
         assert isinstance(meter, InMemoryMetering)

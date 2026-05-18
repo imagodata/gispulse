@@ -6,7 +6,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from capabilities.selection import (
+from gispulse.capabilities.selection import (
     DeduplicateCapability,
     RandomSampleCapability,
     SortCapability,

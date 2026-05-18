@@ -12,9 +12,9 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import APIRouter, FastAPI
 
-from core import plugin_hub
-from core.plugin_hub import _version_satisfies, _check_protocol_version
-from core.plugin_contracts import LicenceState, PluginHostContext, PROTOCOL_VERSION
+from gispulse.core import plugin_hub
+from gispulse.core.plugin_hub import _version_satisfies, _check_protocol_version
+from gispulse.core.plugin_contracts import LicenceState, PluginHostContext, PROTOCOL_VERSION
 from gispulse.adapters.http.app import _create_plugin_router
 
 
@@ -47,7 +47,7 @@ def _patch_eps(monkeypatch: pytest.MonkeyPatch, mapping: dict[str, list[_FakeEnt
         return mapping.get(group, [])
 
     monkeypatch.setattr(plugin_hub, "entry_points", fake)
-    plugin_hub.PluginHub.reset()
+    plugin_hub.ExtensionHub.reset()
 
 
 # ---------------------------------------------------------------------------
@@ -55,10 +55,10 @@ def _patch_eps(monkeypatch: pytest.MonkeyPatch, mapping: dict[str, list[_FakeEnt
 # ---------------------------------------------------------------------------
 
 
-class TestPluginHubDiscovery:
+class TestExtensionHubDiscovery:
     def test_no_plugins_yields_defaults_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_eps(monkeypatch, {})
-        hub = plugin_hub.PluginHub.get()
+        hub = plugin_hub.ExtensionHub.get()
         assert hub.routers == {}
         assert hub.middleware == []
         assert hub.auth_providers == {}
@@ -81,7 +81,7 @@ class TestPluginHubDiscovery:
             monkeypatch,
             {"gispulse.routers": [_FakeEntryPoint("fake-billing", FakeRouterFactory)]},
         )
-        hub = plugin_hub.PluginHub.get()
+        hub = plugin_hub.ExtensionHub.get()
         assert "fake-billing" in hub.routers
         assert hub.routers["fake-billing"].name == "fake-billing"
 
@@ -105,7 +105,7 @@ class TestPluginHubDiscovery:
                 ]
             },
         )
-        hub = plugin_hub.PluginHub.get()
+        hub = plugin_hub.ExtensionHub.get()
         assert set(hub.routers) == {"a", "b"}
 
     def test_billing_first_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,7 +131,7 @@ class TestPluginHubDiscovery:
                 ]
             },
         )
-        hub = plugin_hub.PluginHub.get()
+        hub = plugin_hub.ExtensionHub.get()
         assert hub.billing_provider is not None
         assert hub.billing_provider.name == "stripe"
 
@@ -146,7 +146,7 @@ class TestPluginHubDiscovery:
             monkeypatch,
             {"gispulse.routers": [BoomEntry()]},  # type: ignore[list-item]
         )
-        hub = plugin_hub.PluginHub.get()
+        hub = plugin_hub.ExtensionHub.get()
         assert hub.routers == {}
         # Other defaults still in place.
         assert hub.licence_provider.name == "noop"
@@ -165,7 +165,7 @@ class TestPluginHubDiscovery:
             monkeypatch,
             {"gispulse.routers": [_FakeEntryPoint("needs-stripe", MissingDepsFactory)]},
         )
-        hub = plugin_hub.PluginHub.get()
+        hub = plugin_hub.ExtensionHub.get()
         assert hub.routers["needs-stripe"].create(app=None) is None
 
     def test_lifecycle_plugins_are_registered(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -180,7 +180,7 @@ class TestPluginHubDiscovery:
             monkeypatch,
             {"gispulse.lifecycle": [_FakeEntryPoint("fake-lifecycle", FakeLifecycle)]},
         )
-        hub = plugin_hub.PluginHub.get()
+        hub = plugin_hub.ExtensionHub.get()
         assert [p.name for p in hub.lifecycle] == ["fake-lifecycle"]
 
     def test_mcp_plugins_are_registered(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -201,7 +201,7 @@ class TestPluginHubDiscovery:
                 "gispulse.mcp_resources": [_FakeEntryPoint("fake-resources", FakeResources)],
             },
         )
-        hub = plugin_hub.PluginHub.get()
+        hub = plugin_hub.ExtensionHub.get()
         assert [p.name for p in hub.mcp_tools] == ["fake-tools"]
         assert [p.name for p in hub.mcp_resources] == ["fake-resources"]
 
@@ -214,7 +214,7 @@ class TestPluginHubDiscovery:
 class TestPluginRouterCreation:
     def test_context_aware_factory_receives_plugin_host_context(self) -> None:
         app = FastAPI()
-        hub = plugin_hub.PluginHub()
+        hub = plugin_hub.ExtensionHub()
         context = PluginHostContext(app=app, settings=object(), logger=object(), plugin_hub=hub)
         seen: list[PluginHostContext] = []
 
@@ -232,7 +232,7 @@ class TestPluginRouterCreation:
 
     def test_context_factory_can_be_detected_by_annotation_only(self) -> None:
         app = FastAPI()
-        hub = plugin_hub.PluginHub()
+        hub = plugin_hub.ExtensionHub()
         context = PluginHostContext(app=app, settings=object(), logger=object(), plugin_hub=hub)
         seen: list[PluginHostContext] = []
 
@@ -250,7 +250,7 @@ class TestPluginRouterCreation:
 
     def test_legacy_factory_receives_app_when_signature_is_legacy(self) -> None:
         app = FastAPI()
-        hub = plugin_hub.PluginHub()
+        hub = plugin_hub.ExtensionHub()
         context = PluginHostContext(app=app, settings=object(), logger=object(), plugin_hub=hub)
         seen: list[FastAPI] = []
 
@@ -270,7 +270,7 @@ class TestPluginRouterCreation:
 
     def test_context_factory_type_error_is_not_treated_as_legacy_signature(self) -> None:
         app = FastAPI()
-        hub = plugin_hub.PluginHub()
+        hub = plugin_hub.ExtensionHub()
         context = PluginHostContext(app=app, settings=object(), logger=object(), plugin_hub=hub)
 
         class BrokenContextAwareFactory:
@@ -318,18 +318,18 @@ class TestNoOpLicenceProvider:
 # ---------------------------------------------------------------------------
 
 
-class TestPluginHubSingleton:
+class TestExtensionHubSingleton:
     def test_get_returns_same_instance(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_eps(monkeypatch, {})
-        a = plugin_hub.PluginHub.get()
-        b = plugin_hub.PluginHub.get()
+        a = plugin_hub.ExtensionHub.get()
+        b = plugin_hub.ExtensionHub.get()
         assert a is b
 
     def test_reset_clears_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_eps(monkeypatch, {})
-        a = plugin_hub.PluginHub.get()
-        plugin_hub.PluginHub.reset()
-        b = plugin_hub.PluginHub.get()
+        a = plugin_hub.ExtensionHub.get()
+        plugin_hub.ExtensionHub.reset()
+        b = plugin_hub.ExtensionHub.get()
         assert a is not b
 
 
@@ -402,7 +402,7 @@ class TestProtocolVersionHandshake:
             monkeypatch,
             {"gispulse.routers": [_FakeEntryPoint("matching", MatchingFactory)]},
         )
-        hub = plugin_hub.PluginHub.get()
+        hub = plugin_hub.ExtensionHub.get()
         assert "matching" in hub.routers
 
     def test_mismatched_plugin_still_loads_but_log_warning_is_called(
@@ -428,7 +428,7 @@ class TestProtocolVersionHandshake:
             real_warning(event, **kw)
 
         monkeypatch.setattr(plugin_hub.log, "warning", capture_warning)
-        hub = plugin_hub.PluginHub.get()
+        hub = plugin_hub.ExtensionHub.get()
 
         # Plugin must survive — warning, not hard error.
         assert "future" in hub.routers
@@ -453,7 +453,7 @@ class TestProtocolVersionHandshake:
             warned.append(event)
 
         monkeypatch.setattr(plugin_hub.log, "warning", capture_warning)
-        hub = plugin_hub.PluginHub.get()
+        hub = plugin_hub.ExtensionHub.get()
 
         assert "silent" in hub.routers
         protocol_warns = [w for w in warned if "protocol" in w]

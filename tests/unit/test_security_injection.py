@@ -11,7 +11,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # rules/operation_executor.py — _validate_expression
 # ---------------------------------------------------------------------------
-from rules.operation_executor import _validate_expression as opexec_validate_expression
+from gispulse.rules.operation_executor import _validate_expression as opexec_validate_expression
 
 
 class TestOperationExecutorValidateExpression:
@@ -93,7 +93,7 @@ class TestOperationExecutorValidateExpression:
 # ---------------------------------------------------------------------------
 # rules/trigger_evaluator.py — _validate_business_expression
 # ---------------------------------------------------------------------------
-from rules.trigger_evaluator import _validate_business_expression
+from gispulse.rules.trigger_evaluator import _validate_business_expression
 
 
 class TestTriggerEvaluatorValidateBusinessExpression:
@@ -248,7 +248,7 @@ class TestRelationsRouterValidateExpression:
 # ---------------------------------------------------------------------------
 # core/filter/expression_converter.py — ExpressionConverter.validate
 # ---------------------------------------------------------------------------
-from core.filter.expression_converter import ExpressionConverter
+from gispulse.core.filter.expression_converter import ExpressionConverter
 
 
 class TestExpressionConverterValidate:
@@ -340,7 +340,7 @@ class TestExpressionConverterValidate:
 # ---------------------------------------------------------------------------
 # capabilities/vector.py — _validate_calc_expression
 # ---------------------------------------------------------------------------
-from capabilities.vector import _validate_calc_expression, _validate_query_expression
+from gispulse.capabilities.vector import _validate_calc_expression, _validate_query_expression
 
 
 class TestVectorValidateCalcExpression:
@@ -565,7 +565,7 @@ class TestPortalSQLRouterValidateSQLReadonly:
 # ---------------------------------------------------------------------------
 # persistence/bridge.py — HybridEngine.list_layers / load_layer identifier check
 # ---------------------------------------------------------------------------
-from persistence.bridge import HybridEngine
+from gispulse.persistence.bridge import HybridEngine
 
 
 class TestBridgeIdentifierValidation:

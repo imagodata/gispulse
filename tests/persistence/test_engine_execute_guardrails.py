@@ -24,8 +24,8 @@ from pathlib import Path
 
 import pytest
 
-from persistence.gpkg_engine import GeoPackageEngine
-from persistence.sql_guardrails import (
+from gispulse.persistence.gpkg_engine import GeoPackageEngine
+from gispulse.persistence.sql_guardrails import (
     MAX_PAREN_DEPTH,
     SecurityError,
     enforce,

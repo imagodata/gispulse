@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from shapely.geometry import Point
 
-from capabilities.temporal import (
+from gispulse.capabilities.temporal import (
     TemporalFilterCapability,
     TemporalJoinCapability,
 )

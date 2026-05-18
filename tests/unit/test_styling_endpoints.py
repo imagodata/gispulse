@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from shapely.geometry import Polygon
 
-from core.models import Dataset
+from gispulse.core.models import Dataset
 from gispulse.adapters.http.app import create_app
 
 
@@ -138,7 +138,7 @@ class TestPutStyle:
         assert r.json()["layer_name"] == "parcels"
         assert r.json()["qml_size_bytes"] > 0
 
-        from persistence.gpkg import read_styles
+        from gispulse.persistence.gpkg import read_styles
         rows = read_styles(str(gpkg_path))
         parcels_styles = [row for row in rows if row["f_table_name"] == "parcels"]
         assert len(parcels_styles) == 1
@@ -150,7 +150,7 @@ class TestPutStyle:
         sd2 = {"renderer": "single", "symbol": {"kind": "fill", "color": "#00ff00", "opacity": 0.7, "strokeColor": "#000", "strokeWidth": 1}}
         c.put(f"/api/portal/datasets/{ds_id}/styles", json={"layer_name": "parcels", "style_def": sd1, "geom_type": "polygon"})
         c.put(f"/api/portal/datasets/{ds_id}/styles", json={"layer_name": "parcels", "style_def": sd2, "geom_type": "polygon"})
-        from persistence.gpkg import read_styles
+        from gispulse.persistence.gpkg import read_styles
         rows = [row for row in read_styles(str(gpkg_path)) if row["f_table_name"] == "parcels"]
         assert len(rows) == 1
 
@@ -212,7 +212,7 @@ class TestImportQml:
             data={"layer_name": "parcels", "geom_type": "polygon"},
             files={"file": ("fixture.qml", _QML_FIXTURE, "application/xml")},
         )
-        from persistence.gpkg import read_styles
+        from gispulse.persistence.gpkg import read_styles
         rows = [row for row in read_styles(str(gpkg_path)) if row["f_table_name"] == "parcels"]
         assert len(rows) == 1
         assert "<qgis" in rows[0]["styleQML"]

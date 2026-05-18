@@ -14,9 +14,9 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import box
 
-from core.models import ChangeOperation, Trigger, TriggerEvent, TriggerType
-from persistence.duckdb_change_detector import DuckDBChangeDetector
-from persistence.spatialite_session import SpatiaLiteSession
+from gispulse.core.models import ChangeOperation, Trigger, TriggerEvent, TriggerType
+from gispulse.persistence.duckdb_change_detector import DuckDBChangeDetector
+from gispulse.persistence.spatialite_session import SpatiaLiteSession
 
 
 # ---------------------------------------------------------------------------

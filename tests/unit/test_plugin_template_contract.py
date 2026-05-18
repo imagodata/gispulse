@@ -14,8 +14,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from core.plugin_contracts import PluginHostContext
-from core import plugin_hub
+from gispulse.core.plugin_contracts import PluginHostContext
+from gispulse.core import plugin_hub
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -34,7 +34,7 @@ class _TemplateEntryPoint:
 
 
 def test_plugin_template_capability_uses_current_execute_signature() -> None:
-    from capabilities.registry import REGISTRY
+    from gispulse.capabilities.registry import REGISTRY
 
     source = (TEMPLATE / "gispulse_cap_example" / "capabilities.py").read_text(
         encoding="utf-8"
@@ -100,10 +100,10 @@ def test_plugin_template_router_is_discoverable_through_plugin_hub(
         return []
 
     monkeypatch.setattr(plugin_hub, "entry_points", fake_entry_points)
-    plugin_hub.PluginHub.reset()
+    plugin_hub.ExtensionHub.reset()
     sys.path.insert(0, str(TEMPLATE))
     try:
-        hub = plugin_hub.PluginHub.get()
+        hub = plugin_hub.ExtensionHub.get()
         app = FastAPI()
         ctx = PluginHostContext(
             app=app,
@@ -114,7 +114,7 @@ def test_plugin_template_router_is_discoverable_through_plugin_hub(
         app.include_router(hub.routers["example"].create(ctx))
     finally:
         sys.path.remove(str(TEMPLATE))
-        plugin_hub.PluginHub.reset()
+        plugin_hub.ExtensionHub.reset()
 
     response = TestClient(app).get("/plugins/example/health")
 

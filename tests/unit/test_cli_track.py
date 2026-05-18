@@ -20,7 +20,7 @@ from gispulse.cli import app
 @pytest.fixture()
 def gpkg(tmp_path: Path) -> Path:
     """Return a fresh GPKG with two spatial layers, no triggers yet."""
-    from persistence.gpkg_engine import GeoPackageEngine
+    from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
     path = tmp_path / "fixture.gpkg"
     engine = GeoPackageEngine(path=path)

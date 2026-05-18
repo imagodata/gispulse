@@ -6,7 +6,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from capabilities.schema import (
+from gispulse.capabilities.schema import (
     CaseWhenCapability,
     CoalesceFieldsCapability,
     LookupTableCapability,

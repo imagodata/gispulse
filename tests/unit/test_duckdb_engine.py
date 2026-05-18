@@ -5,7 +5,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from persistence.duckdb_engine import DuckDBSession
+from gispulse.persistence.duckdb_engine import DuckDBSession
 
 
 @pytest.fixture

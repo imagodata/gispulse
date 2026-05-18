@@ -23,9 +23,9 @@ from uuid import uuid4
 
 import pytest
 
-from core.enums import TriggerCategory, TriggerEvent, TriggerType
-from core.graph import ActionDef, ActionType
-from core.models import Trigger
+from gispulse.core.enums import TriggerCategory, TriggerEvent, TriggerType
+from gispulse.core.graph import ActionDef, ActionType
+from gispulse.core.models import Trigger
 from gispulse.runtime import build_runtime
 
 
@@ -43,7 +43,7 @@ def gpkg_with_parcels(tmp_path: Path) -> Path:
     triggers, etc.). The engine is closed after setup so the runtime
     can open it cleanly.
     """
-    from persistence.gpkg_engine import GeoPackageEngine
+    from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
     gpkg_path = tmp_path / "fixture.gpkg"
     engine = GeoPackageEngine(path=gpkg_path)

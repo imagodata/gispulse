@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import pytest
 
-from core.models import Dataset, Job, JobStatus, Rule, Scenario
-from persistence.sqlite_repository import SQLiteRepository
+from gispulse.core.models import Dataset, Job, JobStatus, Rule, Scenario
+from gispulse.persistence.sqlite_repository import SQLiteRepository
 
 
 @pytest.fixture

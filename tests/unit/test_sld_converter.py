@@ -5,7 +5,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 
 
-from persistence.sld_converter import sld_to_style_def, style_def_to_sld
+from gispulse.persistence.sld_converter import sld_to_style_def, style_def_to_sld
 
 
 SE_NS = "http://www.opengis.net/se"

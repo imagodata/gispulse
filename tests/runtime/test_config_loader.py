@@ -32,7 +32,7 @@ from gispulse.runtime.config_loader import (
 @pytest.fixture()
 def tracked_gpkg(tmp_path: Path) -> Path:
     """Create a real GPKG with a ``parcels`` table tracked by triggers."""
-    from persistence.gpkg_engine import GeoPackageEngine
+    from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
     gpkg = tmp_path / "fixture.gpkg"
     engine = GeoPackageEngine(path=gpkg)
@@ -112,7 +112,7 @@ def test_load_config_valid_yaml(valid_yaml: Path, tracked_gpkg: Path) -> None:
 
 
 def test_to_triggers_maps_into_domain(valid_yaml: Path) -> None:
-    from core.graph import ActionType
+    from gispulse.core.graph import ActionType
 
     cfg = load_config(valid_yaml)
     triggers = to_triggers(cfg)
@@ -142,7 +142,7 @@ def test_gpkg_override_wins_over_config_value(
 ) -> None:
     # Build a second GPKG and pass it via override.
     other = tracked_gpkg.parent / "other.gpkg"
-    from persistence.gpkg_engine import GeoPackageEngine
+    from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
     eng = GeoPackageEngine(path=other)
     eng.open()
@@ -481,7 +481,7 @@ def test_source_changed_to_triggers_maps_source_changed_type(
     tracked_gpkg: Path, tmp_path: Path
 ) -> None:
     """``to_triggers`` builds a SOURCE_CHANGED domain trigger."""
-    from core.enums import TriggerCategory, TriggerType
+    from gispulse.core.enums import TriggerCategory, TriggerType
 
     cfg_path = tmp_path / "src.yaml"
     cfg_path.write_text(

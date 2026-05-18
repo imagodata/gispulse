@@ -24,7 +24,7 @@ def _make_tiles_client(backend_name: str = "postgis") -> tuple[TestClient, Magic
     then overrides app.state.spatial_engine with a mock.
     """
     from gispulse.adapters.http.app import create_app
-    from persistence.engine import SpatialEngine
+    from gispulse.persistence.engine import SpatialEngine
 
     mock_engine = MagicMock(spec=SpatialEngine)
     mock_engine.backend_name = backend_name
@@ -118,7 +118,7 @@ class TestTilesInvalidCoords:
 class TestTilesDuckdbFallback:
     def test_duckdb_backend_returns_501(self):
         """DuckDB backend cannot encode MVT, must return 501."""
-        from core.models import Dataset
+        from gispulse.core.models import Dataset
 
         client, mock_engine = _make_tiles_client("duckdb")
         ds = Dataset(name="test_duckdb", source_path="/tmp/test.gpkg")
@@ -131,7 +131,7 @@ class TestTilesDuckdbFallback:
 
 class TestTilesPostgisPath:
     def test_empty_tile_returns_204(self):
-        from core.models import Dataset
+        from gispulse.core.models import Dataset
 
         client, mock_engine = _make_tiles_client("postgis")
         mock_engine.execute_sql.return_value = [{"tile": None}]
@@ -143,7 +143,7 @@ class TestTilesPostgisPath:
         assert resp.status_code == 204
 
     def test_valid_tile_returns_200_with_mvt_content_type(self):
-        from core.models import Dataset
+        from gispulse.core.models import Dataset
 
         client, mock_engine = _make_tiles_client("postgis")
         mock_engine.execute_sql.return_value = [{"tile": b"\x1a\x03mvt"}]
@@ -157,7 +157,7 @@ class TestTilesPostgisPath:
         assert resp.content == b"\x1a\x03mvt"
 
     def test_cache_control_header_present(self):
-        from core.models import Dataset
+        from gispulse.core.models import Dataset
 
         client, mock_engine = _make_tiles_client("postgis")
         mock_engine.execute_sql.return_value = [{"tile": b"\x1a\x03mvt"}]
@@ -176,7 +176,7 @@ class TestTilesPostgisPath:
 
 class TestTileJSON:
     def test_returns_valid_tilejson_3_with_metadata_bounds(self):
-        from core.models import Dataset
+        from gispulse.core.models import Dataset
         from gispulse.adapters.http.routers.tiles_router import _bounds_cache
 
         _bounds_cache.clear()
@@ -219,7 +219,7 @@ class TestTileJSON:
         assert resp.status_code == 404
 
     def test_respects_x_forwarded_proto_and_host(self):
-        from core.models import Dataset
+        from gispulse.core.models import Dataset
         from gispulse.adapters.http.routers.tiles_router import _bounds_cache
 
         _bounds_cache.clear()

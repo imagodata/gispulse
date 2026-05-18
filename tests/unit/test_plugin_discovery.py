@@ -15,7 +15,7 @@ import pytest
 class TestDiscoverPlugins:
     """capabilities.registry._discover_plugins — hub-mediated since #180.
 
-    Discovery is owned by core.plugin_hub.PluginHub; these tests patch
+    Discovery is owned by core.plugin_hub.ExtensionHub; these tests patch
     the hub's entry-point scan and assert _discover_plugins invokes each
     ACTIVE capability record's register() callable.
     """
@@ -23,18 +23,18 @@ class TestDiscoverPlugins:
     @staticmethod
     def _run(eps):
         """Reset the hub, patch its entry-point scan, run _discover_plugins."""
-        from capabilities.registry import _discover_plugins
-        from core.plugin_hub import PluginHub
+        from gispulse.capabilities.registry import _discover_plugins
+        from gispulse.core.plugin_hub import ExtensionHub
 
         scan = eps if callable(eps) else (
             lambda group: eps if group == "gispulse.capabilities" else []
         )
-        PluginHub.reset()
+        ExtensionHub.reset()
         try:
-            with patch("core.plugin_hub.entry_points", scan):
+            with patch("gispulse.core.plugin_hub.entry_points", scan):
                 return _discover_plugins()
         finally:
-            PluginHub.reset()
+            ExtensionHub.reset()
 
     def test_discover_no_plugins(self):
         """When no entry-points exist, discovery returns empty list."""
@@ -109,14 +109,14 @@ class TestListPlugins:
     """Test capabilities.registry.list_plugins."""
 
     def test_list_plugins_empty(self):
-        from capabilities.registry import list_plugins
+        from gispulse.capabilities.registry import list_plugins
 
         with patch("importlib.metadata.entry_points", return_value=[]):
             result = list_plugins()
         assert result == []
 
     def test_list_plugins_returns_metadata(self):
-        from capabilities.registry import list_plugins
+        from gispulse.capabilities.registry import list_plugins
 
         ep = MagicMock()
         ep.name = "ftth"
@@ -147,7 +147,7 @@ class TestMarketplaceCLI:
 
     def test_marketplace_list_empty(self, runner):
         cli_runner, app = runner
-        with patch("capabilities.registry.list_plugins", return_value=[]):
+        with patch("gispulse.capabilities.registry.list_plugins", return_value=[]):
             result = cli_runner.invoke(app, ["marketplace", "list"])
         assert result.exit_code == 0
         assert "No plugins installed" in result.output
@@ -158,7 +158,7 @@ class TestMarketplaceCLI:
             {"name": "ftth", "module": "gispulse_cap_ftth:register"},
             {"name": "urban", "module": "gispulse_cap_urban:register"},
         ]
-        with patch("capabilities.registry.list_plugins", return_value=plugins):
+        with patch("gispulse.capabilities.registry.list_plugins", return_value=plugins):
             result = cli_runner.invoke(app, ["marketplace", "list"])
         assert result.exit_code == 0
         assert "2 plugin(s)" in result.output

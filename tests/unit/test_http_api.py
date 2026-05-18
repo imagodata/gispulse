@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gispulse.adapters.http.app import create_app
-from core.models import Dataset
+from gispulse.core.models import Dataset
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +189,7 @@ class TestRules:
         the broken rule straight into the repo to simulate the realistic case:
         a rule that became invalid after a capability schema migration.
         """
-        from core.models import Rule
+        from gispulse.core.models import Rule
 
         broken_rule = Rule(
             name="reproject_broken",

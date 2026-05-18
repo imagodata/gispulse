@@ -33,7 +33,7 @@ _requires_postgis = pytest.mark.skipif(
 # Skip the entire module import check for sqlalchemy/psycopg2 too.
 # If psycopg2 is not installed the live tests will fail anyway, which is fine.
 
-from persistence.postgis import PostGISConnection  # noqa: E402
+from gispulse.persistence.postgis import PostGISConnection  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +259,7 @@ class TestDSNNormalization:
             captured.append(dsn)
             return _orig_create_engine(dsn, **kwargs)
 
-        monkeypatch.setattr("persistence.postgis.create_engine", fake_create_engine)
+        monkeypatch.setattr("gispulse.persistence.postgis.create_engine", fake_create_engine)
 
         try:
             PostGISConnection(dsn="postgresql://u:p@localhost:5432/db")

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-from core.models import (
+from gispulse.core.models import (
     AttrPredicate,
     CompoundPredicate,
     ExecutionMode,

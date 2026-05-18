@@ -275,7 +275,7 @@ def test_build_runtime_wraps_engine_execute_by_default(
     path with guardrails). When no ``sql_executor=`` is injected,
     ``build_runtime`` picks up ``engine.execute`` and wraps it in
     :class:`RetryingSqlExecutor`."""
-    from persistence.gpkg_engine import GeoPackageEngine
+    from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
     from gispulse.runtime import build_runtime
 
@@ -313,7 +313,7 @@ def test_build_runtime_also_wraps_user_supplied_executor(
     """When the caller injects a stub, we still wrap it — so a user's
     integration test that simulates SQLITE_BUSY benefits from the same
     retry policy as production."""
-    from persistence.gpkg_engine import GeoPackageEngine
+    from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
     from gispulse.runtime import build_runtime
 
@@ -360,7 +360,7 @@ def test_security_error_is_not_retried() -> None:
     matches ``database is locked`` / ``database is busy``); a
     :class:`SecurityError` bypasses the catch entirely.
     """
-    from persistence.sql_guardrails import SecurityError
+    from gispulse.persistence.sql_guardrails import SecurityError
 
     inner = _ProgrammableInner([SecurityError("forbidden table")])
     sleeps: list[float] = []
@@ -377,8 +377,8 @@ def test_security_error_is_not_retried() -> None:
 def test_security_error_through_engine_via_wrapper(tmp_path: Any) -> None:
     """End-to-end on the real engine: the wrapper surfaces
     SecurityError without retrying."""
-    from persistence.gpkg_engine import GeoPackageEngine
-    from persistence.sql_guardrails import SecurityError
+    from gispulse.persistence.gpkg_engine import GeoPackageEngine
+    from gispulse.persistence.sql_guardrails import SecurityError
 
     gpkg = tmp_path / "secfast.gpkg"
     eng = GeoPackageEngine(path=gpkg)

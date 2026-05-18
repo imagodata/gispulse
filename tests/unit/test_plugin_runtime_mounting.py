@@ -1,4 +1,4 @@
-"""Runtime tests for PluginHub surfaces consumed by the HTTP app."""
+"""Runtime tests for ExtensionHub surfaces consumed by the HTTP app."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
 
-from core import plugin_hub
+from gispulse.core import plugin_hub
 from gispulse.adapters.http.app import create_app
 
 
@@ -29,16 +29,16 @@ def _patch_eps(monkeypatch: pytest.MonkeyPatch, mapping: dict[str, list[_FakeEnt
         return mapping.get(group, [])
 
     monkeypatch.setattr(plugin_hub, "entry_points", fake)
-    plugin_hub.PluginHub.reset()
+    plugin_hub.ExtensionHub.reset()
 
 
 @pytest.fixture(autouse=True)
 def _memory_storage(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("GISPULSE_STORAGE", "memory")
     monkeypatch.delenv("GISPULSE_API_KEYS", raising=False)
-    plugin_hub.PluginHub.reset()
+    plugin_hub.ExtensionHub.reset()
     yield
-    plugin_hub.PluginHub.reset()
+    plugin_hub.ExtensionHub.reset()
 
 
 def test_create_app_mounts_plugin_router(monkeypatch: pytest.MonkeyPatch) -> None:

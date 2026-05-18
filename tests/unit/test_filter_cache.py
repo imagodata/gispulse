@@ -12,8 +12,8 @@ import time
 import geopandas as gpd
 from shapely.geometry import Point
 
-from core.filter.cache import CacheStats, FilterCache, NullCache
-from core.filter.result import FilterResult
+from gispulse.core.filter.cache import CacheStats, FilterCache, NullCache
+from gispulse.core.filter.result import FilterResult
 
 
 def _make_result(layer_key: str = "l", expr: str = "x = 1") -> FilterResult:

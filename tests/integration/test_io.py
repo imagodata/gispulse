@@ -10,7 +10,7 @@ from shapely.geometry import Point, Polygon, LineString
 
 pytest.importorskip("fiona", reason="fiona not installed")
 
-from persistence.io import (  # noqa: E402
+from gispulse.persistence.io import (  # noqa: E402
     dataset_from_file,
     detect_format,
     list_layers,

@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import sys
 
-from core.plugin_hub import PluginHub
-from core.plugin_model import PluginKind, PluginState
+from gispulse.core.plugin_hub import PluginHub
+from gispulse.core.plugin_model import PluginKind, PluginState
 
 
 def main() -> int:

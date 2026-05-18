@@ -3,7 +3,7 @@
 The legacy implementation hard-coded ``from gispulse.adapters.http.oidc import …``
 which no longer exists post OSS split, so OIDC session resolution silently
 always returned ``None`` (→ 401 in tests). The refactor delegates to
-``PluginHub.auth_providers``.
+``ExtensionHub.auth_providers``.
 
 This test guards the new contract:
 
@@ -18,16 +18,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core import plugin_hub
+from gispulse.core import plugin_hub
 from gispulse.adapters.http.auth import _resolve_user_from_session
-from persistence.auth_models import User
+from gispulse.persistence.auth_models import User
 
 
 @pytest.fixture(autouse=True)
 def _reset_hub():
-    plugin_hub.PluginHub.reset()
+    plugin_hub.ExtensionHub.reset()
     yield
-    plugin_hub.PluginHub.reset()
+    plugin_hub.ExtensionHub.reset()
 
 
 def _make_request(*, app_state=None, cookie: str | None = None) -> MagicMock:
@@ -39,7 +39,7 @@ def _make_request(*, app_state=None, cookie: str | None = None) -> MagicMock:
 
 
 def _install_providers(monkeypatch: pytest.MonkeyPatch, providers: dict) -> None:
-    hub = plugin_hub.PluginHub.get()
+    hub = plugin_hub.ExtensionHub.get()
     monkeypatch.setattr(hub, "auth_providers", providers)
 
 

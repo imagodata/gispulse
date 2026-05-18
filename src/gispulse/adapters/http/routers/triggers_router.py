@@ -1,0 +1,1056 @@
+"""
+Triggers router for the GISPulse HTTP API.
+
+Endpoints:
+    POST   /triggers                  — create a trigger
+    POST   /triggers/import           — validate (and optionally commit) a triggers.yaml
+    GET    /triggers                  — list all triggers
+    GET    /triggers/eval-stream      — SSE stream of trigger_fired events
+    GET    /triggers/{id}             — detail for a single trigger
+    PUT    /triggers/{id}             — update a trigger
+    DELETE /triggers/{id}             — delete a trigger
+    POST   /triggers/{id}/toggle      — enable/disable a trigger
+    POST   /triggers/{id}/evaluate    — evaluate trigger against ChangeRecords (→ SSE)
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from typing import Any
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+
+from gispulse.adapters.http.dependencies import get_trigger_repo
+from gispulse.adapters.http.event_hub import get_event_hub
+from gispulse.adapters.http.rate_limit import limiter
+from gispulse.adapters.http.schemas import (
+    ChangeRecordIn,
+    EvaluateRequest,
+    FiredTriggerOut,
+    TriggerCreate,
+    TriggerResponse,
+)
+from gispulse.core.models import (
+    ChangeOperation,
+    ChangeRecord,
+    Trigger,
+    TriggerEvent,
+    TriggerType,
+)
+from gispulse.persistence.repository import Repository
+from gispulse.persistence.tier import TierError, check_tier, enforce_feature
+from gispulse.rules.trigger_evaluator import TriggerEvaluator
+
+
+# ---------------------------------------------------------------------------
+# Tier gating
+# ---------------------------------------------------------------------------
+#
+# Triggers come in two flavours, gated independently:
+#
+#   * ``local_triggers``  — Community + Pro. In-process bus + WebSocket
+#     dispatch, single-process, best-effort durability. Capped at 5 active
+#     triggers per process and forbids advanced action types (webhook,
+#     cron, cascade>1, DLQ).
+#   * ``esb_triggers``    — Pro only. Backed by PostgreSQL ``pg_notify``,
+#     DLQ, circuit breakers, cron schedules, outbound webhooks. The
+#     enforcement of this gate lives in :mod:`gispulse.adapters.esb`
+#     (workers, ``TriggerManager.install``, ``esb_router``) — not here.
+#
+# The router only owns CRUD on ``Trigger`` model objects; persisting a
+# Trigger does not by itself install a pg_notify trigger function. So
+# every endpoint here is gated at the ``local_triggers`` level (Community
+# OK), and the per-tier caps for Community accounts are enforced in
+# :func:`_enforce_community_trigger_caps` at create/update time.
+# ---------------------------------------------------------------------------
+
+
+def _require_local_triggers() -> None:
+    """Triggers CRUD requires the ``local_triggers`` feature (Community + Pro)."""
+    try:
+        enforce_feature("local_triggers")
+    except TierError as exc:
+        raise HTTPException(status_code=402, detail=str(exc))
+
+
+# Cap rules for Community-tier ``local_triggers``. Pro has no caps
+# (esb_triggers feature, full pg_notify pipeline).
+_LOCAL_TRIGGER_MAX_ACTIVE = 5
+_LOCAL_TRIGGER_MAX_CASCADE_DEPTH = 1
+# Forbidden top-level keys / action shapes in trigger.conditions for Community.
+# Anything that requires the ESB pipeline (DLQ, cron, outbound HTTP) lives
+# behind the esb_triggers feature.
+_LOCAL_TRIGGER_FORBIDDEN_KEYS = frozenset(
+    {
+        "webhook",
+        "outbound_action",
+        "outbound_webhook",
+        "cron_schedule",
+        "cron",
+        "schedule",
+        "dlq_enabled",
+        "dlq",
+    }
+)
+
+
+def _is_pro_or_above() -> bool:
+    """Return True if the current tier has the ``esb_triggers`` feature."""
+    try:
+        check_tier("pro")
+    except TierError:
+        return False
+    return True
+
+
+# Forbidden ``action_type`` values for inline actions / operation extras
+# in Community. Any attempt to use one of these — including in operation
+# ``extra`` payloads — is a privilege escalation toward the ESB pipeline.
+_LOCAL_TRIGGER_FORBIDDEN_ACTION_TYPES = frozenset(
+    {"webhook", "http", "outbound_webhook"}
+)
+
+# Forbidden keys at the *operation extra* level (Bug #2). Superset of
+# _LOCAL_TRIGGER_FORBIDDEN_KEYS — operations are merged into
+# ``trigger.conditions.operations[N]`` and later consumed by the ESB
+# worker, so any URL / cron / DLQ / cascade hook there is the same
+# privilege escalation as a top-level conditions key.
+_LOCAL_TRIGGER_FORBIDDEN_OP_KEYS = frozenset(
+    {
+        "webhook",
+        "webhook_url",
+        "outbound_action",
+        "outbound_webhook",
+        "outbound_url",
+        "cron",
+        "cron_schedule",
+        "schedule",
+        "dlq",
+        "dlq_enabled",
+        "cascade",
+        "cascade_depth",
+        "http",
+        "http_url",
+    }
+)
+
+
+def _normalize_action_type(value: object) -> str:
+    """Canonicalize ``action_type`` for comparison: trim + lowercase.
+
+    Defends against bypasses like ``"webhook "`` (trailing space) or
+    ``"WEBHOOK"`` (case). Always returns a string (empty if value is None).
+    """
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
+def _normalize_key(value: object) -> str:
+    """Canonicalize a config-key for forbidden-key comparison."""
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
+def _check_active_count(
+    repo: "Repository",
+    *,
+    exclude_id: UUID | None = None,
+    will_be_enabled: bool = True,
+) -> None:
+    """Raise 402 if enabling one more trigger would exceed Community cap.
+
+    Counts enabled triggers, optionally excluding ``exclude_id`` (the
+    trigger being updated/toggled). When ``will_be_enabled`` is True we
+    require strictly fewer than ``_LOCAL_TRIGGER_MAX_ACTIVE`` *other*
+    active triggers — i.e. the new one would land at index ``cap-1``.
+    """
+    if not will_be_enabled:
+        return
+    try:
+        current_triggers = repo.list_all()
+    except Exception:
+        current_triggers = []
+    active = sum(
+        1
+        for t in current_triggers
+        if getattr(t, "enabled", False)
+        and (exclude_id is None or getattr(t, "id", None) != exclude_id)
+    )
+    if active >= _LOCAL_TRIGGER_MAX_ACTIVE:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"Community tier is capped at {_LOCAL_TRIGGER_MAX_ACTIVE} "
+                "active local triggers. Upgrade to Pro for unlimited "
+                "triggers (esb_triggers feature)."
+            ),
+        )
+
+
+def _check_forbidden_extra_keys(extra: object) -> None:
+    """Raise 402 if a free-form payload contains an ESB-only key.
+
+    Used by operation create/update endpoints where Pydantic accepts an
+    arbitrary ``extra: dict[str, Any]`` that is later merged into
+    ``trigger.conditions.operations[N]``. Without this check, an
+    attacker can attach a ``webhook`` URL Community-side.
+
+    Bypassed for Pro+.
+    """
+    if _is_pro_or_above():
+        return
+    if not isinstance(extra, dict):
+        return
+    bad: list[str] = []
+    for k, v in extra.items():
+        norm = _normalize_key(k)
+        if norm in _LOCAL_TRIGGER_FORBIDDEN_OP_KEYS:
+            bad.append(str(k))
+            continue
+        # Defense in depth: a key like ``action_type`` whose *value*
+        # is "webhook" / "http" / "outbound_webhook" is also a vector.
+        if norm == "action_type" and _normalize_action_type(v) in _LOCAL_TRIGGER_FORBIDDEN_ACTION_TYPES:
+            bad.append(str(k))
+    if bad:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"Operation extra keys {sorted(set(bad))} require the "
+                "esb_triggers feature (Pro). "
+                "Community local_triggers do not support webhooks, "
+                "cron, DLQ, or cascade>1."
+            ),
+        )
+
+
+def _enforce_community_trigger_caps(
+    payload: "TriggerCreate",
+    repo: "Repository",
+    *,
+    exclude_id: UUID | None = None,
+) -> None:
+    """Enforce the Community caps for ``local_triggers`` at create/update time.
+
+    Pro+ skips all caps (it has the richer ``esb_triggers`` feature).
+
+    ``exclude_id`` excludes one trigger from the active-count (used on
+    PUT/toggle so the trigger being mutated is not double-counted —
+    the count already reflects whether that trigger was active before
+    the call, which is irrelevant since we only care about the *other*
+    triggers vs the cap-1 budget).
+
+    The structural cap ``single_process_only`` is **not** enforced here:
+    Community has no PostGIS engine and therefore no ``pg_notify`` —
+    durability is single-process by construction. See pricing_catalog.yml
+    `features.local_triggers.caps.single_process_only`.
+
+    Raises:
+        HTTPException(402): On any Community cap violation.
+    """
+    if _is_pro_or_above():
+        return
+
+    # 1. max_active_triggers cap (only counts enabled triggers, excluding
+    #    the trigger being mutated so e.g. a same-state PUT does not 402).
+    if payload.enabled:
+        _check_active_count(
+            repo,
+            exclude_id=exclude_id,
+            will_be_enabled=True,
+        )
+
+    # 2. Forbidden config shapes (webhook / cron / DLQ / cascade > 1).
+    conditions = payload.conditions or {}
+    if isinstance(conditions, dict):
+        normalized_keys = {_normalize_key(k) for k in conditions.keys()}
+        bad = _LOCAL_TRIGGER_FORBIDDEN_KEYS.intersection(normalized_keys)
+        if bad:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"Trigger config keys {sorted(bad)} require the "
+                    "esb_triggers feature (Pro). "
+                    "Community local_triggers do not support webhooks, "
+                    "cron, DLQ, or cascade>1."
+                ),
+            )
+        cascade = conditions.get("cascade_depth") or conditions.get("cascade")
+        if isinstance(cascade, int) and cascade > _LOCAL_TRIGGER_MAX_CASCADE_DEPTH:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"cascade_depth={cascade} exceeds the Community cap of "
+                    f"{_LOCAL_TRIGGER_MAX_CASCADE_DEPTH}. Upgrade to Pro."
+                ),
+            )
+
+        # Inline action defs may also carry a forbidden shape.
+        actions = conditions.get("actions") or []
+        if isinstance(actions, list):
+            for action in actions:
+                if not isinstance(action, dict):
+                    continue
+                action_type = _normalize_action_type(action.get("action_type"))
+                if action_type in _LOCAL_TRIGGER_FORBIDDEN_ACTION_TYPES:
+                    raise HTTPException(
+                        status_code=402,
+                        detail=(
+                            "Outbound webhook actions require the "
+                            "esb_triggers feature (Pro)."
+                        ),
+                    )
+
+
+router = APIRouter(
+    prefix="/triggers",
+    tags=["triggers"],
+    dependencies=[Depends(_require_local_triggers)],
+)
+
+
+def _trigger_to_response(trigger: Trigger) -> TriggerResponse:
+    return TriggerResponse(
+        id=trigger.id,
+        name=trigger.name,
+        description=getattr(trigger, "description", ""),
+        event=trigger.event.value if isinstance(trigger.event, TriggerEvent) else trigger.event,
+        trigger_type=trigger.trigger_type.value if isinstance(trigger.trigger_type, TriggerType) else trigger.trigger_type,
+        category=getattr(trigger, "category", "data") if not hasattr(trigger.category, "value") else trigger.category.value,
+        severity=getattr(trigger, "severity", "info"),
+        rule_id=trigger.rule_id,
+        conditions=trigger.conditions,
+        predicates=[_predicate_to_dict(p) for p in trigger.predicates] if trigger.predicates else [],
+        predicate_logic=trigger.predicate_logic,
+        actions=[{"action_type": a.action_type.value if hasattr(a.action_type, "value") else a.action_type, "config": a.config} for a in trigger.actions] if trigger.actions else [],
+        enabled=trigger.enabled,
+        auto_eval=trigger.auto_eval,
+    )
+
+
+def _predicate_to_dict(pred) -> dict:
+    """Serialize a predicate (Attr/Geom/Compound) to a dict."""
+    from dataclasses import asdict
+    try:
+        return asdict(pred)
+    except Exception:
+        return {"type": str(type(pred).__name__), "raw": str(pred)}
+
+
+def _change_record_in_to_model(r: ChangeRecordIn) -> ChangeRecord:
+    op_map = {
+        "INSERT": ChangeOperation.INSERT,
+        "UPDATE": ChangeOperation.UPDATE,
+        "DELETE": ChangeOperation.DELETE,
+    }
+    return ChangeRecord(
+        session_id=r.session_id,
+        table_name=r.table_name,
+        feature_id=r.feature_id,
+        operation=op_map.get(r.operation.upper(), ChangeOperation.INSERT),
+        old_values=r.old_values,
+        new_values=r.new_values,
+    )
+
+
+@router.post("", response_model=TriggerResponse, status_code=201)
+@limiter.limit("30/minute")
+def create_trigger(
+    request: Request,
+    payload: TriggerCreate,
+    repo: Repository = Depends(get_trigger_repo),
+) -> TriggerResponse:
+    """Create a new Trigger and persist it."""
+    _enforce_community_trigger_caps(payload, repo)
+
+    from gispulse.core.models import TriggerCategory
+    trigger = Trigger(
+        name=payload.name,
+        description=payload.description,
+        event=TriggerEvent(payload.event) if payload.event in TriggerEvent._value2member_map_ else TriggerEvent.MANUAL,
+        trigger_type=TriggerType(payload.trigger_type) if payload.trigger_type in TriggerType._value2member_map_ else TriggerType.API,
+        category=TriggerCategory(payload.category) if payload.category in TriggerCategory._value2member_map_ else TriggerCategory.DATA,
+        severity=payload.severity,
+        rule_id=payload.rule_id,
+        conditions=payload.conditions,
+        enabled=payload.enabled,
+        auto_eval=payload.auto_eval,
+    )
+    repo.save(trigger)
+    return _trigger_to_response(trigger)
+
+
+# ---------------------------------------------------------------------------
+# Issue #94 — POST /triggers/import (CLI ↔ Portal parity P0-5)
+# ---------------------------------------------------------------------------
+
+
+_YAML_MIME_PREFIXES = ("application/x-yaml", "application/yaml", "text/yaml")
+_IMPORT_MAX_BYTES = 1 * 1024 * 1024  # 1 MiB — far above realistic triggers.yaml
+
+
+async def _read_yaml_payload(request: Request) -> str:
+    """Extract the YAML text from either a multipart upload or a raw body.
+
+    Issue #94: the CLI lets ``gispulse triggers validate --config`` point
+    at a path on disk; the portal needs the same validator over the
+    network. We accept *both* a ``multipart/form-data`` upload (one part
+    named ``file``) and a raw body with a YAML / plain-text content
+    type — same endpoint, no client-side guessing required.
+
+    Returns the YAML payload as a UTF-8 string.
+
+    Raises:
+        HTTPException 400 — body is missing, larger than
+            :data:`_IMPORT_MAX_BYTES`, or in an unrecognised content
+            type.
+    """
+    content_type = (request.headers.get("content-type") or "").lower()
+    if content_type.startswith("multipart/form-data"):
+        try:
+            form = await request.form()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400, detail=f"invalid multipart body: {exc}"
+            )
+        upload = form.get("file")
+        if upload is None:
+            raise HTTPException(
+                status_code=400,
+                detail="multipart upload must include a 'file' part",
+            )
+        # Starlette's UploadFile vs plain str (large/small fields).
+        read = getattr(upload, "read", None)
+        if read is None:
+            raise HTTPException(
+                status_code=400, detail="'file' part must be a file upload"
+            )
+        raw = await read()
+    else:
+        raw = await request.body()
+    if not raw:
+        raise HTTPException(status_code=400, detail="empty request body")
+    if len(raw) > _IMPORT_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"YAML payload too large "
+                f"({len(raw)} bytes > {_IMPORT_MAX_BYTES} max)"
+            ),
+        )
+    if isinstance(raw, bytes):
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"YAML body must be UTF-8: {exc}",
+            )
+    else:
+        text = str(raw)
+    return text
+
+
+def _summarise_imported_config(config: Any) -> dict[str, Any]:
+    """Build the dry-run preview block for ``POST /triggers/import``.
+
+    Returns the schema documented in the issue:
+    ``{ valid, summary: {triggers, actions}, preview: [...], warnings }``.
+    """
+    triggers = list(getattr(config, "triggers", []) or [])
+    actions_total = 0
+    preview: list[dict[str, Any]] = []
+    for entry in triggers:
+        actions = list(getattr(entry, "actions", []) or [])
+        actions_total += len(actions)
+        action_types = [getattr(a, "type", None) for a in actions]
+        when = list(getattr(entry, "when", []) or [])
+        preview.append(
+            {
+                "name": getattr(entry, "name", None),
+                "table": getattr(entry, "table", None),
+                "when": when,
+                # Backwards-compat alias for the body shape documented
+                # in the issue (``operation``). When several values are
+                # listed we surface the first; the canonical list is
+                # also exposed under ``when``.
+                "operation": when[0] if when else None,
+                "predicate": getattr(entry, "predicate", None),
+                "actions": [str(t) for t in action_types if t is not None],
+                "enabled": getattr(entry, "enabled", True),
+            }
+        )
+    return {
+        "valid": True,
+        "summary": {
+            "triggers": len(triggers),
+            "actions": actions_total,
+        },
+        "preview": preview,
+        "warnings": [],
+    }
+
+
+@router.post("/import")
+@limiter.limit("10/minute")
+async def import_triggers(
+    request: Request,
+    commit: bool = Query(
+        False,
+        description=(
+            "When true, persist the parsed triggers via the trigger "
+            "repository (idempotent on duplicate names). Default is "
+            "dry-run: validate only, return the preview block."
+        ),
+    ),
+    repo: Repository = Depends(get_trigger_repo),
+) -> dict[str, Any]:
+    """Validate (and optionally commit) a ``triggers.yaml`` config.
+
+    Closes #94 — CLI ↔ Portal parity P0-5. The portal's "Import YAML"
+    button hits this endpoint. Replaces ``gispulse triggers validate
+    --config <path>`` from the CLI: same validator (``parse_config_text``
+    in :mod:`gispulse.runtime.config_loader`), zero divergence between
+    the two surfaces.
+
+    Body: either a ``multipart/form-data`` upload with a ``file`` part
+    or a raw body with ``application/x-yaml`` / ``application/yaml`` /
+    ``text/yaml`` / ``text/plain`` content type.
+
+    Query params:
+        commit: When ``True``, persist the parsed triggers. Default
+                ``False`` runs a dry-run preview only. Note: the
+                ``gpkg:`` key in the YAML is **not** used for path
+                resolution in the importer — the caller's tenant
+                binding is implicit through the repository. This is a
+                deliberate hardening over the CLI which trusts the
+                ``gpkg:`` path because it always runs as the user.
+
+    Returns:
+        - dry-run: ``{valid, summary, preview, warnings}``.
+        - commit:  ``{valid, summary, preview, warnings, committed: [<trigger_id>...]}``.
+
+    Raises:
+        HTTPException 400/413 — bad request body / payload too large.
+        HTTPException 422 — YAML parses but fails validation. Body
+            includes a ``valid: false`` envelope with a list of
+            ``{path, message}`` errors.
+    """
+    _require_local_triggers()
+
+    text = await _read_yaml_payload(request)
+
+    # Local imports keep the router free of a hard runtime dependency
+    # at module-load time — matches the lazy-import style used elsewhere
+    # in this file.
+    from gispulse.runtime.config_loader import (
+        ConfigError,
+        parse_config_text,
+        to_triggers,
+    )
+
+    try:
+        config = parse_config_text(
+            text,
+            source="<upload>",
+            resolve_gpkg=False,
+        )
+    except ConfigError as exc:
+        # Skip the global error envelope so the portal can render the
+        # structured ``{path, message}`` list directly. ConfigError
+        # already wraps both yaml.YAMLError and pydantic.ValidationError.
+        return JSONResponse(
+            status_code=422,
+            content={
+                "valid": False,
+                "errors": [{"path": "$", "message": str(exc)}],
+            },
+        )
+
+    response = _summarise_imported_config(config)
+
+    if not commit:
+        return response
+
+    # Commit path — convert YAML to domain Triggers and persist via the
+    # repository. Idempotent: ignore triggers whose ``name`` already
+    # exists for the tenant (matches the issue spec "skip ceux qui
+    # existent déjà avec même hash" — name is the canonical key in v1.5.x).
+    try:
+        domain_triggers = to_triggers(config)
+    except Exception as exc:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "valid": False,
+                "errors": [
+                    {
+                        "path": "$",
+                        "message": f"unable to convert to domain triggers: {exc}",
+                    }
+                ],
+            },
+        )
+
+    # Tier cap for Community: max 5 active triggers per repo. Reject up
+    # front if the import would push us over.
+    existing = repo.list_all() if hasattr(repo, "list_all") else []
+    existing_names = {getattr(t, "name", None) for t in existing}
+    new_to_create = [
+        t for t in domain_triggers if getattr(t, "name", None) not in existing_names
+    ]
+
+    # Tier check — uses the same machinery as the per-trigger create path
+    # so a Community user gets a 402 with the upgrade hint instead of a
+    # silent partial commit.
+    if hasattr(repo, "list_all"):
+        active_after = sum(
+            1 for t in existing if getattr(t, "enabled", True)
+        ) + sum(1 for t in new_to_create if getattr(t, "enabled", True))
+        if not _is_pro_or_above() and active_after > _LOCAL_TRIGGER_MAX_ACTIVE:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"Community tier is capped at "
+                    f"{_LOCAL_TRIGGER_MAX_ACTIVE} active triggers; "
+                    f"importing this YAML would push you to "
+                    f"{active_after}. Upgrade to Pro or disable some."
+                ),
+            )
+
+    committed: list[str] = []
+    skipped: list[str] = []
+    for trigger in new_to_create:
+        try:
+            repo.save(trigger)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "valid": True,
+                    "summary": response["summary"],
+                    "preview": response["preview"],
+                    "committed": committed,
+                    "error": f"failed to persist '{getattr(trigger, 'name', '?')}': {exc}",
+                },
+            )
+        committed.append(str(getattr(trigger, "id", "")))
+    for trigger in domain_triggers:
+        if getattr(trigger, "name", None) in existing_names:
+            skipped.append(str(getattr(trigger, "name", "")))
+
+    response["committed"] = committed
+    response["skipped"] = skipped
+    return response
+
+
+@router.get("")
+def list_triggers(
+    limit: int = 50,
+    offset: int = 0,
+    repo: Repository = Depends(get_trigger_repo),
+) -> dict:
+    """Return paginated triggers."""
+    all_items = repo.list_all()
+    total = len(all_items)
+    page = all_items[offset : offset + limit]
+    return {
+        "items": [_trigger_to_response(t) for t in page],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/eval-stream")
+async def eval_stream(
+    request: Request,
+    trigger_id: UUID | None = None,
+) -> StreamingResponse:
+    """SSE stream of ``trigger_fired`` events.
+
+    Clients connect once and receive a real-time stream of FiredTrigger
+    payloads as Server-Sent Events.  Optional ``trigger_id`` query param
+    filters the stream to a single trigger.
+
+    Protocol::
+
+        data: {"type": "trigger_fired", "data": {...}, "timestamp": "..."}\\n\\n
+        : heartbeat\\n\\n   (every 15 s to keep the connection alive)
+    """
+    hub = get_event_hub()
+    queue = hub.subscribe()
+    filter_id = str(trigger_id) if trigger_id else None
+
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    raw = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    event = json.loads(raw)
+                    # Filter by trigger_id if requested
+                    if filter_id and event.get("data", {}).get("trigger_id") != filter_id:
+                        continue
+                    if event.get("type") == "trigger_fired":
+                        yield f"data: {raw}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
+        finally:
+            hub.unsubscribe(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/{trigger_id}", response_model=TriggerResponse)
+def get_trigger(
+    trigger_id: UUID,
+    repo: Repository = Depends(get_trigger_repo),
+) -> TriggerResponse:
+    """Return a single trigger by UUID."""
+    trigger = repo.get(trigger_id)
+    if trigger is None:
+        raise HTTPException(status_code=404, detail=f"Trigger '{trigger_id}' not found.")
+    return _trigger_to_response(trigger)
+
+
+@router.put("/{trigger_id}", response_model=TriggerResponse)
+def update_trigger(
+    trigger_id: UUID,
+    payload: TriggerCreate,
+    repo: Repository = Depends(get_trigger_repo),
+) -> TriggerResponse:
+    """Update an existing trigger."""
+    trigger = repo.get(trigger_id)
+    if trigger is None:
+        raise HTTPException(status_code=404, detail=f"Trigger '{trigger_id}' not found.")
+
+    _enforce_community_trigger_caps(payload, repo, exclude_id=trigger_id)
+
+    from gispulse.core.models import TriggerCategory
+    trigger.name = payload.name
+    trigger.description = payload.description
+    trigger.event = TriggerEvent(payload.event) if payload.event in TriggerEvent._value2member_map_ else TriggerEvent.MANUAL
+    trigger.trigger_type = TriggerType(payload.trigger_type) if payload.trigger_type in TriggerType._value2member_map_ else TriggerType.API
+    trigger.category = TriggerCategory(payload.category) if payload.category in TriggerCategory._value2member_map_ else TriggerCategory.DATA
+    trigger.severity = payload.severity
+    trigger.rule_id = payload.rule_id
+    trigger.conditions = payload.conditions
+    trigger.enabled = payload.enabled
+    trigger.auto_eval = payload.auto_eval
+    repo.save(trigger)
+    return _trigger_to_response(trigger)
+
+
+@router.delete("/{trigger_id}", status_code=204)
+def delete_trigger(
+    trigger_id: UUID,
+    repo: Repository = Depends(get_trigger_repo),
+) -> None:
+    """Delete a trigger by UUID."""
+    deleted = repo.delete(trigger_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Trigger '{trigger_id}' not found.")
+
+
+@router.post("/{trigger_id}/toggle", response_model=TriggerResponse)
+def toggle_trigger(
+    trigger_id: UUID,
+    repo: Repository = Depends(get_trigger_repo),
+) -> TriggerResponse:
+    """Toggle the enabled state of a trigger.
+
+    Community: a transition ``False -> True`` is gated by the
+    ``max_active_triggers`` cap. Disabling (``True -> False``) is always
+    allowed.
+    """
+    trigger = repo.get(trigger_id)
+    if trigger is None:
+        raise HTTPException(status_code=404, detail=f"Trigger '{trigger_id}' not found.")
+
+    # Re-enable transition needs cap enforcement (Bug #1: toggle was a
+    # bypass for the create-time cap). Exclude the trigger from the count
+    # because it is currently disabled — only the *other* active triggers
+    # consume the cap budget.
+    if not trigger.enabled:
+        _check_active_count(
+            repo,
+            exclude_id=trigger_id,
+            will_be_enabled=True,
+        )
+
+    trigger.enabled = not trigger.enabled
+    repo.save(trigger)
+    return _trigger_to_response(trigger)
+
+
+# ---------------------------------------------------------------------------
+# P-8 #85 — auto_eval + SSE feedback
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{trigger_id}/evaluate", response_model=list[FiredTriggerOut])
+@limiter.limit("60/minute")
+def evaluate_trigger(
+    request: Request,
+    trigger_id: UUID,
+    payload: EvaluateRequest,
+    repo: Repository = Depends(get_trigger_repo),
+) -> list[FiredTriggerOut]:
+    """Evaluate a trigger against a list of ChangeRecords.
+
+    Runs TriggerEvaluator synchronously and broadcasts each FiredTrigger
+    to the EventHub (type ``trigger_fired``) so SSE clients receive
+    real-time feedback. Returns the full list of FiredTrigger objects.
+    """
+    trigger = repo.get(trigger_id)
+    if trigger is None:
+        raise HTTPException(status_code=404, detail=f"Trigger '{trigger_id}' not found.")
+
+    records = [_change_record_in_to_model(r) for r in payload.records]
+    evaluator = TriggerEvaluator()
+    fired = evaluator.evaluate_changeset_records(records, [trigger])
+
+    hub = get_event_hub()
+    for ft in fired:
+        hub.broadcast(
+            "trigger_fired",
+            {
+                "trigger_id": str(ft.trigger_id),
+                "change_record_id": str(ft.change_record_id) if ft.change_record_id else None,
+                "matched": ft.matched,
+                "actions_dispatched": ft.actions_dispatched,
+                "eval_time_ms": ft.eval_time_ms,
+                "result_summary": ft.result_summary,
+                "cascade_depth": ft.cascade_depth,
+            },
+        )
+
+    return [
+        FiredTriggerOut(
+            id=ft.id,
+            trigger_id=ft.trigger_id,
+            change_record_id=ft.change_record_id,
+            matched=ft.matched,
+            actions_dispatched=ft.actions_dispatched,
+            eval_time_ms=ft.eval_time_ms,
+            result_summary=ft.result_summary,
+            cascade_depth=ft.cascade_depth,
+            fired_at=ft.fired_at,
+        )
+        for ft in fired
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Trigger Operations CRUD (#404)
+# ---------------------------------------------------------------------------
+
+from pydantic import BaseModel, Field
+
+# ``Any`` is already imported at module top — local re-import would
+# be dead code (ruff F811).
+
+
+class TriggerOperationIn(BaseModel):
+    """Payload to create/update a trigger operation (Forge spatial ops)."""
+
+    phase: str = Field(..., description="'before' or 'after'.")
+    operation: str = Field(..., description="Operation type (st_within, st_intersects, count_st_contains, etc.).")
+    field: str = Field("", description="Target field to populate (BEFORE) or aggregate field (AFTER).")
+    distant_table: str = Field("", description="Reference table for spatial lookup.")
+    distant_field: str = Field("", description="Field in distant table to retrieve.")
+    distant_filter: str | None = Field(None, description="Optional SQL filter on distant table.")
+    order: int = Field(0, description="Execution order within phase.")
+    enabled: bool = Field(True, description="Whether this operation is active.")
+    coalesce: bool = Field(False, description="Skip if target field already has a value.")
+    extra: dict[str, Any] = Field(default_factory=dict, description="Additional operation-specific params.")
+
+
+class TriggerOperationOut(BaseModel):
+    """A single trigger operation with its index (acts as op_id)."""
+
+    op_id: int = Field(..., description="Index in the operations list (0-based).")
+    phase: str
+    operation: str
+    field: str = ""
+    distant_table: str = ""
+    distant_field: str = ""
+    distant_filter: str | None = None
+    order: int = 0
+    enabled: bool = True
+    coalesce: bool = False
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+
+def _get_operations(trigger: Trigger) -> list[dict[str, Any]]:
+    """Extract the operations list from trigger.conditions."""
+    conditions = trigger.conditions
+    if isinstance(conditions, dict):
+        return conditions.get("operations", [])
+    # Typed conditions (DMLConditions etc.)
+    return getattr(conditions, "operations", [])
+
+
+def _set_operations(trigger: Trigger, operations: list[dict[str, Any]]) -> None:
+    """Set the operations list in trigger.conditions."""
+    if isinstance(trigger.conditions, dict):
+        trigger.conditions["operations"] = operations
+    elif hasattr(trigger.conditions, "operations"):
+        trigger.conditions.operations = operations
+    else:
+        trigger.conditions = {"operations": operations}
+
+
+def _op_to_response(index: int, op: dict[str, Any]) -> TriggerOperationOut:
+    """Convert a raw operation dict to response model."""
+    known_keys = {"phase", "operation", "field", "distant_table", "distant_field",
+                  "distant_filter", "order", "enabled", "coalesce"}
+    extra = {k: v for k, v in op.items() if k not in known_keys}
+    return TriggerOperationOut(
+        op_id=index,
+        phase=op.get("phase", "before"),
+        operation=op.get("operation", ""),
+        field=op.get("field", ""),
+        distant_table=op.get("distant_table", ""),
+        distant_field=op.get("distant_field", ""),
+        distant_filter=op.get("distant_filter"),
+        order=op.get("order", 0),
+        enabled=op.get("enabled", True),
+        coalesce=op.get("coalesce", False),
+        extra=extra,
+    )
+
+
+@router.get("/{trigger_id}/operations", response_model=list[TriggerOperationOut])
+def list_operations(
+    trigger_id: UUID,
+    repo: Repository = Depends(get_trigger_repo),
+) -> list[TriggerOperationOut]:
+    """List all operations for a trigger."""
+    trigger = repo.get(trigger_id)
+    if trigger is None:
+        raise HTTPException(status_code=404, detail=f"Trigger '{trigger_id}' not found.")
+
+    operations = _get_operations(trigger)
+    return [_op_to_response(i, op) for i, op in enumerate(operations)]
+
+
+@router.post("/{trigger_id}/operations", response_model=TriggerOperationOut, status_code=201)
+def add_operation(
+    trigger_id: UUID,
+    payload: TriggerOperationIn,
+    repo: Repository = Depends(get_trigger_repo),
+) -> TriggerOperationOut:
+    """Add an operation to a trigger's conditions.operations list.
+
+    Community: ``payload.extra`` is gated against ESB-only keys
+    (webhook, cron, DLQ, cascade, http) — see Bug #2: operation extras
+    were merged unchecked into ``trigger.conditions.operations[N]`` and
+    later consumed by the ESB worker, allowing exfiltration.
+    """
+    trigger = repo.get(trigger_id)
+    if trigger is None:
+        raise HTTPException(status_code=404, detail=f"Trigger '{trigger_id}' not found.")
+
+    _check_forbidden_extra_keys(payload.extra)
+
+    operations = _get_operations(trigger)
+
+    # Build operation dict
+    op_dict: dict[str, Any] = {
+        "phase": payload.phase,
+        "operation": payload.operation,
+        "field": payload.field,
+        "distant_table": payload.distant_table,
+        "distant_field": payload.distant_field,
+        "order": payload.order,
+        "enabled": payload.enabled,
+        "coalesce": payload.coalesce,
+    }
+    if payload.distant_filter:
+        op_dict["distant_filter"] = payload.distant_filter
+    if payload.extra:
+        op_dict.update(payload.extra)
+
+    operations.append(op_dict)
+    _set_operations(trigger, operations)
+    repo.save(trigger)
+
+    return _op_to_response(len(operations) - 1, op_dict)
+
+
+@router.put("/{trigger_id}/operations/{op_id}", response_model=TriggerOperationOut)
+def update_operation(
+    trigger_id: UUID,
+    op_id: int,
+    payload: TriggerOperationIn,
+    repo: Repository = Depends(get_trigger_repo),
+) -> TriggerOperationOut:
+    """Update a specific operation by index.
+
+    Community: ``payload.extra`` is gated against ESB-only keys (same
+    vector as :func:`add_operation`, Bug #2).
+    """
+    trigger = repo.get(trigger_id)
+    if trigger is None:
+        raise HTTPException(status_code=404, detail=f"Trigger '{trigger_id}' not found.")
+
+    _check_forbidden_extra_keys(payload.extra)
+
+    operations = _get_operations(trigger)
+    if op_id < 0 or op_id >= len(operations):
+        raise HTTPException(status_code=404, detail=f"Operation {op_id} not found (trigger has {len(operations)} operations).")
+
+    op_dict: dict[str, Any] = {
+        "phase": payload.phase,
+        "operation": payload.operation,
+        "field": payload.field,
+        "distant_table": payload.distant_table,
+        "distant_field": payload.distant_field,
+        "order": payload.order,
+        "enabled": payload.enabled,
+        "coalesce": payload.coalesce,
+    }
+    if payload.distant_filter:
+        op_dict["distant_filter"] = payload.distant_filter
+    if payload.extra:
+        op_dict.update(payload.extra)
+
+    operations[op_id] = op_dict
+    _set_operations(trigger, operations)
+    repo.save(trigger)
+
+    return _op_to_response(op_id, op_dict)
+
+
+@router.delete("/{trigger_id}/operations/{op_id}", status_code=204)
+def delete_operation(
+    trigger_id: UUID,
+    op_id: int,
+    repo: Repository = Depends(get_trigger_repo),
+) -> None:
+    """Delete an operation by index."""
+    trigger = repo.get(trigger_id)
+    if trigger is None:
+        raise HTTPException(status_code=404, detail=f"Trigger '{trigger_id}' not found.")
+
+    operations = _get_operations(trigger)
+    if op_id < 0 or op_id >= len(operations):
+        raise HTTPException(status_code=404, detail=f"Operation {op_id} not found (trigger has {len(operations)} operations).")
+
+    operations.pop(op_id)
+    _set_operations(trigger, operations)
+    repo.save(trigger)

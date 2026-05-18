@@ -20,7 +20,7 @@ def client(monkeypatch) -> TestClient:
     monkeypatch.setenv("GISPULSE_SQL_ADMIN_KEY", "test_sql_admin_key")
     monkeypatch.setenv("GISPULSE_POSTGIS_DSN", "postgresql://nobody@/nodb")
     # Force config reload — settings is a module-level singleton.
-    from core import config as _cfg_mod
+    from gispulse.core import config as _cfg_mod
     monkeypatch.setattr(_cfg_mod, "settings", _cfg_mod.Settings())
 
     from gispulse.adapters.http.app import create_app

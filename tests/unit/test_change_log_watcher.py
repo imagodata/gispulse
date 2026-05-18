@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from persistence.change_log_watcher import ChangeLogWatcher
+from gispulse.persistence.change_log_watcher import ChangeLogWatcher
 
 
 # ---------------------------------------------------------------------------
@@ -391,14 +391,14 @@ class TestActionDispatchBridge:
     """
 
     def _build_trigger(self, trigger_id, *, actions):
-        from core.models import Trigger
+        from gispulse.core.models import Trigger
 
         return Trigger(id=trigger_id, name=f"t-{trigger_id}", actions=actions)
 
     def test_dispatches_when_action_dispatcher_wired(self) -> None:
         from uuid import uuid4
 
-        from core.graph import ActionDef, ActionType
+        from gispulse.core.graph import ActionDef, ActionType
 
         engine = _FakeEngine()
         hub = _RecordingHub()
@@ -464,7 +464,7 @@ class TestActionDispatchBridge:
         """Backward-compat: omitting action_dispatcher reverts to broadcast-only."""
         from uuid import uuid4
 
-        from core.graph import ActionDef, ActionType
+        from gispulse.core.graph import ActionDef, ActionType
 
         engine = _FakeEngine()
         hub = _RecordingHub()
@@ -509,7 +509,7 @@ class TestActionDispatchBridge:
         """A buggy dispatcher must not pin the change-log backlog."""
         from uuid import uuid4
 
-        from core.graph import ActionDef, ActionType
+        from gispulse.core.graph import ActionDef, ActionType
 
         engine = _FakeEngine()
         hub = _RecordingHub()

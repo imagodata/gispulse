@@ -22,8 +22,8 @@ from uuid import uuid4
 
 import pytest
 
-from core.models import Job, JobStatus
-from orchestration.job_queue import InMemoryJobQueue, _serialize_job, _deserialize_job
+from gispulse.core.models import Job, JobStatus
+from gispulse.orchestration.job_queue import InMemoryJobQueue, _serialize_job, _deserialize_job
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +140,7 @@ class TestEmptyDatabaseAllRepos:
 
     def test_auth_repo_empty_user_count(self):
         """AuthRepository.user_count() returns 0 on empty DB."""
-        from persistence.auth_repository import AuthRepository
+        from gispulse.persistence.auth_repository import AuthRepository
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "empty_auth.db"
@@ -149,7 +149,7 @@ class TestEmptyDatabaseAllRepos:
 
     def test_auth_repo_get_nonexistent_user(self):
         """AuthRepository.get_user() returns None for a non-existent user."""
-        from persistence.auth_repository import AuthRepository
+        from gispulse.persistence.auth_repository import AuthRepository
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "empty_auth.db"
@@ -159,7 +159,7 @@ class TestEmptyDatabaseAllRepos:
 
     def test_auth_repo_get_nonexistent_api_key(self):
         """AuthRepository.get_api_key_by_hash() returns None for unknown hash."""
-        from persistence.auth_repository import AuthRepository
+        from gispulse.persistence.auth_repository import AuthRepository
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "empty_auth.db"
@@ -169,7 +169,7 @@ class TestEmptyDatabaseAllRepos:
 
     def test_audit_logger_query_empty(self):
         """AuditLogger.query() returns empty list on empty DB."""
-        from persistence.audit import AuditLogger, AuditQuery
+        from gispulse.persistence.audit import AuditLogger, AuditQuery
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "empty_audit.db"
@@ -179,7 +179,7 @@ class TestEmptyDatabaseAllRepos:
 
     def test_audit_logger_count_empty(self):
         """AuditLogger.count() returns 0 on empty DB."""
-        from persistence.audit import AuditLogger, AuditQuery
+        from gispulse.persistence.audit import AuditLogger, AuditQuery
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "empty_audit.db"
@@ -188,7 +188,7 @@ class TestEmptyDatabaseAllRepos:
 
     def test_audit_logger_cleanup_empty(self):
         """AuditLogger.cleanup() on empty DB returns 0 without error."""
-        from persistence.audit import AuditLogger
+        from gispulse.persistence.audit import AuditLogger
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "empty_audit.db"
@@ -216,7 +216,7 @@ class TestEmptyDatabaseAllRepos:
 
     def test_storage_list_empty_directory(self):
         """LocalStorage.list_keys() returns empty list for empty storage."""
-        from persistence.storage import LocalStorage
+        from gispulse.persistence.storage import LocalStorage
 
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = LocalStorage(base_path=tmpdir)
@@ -225,7 +225,7 @@ class TestEmptyDatabaseAllRepos:
 
     def test_storage_download_nonexistent(self):
         """LocalStorage.download() raises StorageError for non-existent key."""
-        from persistence.storage import LocalStorage, StorageError
+        from gispulse.persistence.storage import LocalStorage, StorageError
 
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = LocalStorage(base_path=tmpdir)
@@ -311,7 +311,7 @@ class TestExpiredApiKey:
 
     def test_expired_key_detected(self):
         """An API key with expires_at in the past must be detectable."""
-        from persistence.auth_models import ApiKey
+        from gispulse.persistence.auth_models import ApiKey
 
         expired = ApiKey(
             user_id="user1",
@@ -326,7 +326,7 @@ class TestExpiredApiKey:
 
     def test_non_expired_key_passes(self):
         """An API key with expires_at in the future is still valid."""
-        from persistence.auth_models import ApiKey
+        from gispulse.persistence.auth_models import ApiKey
 
         valid = ApiKey(
             user_id="user1",
@@ -340,7 +340,7 @@ class TestExpiredApiKey:
 
     def test_key_without_expiry_is_valid(self):
         """An API key without expires_at (None) never expires."""
-        from persistence.auth_models import ApiKey
+        from gispulse.persistence.auth_models import ApiKey
 
         forever = ApiKey(
             user_id="user1",
@@ -353,8 +353,8 @@ class TestExpiredApiKey:
 
     def test_expired_key_in_auth_repo(self):
         """AuthRepository stores and retrieves expired keys — auth layer must check."""
-        from persistence.auth_models import User
-        from persistence.auth_repository import AuthRepository
+        from gispulse.persistence.auth_models import User
+        from gispulse.persistence.auth_repository import AuthRepository
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "auth.db"
@@ -391,8 +391,8 @@ class TestRevokedApiKeyCached:
 
     def test_deleted_key_not_found(self):
         """After deleting an API key, it must no longer be retrievable."""
-        from persistence.auth_models import User
-        from persistence.auth_repository import AuthRepository
+        from gispulse.persistence.auth_models import User
+        from gispulse.persistence.auth_repository import AuthRepository
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "auth.db"
@@ -418,8 +418,8 @@ class TestRevokedApiKeyCached:
 
     def test_deleted_user_keys_also_gone(self):
         """Deleting a user should also remove their API keys."""
-        from persistence.auth_models import User
-        from persistence.auth_repository import AuthRepository
+        from gispulse.persistence.auth_models import User
+        from gispulse.persistence.auth_repository import AuthRepository
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "auth.db"

@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.models import FiredTrigger
-from orchestration.trigger_bridge import TriggerJobBridge
+from gispulse.core.models import FiredTrigger
+from gispulse.orchestration.trigger_bridge import TriggerJobBridge
 
 
 @pytest.fixture

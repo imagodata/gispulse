@@ -7,8 +7,8 @@ wrong filters.
 from __future__ import annotations
 
 
-from core.filter.chain import FilterChain
-from core.filter.types import CombinationStrategy, Filter, FilterType
+from gispulse.core.filter.chain import FilterChain
+from gispulse.core.filter.types import CombinationStrategy, Filter, FilterType
 
 
 def _filt(

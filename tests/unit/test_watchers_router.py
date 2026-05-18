@@ -28,7 +28,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gispulse.adapters.http.app import create_app
-from persistence.gpkg_schema import bootstrap_gpkg_project
+from gispulse.persistence.gpkg_schema import bootstrap_gpkg_project
 
 
 def _make_gpkg(path: Path) -> None:

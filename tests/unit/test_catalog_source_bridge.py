@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from catalog.models import CatalogDomain, CatalogEntry
-from catalog.providers.base import CatalogProvider
-from catalog.registry import PROVIDERS, register_provider
-from catalog.source_bridge import CatalogProviderSource, bridge_catalog_providers
-from core.plugin_model import Payload, SourceDomain
-from core.sources import DataSource, ProtocolNotSupported
+from gispulse.catalog.models import CatalogDomain, CatalogEntry
+from gispulse.catalog.providers.base import CatalogProvider
+from gispulse.catalog.registry import PROVIDERS, register_provider
+from gispulse.catalog.source_bridge import CatalogProviderSource, bridge_catalog_providers
+from gispulse.core.plugin_model import Payload, SourceDomain
+from gispulse.core.sources import DataSource, ProtocolNotSupported
 
 
 class FakeProvider(CatalogProvider):

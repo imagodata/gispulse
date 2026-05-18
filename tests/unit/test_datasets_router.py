@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gispulse.adapters.http.app import create_app
-from core.models import Dataset
+from gispulse.core.models import Dataset
 
 
 @pytest.fixture(autouse=True)

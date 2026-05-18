@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from capabilities.postgis_sql import PostGISSQLCapability, _safe_render
+from gispulse.capabilities.postgis_sql import PostGISSQLCapability, _safe_render
 
 
 def _make_gdf():

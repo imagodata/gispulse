@@ -10,13 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from persistence.changelog_reader import (
+from gispulse.persistence.changelog_reader import (
     ChangelogReaderError,
     changelog_stats,
     list_pending_changes,
     next_since_id,
 )
-from persistence.gpkg_schema import bootstrap_gpkg_project, install_change_tracking
+from gispulse.persistence.gpkg_schema import bootstrap_gpkg_project, install_change_tracking
 
 
 # ---------------------------------------------------------------------------

@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from gispulse.adapters.http.routers._upload_utils import sha256_file as _sha256, find_duplicate_by_hash as _find_duplicate
-from persistence.repository import InMemoryRepository
-from core.models import Dataset
+from gispulse.persistence.repository import InMemoryRepository
+from gispulse.core.models import Dataset
 
 
 @pytest.fixture

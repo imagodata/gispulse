@@ -84,7 +84,7 @@ class _FakeScheduler:
 def _env(monkeypatch):
     monkeypatch.setenv("GISPULSE_STORAGE", "memory")
     monkeypatch.setenv("GISPULSE_TIER", "pro")
-    from persistence.tier import make_test_license_key
+    from gispulse.persistence.tier import make_test_license_key
     monkeypatch.setenv("GISPULSE_LICENSE_KEY", make_test_license_key("pro"))
     monkeypatch.setenv("GISPULSE_LICENCE_SKIP_VERIFY", "1")
     from gispulse.adapters.http.rate_limit import limiter
@@ -93,7 +93,7 @@ def _env(monkeypatch):
 
 @pytest.fixture()
 def client() -> TestClient:
-    from persistence.tier import make_test_license_key
+    from gispulse.persistence.tier import make_test_license_key
     os.environ["GISPULSE_STORAGE"] = "memory"
     os.environ["GISPULSE_TIER"] = "pro"
     os.environ["GISPULSE_LICENSE_KEY"] = make_test_license_key("pro")

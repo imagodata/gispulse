@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from persistence.change_log_watcher import (
+from gispulse.persistence.change_log_watcher import (
     ChangeLogWatcher,
     _summarise_batch,
 )

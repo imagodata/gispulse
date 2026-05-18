@@ -11,8 +11,8 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from core.models import Rule
-from orchestration.session_manager import (
+from gispulse.core.models import Rule
+from gispulse.orchestration.session_manager import (
     MultiLayerResult,
     PipelineResult,
     SessionManager,

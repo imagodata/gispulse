@@ -48,7 +48,7 @@ from gispulse.runtime.headless_runtime import build_runtime
 
 @pytest.fixture()
 def gpkg_with_parcels(tmp_path: Path) -> Path:
-    from persistence.gpkg_engine import GeoPackageEngine
+    from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
     gpkg = tmp_path / "watch.gpkg"
     eng = GeoPackageEngine(path=gpkg)

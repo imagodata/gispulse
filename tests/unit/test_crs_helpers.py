@@ -6,7 +6,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, Point
 
-from core.crs import (
+from gispulse.core.crs import (
     LAMBERT_93,
     WEB_MERCATOR,
     is_angular,
@@ -133,7 +133,7 @@ class TestIsochroneBatchModeMetric:
         )
 
     def test_batch_mode_metric_budget(self):
-        from capabilities.network import IsochroneCapability
+        from gispulse.capabilities.network import IsochroneCapability
 
         network = self._clermont_network_4326()
         sources = self._sources_4326()
@@ -164,7 +164,7 @@ class TestAutoInjectCrsMeters:
     """Unit tests for the executor's auto-injection helper."""
 
     def test_injects_when_angular_and_schema_supports_it(self):
-        from orchestration.pipeline_executor import _auto_inject_crs_meters
+        from gispulse.orchestration.pipeline_executor import _auto_inject_crs_meters
 
         class FakeCap:
             name = "buffer"
@@ -180,7 +180,7 @@ class TestAutoInjectCrsMeters:
         assert params["crs_meters"] == LAMBERT_93
 
     def test_respects_user_value(self):
-        from orchestration.pipeline_executor import _auto_inject_crs_meters
+        from gispulse.orchestration.pipeline_executor import _auto_inject_crs_meters
 
         class FakeCap:
             name = "buffer"
@@ -196,7 +196,7 @@ class TestAutoInjectCrsMeters:
         assert params["crs_meters"] == "EPSG:3857"
 
     def test_skips_when_projected(self):
-        from orchestration.pipeline_executor import _auto_inject_crs_meters
+        from gispulse.orchestration.pipeline_executor import _auto_inject_crs_meters
 
         class FakeCap:
             name = "buffer"
@@ -212,7 +212,7 @@ class TestAutoInjectCrsMeters:
         assert "crs_meters" not in params
 
     def test_skips_when_schema_does_not_declare_param(self):
-        from orchestration.pipeline_executor import _auto_inject_crs_meters
+        from gispulse.orchestration.pipeline_executor import _auto_inject_crs_meters
 
         class FakeCap:
             name = "dissolve"

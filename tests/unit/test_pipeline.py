@@ -8,15 +8,15 @@ import pytest
 import geopandas as gpd
 from shapely.geometry import Point
 
-from core.pipeline import (
+from gispulse.core.pipeline import (
     PipelineSpec,
     StepSpec,
     load_pipeline,
     pipeline_to_dict,
     _parse_predicate,
 )
-from core.predicates import AttrPredicate, CompoundPredicate, GeomPredicate
-from orchestration.pipeline_executor import PipelineExecutor
+from gispulse.core.predicates import AttrPredicate, CompoundPredicate, GeomPredicate
+from gispulse.orchestration.pipeline_executor import PipelineExecutor
 
 
 # ---------------------------------------------------------------------------

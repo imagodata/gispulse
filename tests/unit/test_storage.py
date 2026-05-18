@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from persistence.storage import (
+from gispulse.persistence.storage import (
     LocalStorage,
     StorageError,
     create_storage,
@@ -62,7 +62,7 @@ def _create_s3_storage(mock_boto3, mock_botocore_config):
 
     try:
         # Re-import to pick up mocked modules
-        from persistence.storage import S3Storage
+        from gispulse.persistence.storage import S3Storage
 
         storage = S3Storage(
             endpoint_url="http://localhost:9000",
@@ -289,7 +289,7 @@ class TestCreateStorage:
 
     def test_s3_with_pro_tier(self):
         """S3 endpoint set with pro tier => creates S3Storage."""
-        from persistence.storage import S3Storage
+        from gispulse.persistence.storage import S3Storage
 
         env = {
             "GISPULSE_S3_ENDPOINT": "http://localhost:9000",

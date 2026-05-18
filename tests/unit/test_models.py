@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 
-from core.models import (
+from gispulse.core.models import (
     Artifact,
     DataCategory,
     Dataset,

@@ -14,8 +14,8 @@ from uuid import uuid4
 
 import pytest
 
-from core.models import ChangeRecord, Trigger, TriggerEvent, TriggerType
-from rules.trigger_evaluator import (
+from gispulse.core.models import ChangeRecord, Trigger, TriggerEvent, TriggerType
+from gispulse.rules.trigger_evaluator import (
     MAX_CASCADE_DEPTH,
     CascadeDepthExceeded,
     TriggerEvaluator,

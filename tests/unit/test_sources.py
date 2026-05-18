@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.plugin_model import (
+from gispulse.core.plugin_model import (
     AccessProtocol,
     AccessSpec,
     FetchMode,
@@ -14,7 +14,7 @@ from core.plugin_model import (
     WriteReport,
     WriteSpec,
 )
-from core.sources import (
+from gispulse.core.sources import (
     PROTOCOLS,
     DataSink,
     DataSource,

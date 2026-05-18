@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from rules.operation_executor import OperationExecutor
+from gispulse.rules.operation_executor import OperationExecutor
 
 
 class FakeConn:

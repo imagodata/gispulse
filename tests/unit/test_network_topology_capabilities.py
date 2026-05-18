@@ -6,7 +6,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString
 
-from capabilities.network_topology import (
+from gispulse.capabilities.network_topology import (
     ExtendDanglesCapability,
     NodeLinesCapability,
     RemoveDuplicateEdgesCapability,

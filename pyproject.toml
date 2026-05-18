@@ -65,15 +65,16 @@ Repository = "https://github.com/imagodata/gispulse"
 Changelog = "https://github.com/imagodata/gispulse/blob/main/CHANGELOG.md"
 Issues = "https://github.com/imagodata/gispulse/issues"
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["gispulse*", "core*", "capabilities*", "rules*", "orchestration*", "persistence*", "catalog*", "viewer*"]
-exclude = ["docs*", "tests*"]
+where = ["src"]
+include = ["gispulse*"]
 
 [tool.setuptools.package-data]
-viewer = ["dist/**/*", "dist/*"]
-core = ["pricing_catalog.yml"]
-catalog = ["data/*.json"]
+"gispulse.core" = ["pricing_catalog.yml"]
+"gispulse.catalog" = ["data/*.json"]
 
 [tool.ruff]
 target-version = "py310"
@@ -86,27 +87,27 @@ line-length = 100
 # Lazy / try-import probing modules: imports must come after a runtime
 # capability check, and `from x import y` inside try/except is a feature
 # detector, not dead code.
-"capabilities/postgis_sql.py" = ["E402", "F401"]
-"capabilities/registry.py" = ["E402"]
-"rules/predicates.py" = ["E402", "F401"]
+"src/gispulse/capabilities/postgis_sql.py" = ["E402", "F401"]
+"src/gispulse/capabilities/registry.py" = ["E402"]
+"src/gispulse/rules/predicates.py" = ["E402", "F401"]
 # NB: the blanket "plugins/**/*.py" = ["F401"] ignore was removed in #185 —
 # bundled plugins are now first-class, linted and CI-installed. Their
 # register() hooks carry an explicit `# noqa: F401` where needed.
 # Optional-feature workers / routers register handlers after a runtime
 # import check; module-level imports below the guard are intentional.
-"gispulse/adapters/esb/workers/base_worker.py" = ["E402"]
-"gispulse/adapters/http/routers/jobs_router.py" = ["E402", "F841"]
-"gispulse/adapters/http/routers/triggers_router.py" = ["E402"]
-"gispulse/adapters/http/routers/portal_datasets_router.py" = ["E701"]
-"gispulse/adapters/http/routers/portal_upload_router.py" = ["F841"]
-"gispulse/adapters/http/routers/scenarios_router.py" = ["F841"]
-"gispulse/adapters/http/serve_app.py" = ["E402"]
-"gispulse/adapters/http/app.py" = ["F841"]
-"gispulse/cli.py" = ["F841"]
-"orchestration/job_queue.py" = ["E402"]
-"capabilities/density.py" = ["F841"]
-"capabilities/network.py" = ["F841"]
-"persistence/gpkg.py" = ["F841"]
+"src/gispulse/adapters/esb/workers/base_worker.py" = ["E402"]
+"src/gispulse/adapters/http/routers/jobs_router.py" = ["E402", "F841"]
+"src/gispulse/adapters/http/routers/triggers_router.py" = ["E402"]
+"src/gispulse/adapters/http/routers/portal_datasets_router.py" = ["E701"]
+"src/gispulse/adapters/http/routers/portal_upload_router.py" = ["F841"]
+"src/gispulse/adapters/http/routers/scenarios_router.py" = ["F841"]
+"src/gispulse/adapters/http/serve_app.py" = ["E402"]
+"src/gispulse/adapters/http/app.py" = ["F841"]
+"src/gispulse/cli.py" = ["F841"]
+"src/gispulse/orchestration/job_queue.py" = ["E402"]
+"src/gispulse/capabilities/density.py" = ["F841"]
+"src/gispulse/capabilities/network.py" = ["F841"]
+"src/gispulse/persistence/gpkg.py" = ["F841"]
 "scripts/build_playground_data.py" = ["F841"]
 "scripts/smoke_test_docs.py" = ["F841"]
 

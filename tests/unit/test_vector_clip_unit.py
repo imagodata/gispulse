@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from capabilities.strategy import ExecutionContext, StrategyMode
+from gispulse.capabilities.strategy import ExecutionContext, StrategyMode
 
 # Some tests below trigger ``gpd.clip`` / ``to_crs`` which depend on a
 # clean shapely+numpy import order. Under the local pytest-cov plugin
@@ -27,7 +27,7 @@ _GEOPANDAS_OPS_XFAIL = pytest.mark.xfail(
     "passes in clean CI",
     strict=False,
 )
-from capabilities.vector.clip import (
+from gispulse.capabilities.vector.clip import (
     ClipCapability,
     _ClipDuckDBStrategy,
     _ClipPostGISStrategy,

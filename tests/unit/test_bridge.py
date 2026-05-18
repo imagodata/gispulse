@@ -13,7 +13,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from persistence.bridge import DuckDBPostGISBridge, HybridEngine
+from gispulse.persistence.bridge import DuckDBPostGISBridge, HybridEngine
 
 
 @pytest.fixture

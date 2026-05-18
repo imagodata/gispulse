@@ -12,7 +12,7 @@ from shapely.geometry import (
     Polygon,
 )
 
-from capabilities.vector import (
+from gispulse.capabilities.vector import (
     AssignProjectionCapability,
     BoundaryCapability,
     MultipartToSinglepartsCapability,

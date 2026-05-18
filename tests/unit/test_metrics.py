@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from core.observability import MetricsCollector
+from gispulse.core.observability import MetricsCollector
 
 
 @pytest.fixture(autouse=True)

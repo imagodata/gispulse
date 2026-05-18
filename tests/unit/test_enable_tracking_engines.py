@@ -20,7 +20,7 @@ import pytest
 from fastapi import HTTPException
 from shapely.geometry import Point
 
-from core.models import Dataset
+from gispulse.core.models import Dataset
 from gispulse.adapters.http.routers.datasets_router import (
     _resolve_engine_kind_for_tracking,
 )
@@ -133,7 +133,7 @@ class TestRegistryEngineDispatch:
     def test_unknown_engine_kind_raises_value_error(
         self, tmp_path: Path, fake_hub: _FakeHub
     ) -> None:
-        from persistence.watcher_registry import WatcherRegistry
+        from gispulse.persistence.watcher_registry import WatcherRegistry
 
         registry = WatcherRegistry(event_hub=fake_hub)
         path = tmp_path / "x.gpkg"
@@ -144,7 +144,7 @@ class TestRegistryEngineDispatch:
     def test_register_geojson_via_duckdb_diff(
         self, tmp_path: Path, fake_hub: _FakeHub
     ) -> None:
-        from persistence.watcher_registry import WatcherRegistry
+        from gispulse.persistence.watcher_registry import WatcherRegistry
 
         # Real GeoJSON, real DuckDBDiffEngine path. Confirms the
         # WatcherRegistry can build and start a watcher on a non-GPKG
@@ -176,7 +176,7 @@ class TestRegistryEngineDispatch:
     def test_register_spatialite(
         self, tmp_path: Path, fake_hub: _FakeHub
     ) -> None:
-        from persistence.watcher_registry import WatcherRegistry
+        from gispulse.persistence.watcher_registry import WatcherRegistry
 
         path = tmp_path / "legacy.sqlite"
         # Bootstrap a real SpatiaLite-style file via pyogrio so the
@@ -204,8 +204,8 @@ class TestRegistryEngineDispatch:
     ) -> None:
         # Calling without engine_kind kwarg must still work — back-
         # compat with v1.6.x callers (HTTP routes pre-#157).
-        from persistence.gpkg_schema import bootstrap_gpkg_project
-        from persistence.watcher_registry import WatcherRegistry
+        from gispulse.persistence.gpkg_schema import bootstrap_gpkg_project
+        from gispulse.persistence.watcher_registry import WatcherRegistry
 
         path = tmp_path / "ds.gpkg"
         conn = sqlite3.connect(str(path))

@@ -9,11 +9,11 @@ from pathlib import Path
 import geopandas as gpd
 from shapely.geometry import Point, Polygon
 
-import capabilities  # noqa: F401 — register everything
-from capabilities.registry import get as get_capability
-from capabilities.vector import MergeLayersCapability
-from core.pipeline import load_pipeline
-from orchestration.pipeline_executor import PipelineExecutor
+import gispulse.capabilities as capabilities  # noqa: F401 — register everything
+from gispulse.capabilities.registry import get as get_capability
+from gispulse.capabilities.vector import MergeLayersCapability
+from gispulse.core.pipeline import load_pipeline
+from gispulse.orchestration.pipeline_executor import PipelineExecutor
 
 
 def _poly(size: float, attrs: dict) -> gpd.GeoDataFrame:

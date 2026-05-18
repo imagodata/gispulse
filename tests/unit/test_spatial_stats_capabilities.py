@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from shapely.geometry import Point, Polygon
 
-from capabilities.spatial_stats import (
+from gispulse.capabilities.spatial_stats import (
     GetisOrdGStarCapability,
     MoransICapability,
     SpatialWeightsCapability,

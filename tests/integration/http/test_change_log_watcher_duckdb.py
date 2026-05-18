@@ -54,8 +54,8 @@ def duckdb_app_client(tmp_path, monkeypatch):
     # built-in factory hard-codes ``:memory:`` (Lot 3 keeps that as the
     # production default until config plumbing for duckdb_path lands),
     # so we patch it just for this fixture.
-    from persistence import engine_factory as ef
-    from persistence.duckdb_engine_adapter import DuckDBSpatialEngine
+    from gispulse.persistence import engine_factory as ef
+    from gispulse.persistence.duckdb_engine_adapter import DuckDBSpatialEngine
 
     def _patched_factory(*, dsn=None, duckdb_path=":memory:", **_kw):
         return DuckDBSpatialEngine(database=str(tmp_path / "project.duckdb"))
@@ -112,7 +112,7 @@ class TestLifespanWatcher:
 
     def test_engine_is_duckdb_spatial_engine(self, duckdb_app_client):
         client, _ = duckdb_app_client
-        from persistence.duckdb_engine_adapter import DuckDBSpatialEngine
+        from gispulse.persistence.duckdb_engine_adapter import DuckDBSpatialEngine
 
         # The factory must hand back the adapter, not a bare DuckDBSession.
         assert isinstance(client.app.state.spatial_engine, DuckDBSpatialEngine)
@@ -166,7 +166,7 @@ class TestExternalWriteLimitation:
         adapter-level guarantee in isolation: only DML through
         ``engine.execute()`` reaches ``_change_log``.
         """
-        from persistence.duckdb_engine_adapter import DuckDBSpatialEngine
+        from gispulse.persistence.duckdb_engine_adapter import DuckDBSpatialEngine
 
         db_file = tmp_path / "external.duckdb"
         engine = DuckDBSpatialEngine(database=str(db_file))

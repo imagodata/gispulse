@@ -4,8 +4,8 @@ from __future__ import annotations
 import duckdb
 import pytest
 
-from core.models import ChangeOperation, Trigger, TriggerEvent, TriggerType
-from persistence.duckdb_change_detector import DuckDBChangeDetector
+from gispulse.core.models import ChangeOperation, Trigger, TriggerEvent, TriggerType
+from gispulse.persistence.duckdb_change_detector import DuckDBChangeDetector
 
 
 @pytest.fixture

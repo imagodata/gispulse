@@ -18,7 +18,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from persistence.duckdb_diff_engine import DuckDBDiffEngine
+from gispulse.persistence.duckdb_diff_engine import DuckDBDiffEngine
 
 
 def _bump_mtime(path: Path) -> None:
@@ -279,12 +279,12 @@ class TestPendingChanges:
 
 class TestFactory:
     def test_duckdb_diff_factory_registered(self) -> None:
-        from persistence.engine_factory import _BACKENDS
+        from gispulse.persistence.engine_factory import _BACKENDS
 
         assert "duckdb_diff" in _BACKENDS
 
     def test_factory_returns_engine(self, tmp_path: Path) -> None:
-        from persistence.engine_factory import _BACKENDS
+        from gispulse.persistence.engine_factory import _BACKENDS
 
         path = tmp_path / "x.geojson"
         engine = _BACKENDS["duckdb_diff"](file_path=str(path))
@@ -293,7 +293,7 @@ class TestFactory:
     def test_duckdb_diff_is_community_tier(self) -> None:
         # The CDC engine is portable and runs entirely in-process —
         # tier gating must mirror gpkg / spatialite (Community).
-        from persistence.tier import enforce_engine_tier
+        from gispulse.persistence.tier import enforce_engine_tier
 
         # If this raises TierError the gating is wrong. Currently
         # ``enforce_engine_tier`` only blocks ``postgis`` / ``hybrid``;

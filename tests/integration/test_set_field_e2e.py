@@ -34,10 +34,10 @@ from typing import Any
 
 import pytest
 
-from core.graph import ActionDef, ActionType
-from core.models import Trigger
+from gispulse.core.graph import ActionDef, ActionType
+from gispulse.core.models import Trigger
 from gispulse.runtime.headless_runtime import build_runtime
-from persistence.gpkg_engine import GeoPackageEngine
+from gispulse.persistence.gpkg_engine import GeoPackageEngine
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +255,7 @@ def _replay_http_lifespan_wiring(
     from gispulse.adapters.esb.action_dispatcher import ActionDispatcher
     from gispulse.runtime.headless_runtime import NullEventHub
     from gispulse.runtime.sqlite_retry import RetryingSqlExecutor
-    from persistence.change_log_watcher import ChangeLogWatcher
+    from gispulse.persistence.change_log_watcher import ChangeLogWatcher
 
     engine = GeoPackageEngine(path=gpkg)
     engine.open()
@@ -364,7 +364,7 @@ def test_security_violation_blocks_both_paths_identically(
     silently succeeds, neither silently no-ops. The retry wrapper is
     designed to **not** retry SecurityError; it surfaces immediately.
     """
-    from persistence.sql_guardrails import SecurityError
+    from gispulse.persistence.sql_guardrails import SecurityError
 
     gpkg = tmp_path / "secviol.gpkg"
     _build_gpkg_with_layer(gpkg)

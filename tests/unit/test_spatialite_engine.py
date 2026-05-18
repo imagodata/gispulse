@@ -18,11 +18,11 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from persistence.gpkg_schema import (
+from gispulse.persistence.gpkg_schema import (
     bootstrap_gpkg_project,
     bootstrap_spatialite_project,
 )
-from persistence.spatialite_engine import SpatiaLiteEngine, is_spatialite_file
+from gispulse.persistence.spatialite_engine import SpatiaLiteEngine, is_spatialite_file
 
 
 @pytest.fixture
@@ -241,7 +241,7 @@ class TestSpatiaLiteEngineIO:
 
 class TestEngineFactoryRegistration:
     def test_spatialite_factory_registered(self) -> None:
-        from persistence.engine_factory import _BACKENDS
+        from gispulse.persistence.engine_factory import _BACKENDS
 
         assert "spatialite" in _BACKENDS
 
@@ -250,14 +250,14 @@ class TestEngineFactoryRegistration:
         # backend factories (they read paths from settings). Test the
         # registered factory directly to confirm it returns the right
         # class for the right backend name.
-        from persistence.engine_factory import _BACKENDS
+        from gispulse.persistence.engine_factory import _BACKENDS
 
         path = tmp_path / "x.sqlite"
         engine = _BACKENDS["spatialite"](spatialite_path=str(path))
         assert isinstance(engine, SpatiaLiteEngine)
 
     def test_spatialite_is_community_tier(self) -> None:
-        from persistence.tier import enforce_engine_tier
+        from gispulse.persistence.tier import enforce_engine_tier
 
         # Must not raise TierError for community-tier callers.
         enforce_engine_tier("spatialite")

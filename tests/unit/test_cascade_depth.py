@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.models import ChangeOperation, ChangeRecord, FiredTrigger, Trigger, TriggerEvent, TriggerType
-from rules.trigger_evaluator import (
+from gispulse.core.models import ChangeOperation, ChangeRecord, FiredTrigger, Trigger, TriggerEvent, TriggerType
+from gispulse.rules.trigger_evaluator import (
     MAX_CASCADE_DEPTH,
     CascadeDepthExceeded,
     TriggerEvaluator,

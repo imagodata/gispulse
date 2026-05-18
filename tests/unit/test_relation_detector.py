@@ -5,7 +5,7 @@ import pytest
 from shapely.geometry import LineString, Point
 from shapely.geometry import box
 
-from capabilities.relation_detector import DetectedRelation, SpatialRelationDetector
+from gispulse.capabilities.relation_detector import DetectedRelation, SpatialRelationDetector
 
 
 @pytest.fixture

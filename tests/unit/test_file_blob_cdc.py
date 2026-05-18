@@ -20,8 +20,8 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from core.models import ChangeOperation
-from persistence.file_blob_cdc import (
+from gispulse.core.models import ChangeOperation
+from gispulse.persistence.file_blob_cdc import (
     SNAPSHOT_SUFFIX,
     FileBlobChangeDetector,
 )

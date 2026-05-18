@@ -16,8 +16,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from core.models import Job, JobStatus
-from orchestration.job_queue import (
+from gispulse.core.models import Job, JobStatus
+from gispulse.orchestration.job_queue import (
     DEFAULT_JOB_TIMEOUT,
     InMemoryJobQueue,
     RedisJobQueue,
@@ -534,7 +534,7 @@ class TestMaxRetriesSerialization:
     """Job max_retries must survive serialize/deserialize."""
 
     def test_max_retries_serialized(self):
-        from orchestration.job_queue import _deserialize_job, _serialize_job
+        from gispulse.orchestration.job_queue import _deserialize_job, _serialize_job
         job = Job(name="retry_test", max_retries=5, attempts=2)
         raw = _serialize_job(job)
         restored = _deserialize_job(raw)

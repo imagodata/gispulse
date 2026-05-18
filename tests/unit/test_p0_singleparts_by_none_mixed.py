@@ -17,8 +17,8 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, Point, Polygon
 
-from capabilities.registry import get as cap_get
-import capabilities  # noqa: F401
+from gispulse.capabilities.registry import get as cap_get
+import gispulse.capabilities as capabilities  # noqa: F401
 
 
 @pytest.fixture

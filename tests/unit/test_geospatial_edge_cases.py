@@ -28,7 +28,7 @@ from shapely.geometry import (
     Polygon,
 )
 
-from capabilities.vector import CalculateCapability, FilterCapability
+from gispulse.capabilities.vector import CalculateCapability, FilterCapability
 
 
 # ---------------------------------------------------------------------------

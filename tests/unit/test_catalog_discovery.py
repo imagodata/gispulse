@@ -1,8 +1,8 @@
-"""Tests for catalog-provider discovery via the PluginHub (#193).
+"""Tests for catalog-provider discovery via the ExtensionHub (#193).
 
 Issue #193 moved the single ``gispulse.catalog_providers`` entry-point
-scan into :class:`~core.plugin_hub.PluginHub`; :func:`_discover_providers`
-now *consumes* ``PluginHub.records`` instead of scanning a second time.
+scan into :class:`~core.plugin_hub.ExtensionHub`; :func:`_discover_providers`
+now *consumes* ``ExtensionHub.records`` instead of scanning a second time.
 """
 
 from __future__ import annotations
@@ -11,14 +11,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from catalog.registry import (
+from gispulse.catalog.registry import (
     PROVIDERS,
     _CATALOG_PROVIDER_GROUP,
     _discover_providers,
     register_provider,
 )
-from core import plugin_hub
-from core.plugin_model import PluginKind, PluginRecord, PluginState
+from gispulse.core import plugin_hub
+from gispulse.core.plugin_model import PluginKind, PluginRecord, PluginState
 
 
 @pytest.fixture(autouse=True)
@@ -40,7 +40,7 @@ class _FakeEP:
 
 
 class _FakeHub:
-    """Minimal stand-in for the PluginHub — only ``records`` is consumed."""
+    """Minimal stand-in for the ExtensionHub — only ``records`` is consumed."""
 
     def __init__(self, records: list[PluginRecord]) -> None:
         self.records = records
@@ -66,9 +66,9 @@ def _catalog_record(
 
 
 def _with_hub(records: list[PluginRecord]):
-    """Patch ``PluginHub.get()`` to return a fake hub holding ``records``."""
+    """Patch ``ExtensionHub.get()`` to return a fake hub holding ``records``."""
     return patch.object(
-        plugin_hub.PluginHub, "get", return_value=_FakeHub(records)
+        plugin_hub.ExtensionHub, "get", return_value=_FakeHub(records)
     )
 
 
@@ -136,7 +136,7 @@ class TestDiscoverProviders:
 
     def test_hub_failure_returns_empty(self):
         with patch.object(
-            plugin_hub.PluginHub, "get", side_effect=RuntimeError("hub down")
+            plugin_hub.ExtensionHub, "get", side_effect=RuntimeError("hub down")
         ):
             assert _discover_providers() == []
 

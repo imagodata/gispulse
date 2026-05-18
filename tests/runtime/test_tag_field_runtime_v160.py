@@ -68,7 +68,7 @@ def dispatcher_with_spy(conn):
 
 def _make_ctx(table: str = "parcels", row_id: int = 1):
     from gispulse.core.dispatcher import TriggerContext
-    from core.models import Trigger
+    from gispulse.core.models import Trigger
 
     trigger = Trigger(name="t-validation")
     return TriggerContext(
@@ -81,7 +81,7 @@ def _make_ctx(table: str = "parcels", row_id: int = 1):
 
 
 def _action(**cfg):
-    from core.graph import ActionDef, ActionType
+    from gispulse.core.graph import ActionDef, ActionType
 
     return ActionDef(action_type=ActionType.TAG_FIELD, config=cfg)
 
@@ -94,12 +94,12 @@ def _action(**cfg):
 class TestActionTypeRegistry:
     def test_tag_field_in_handlers(self) -> None:
         from gispulse.adapters.esb.action_dispatcher import ActionDispatcher
-        from core.graph import ActionType
+        from gispulse.core.graph import ActionType
 
         assert ActionType.TAG_FIELD in ActionDispatcher._handlers
 
     def test_tag_field_action_type_value(self) -> None:
-        from core.graph import ActionType
+        from gispulse.core.graph import ActionType
 
         assert ActionType.TAG_FIELD.value == "tag_field"
 
@@ -212,7 +212,7 @@ class TestToTriggersTagField:
             TriggerConfigModel,
             to_triggers,
         )
-        from core.graph import ActionType
+        from gispulse.core.graph import ActionType
 
         gpkg = tmp_path / "x.gpkg"
         gpkg.write_bytes(b"")

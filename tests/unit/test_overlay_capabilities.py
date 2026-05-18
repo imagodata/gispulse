@@ -6,7 +6,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Polygon
 
-from capabilities.overlay import (
+from gispulse.capabilities.overlay import (
     EraseCapability,
     OverlayIntersectionCapability,
     OverlayUnionCapability,

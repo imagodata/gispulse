@@ -6,8 +6,8 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from core.models import EdgeDef, NodeDef, NodeType
-from orchestration.graph_executor import GraphExecutor
+from gispulse.core.models import EdgeDef, NodeDef, NodeType
+from gispulse.orchestration.graph_executor import GraphExecutor
 
 
 # ---------------------------------------------------------------------------
