@@ -205,12 +205,15 @@ serializations.
 
 ## Status of related work
 
-- The EPIC [#243](https://github.com/imagodata/gispulse/issues/243)
-  children (#244–#253) were scoped against the earlier draft. They need
-  **re-scoping**: "build a DAG resolver" → "extract `_topo_sort` as a
-  load-time validator"; "build per-node dispatch" → "write missing SQL
-  strategies"; "new `version: 2` grammar" → "`version: 3` manifest +
-  `models:`→`PipelineSpec` compiler". Tracked as a follow-up to this ADR.
+- The EPIC [#243](https://github.com/imagodata/gispulse/issues/243) has
+  been **re-scoped** against this ADR (2026-05-18): "build a DAG
+  resolver" → "extract `_topo_sort` as a load-time validator"; "build
+  per-node dispatch" → "write missing SQL strategies"; "new `version: 2`
+  grammar" → "`version: 3` manifest + `models:`→`PipelineSpec` compiler".
+  Child #250 (per-node dispatch) is **closed** — `select_strategy()`
+  already exists; the real work moved into #245/#246 (SQL strategies)
+  and #251 (`gispulse explain` inspection). Implementation has not
+  started: v1.9.0 (EPIC #226) ships first.
 - SQL-ability audit (2026-05-18): effort to reach "majority ELT"
   estimated 6–8 weeks (1 dev) — to be re-estimated downward now that the
   DAG engine and dispatcher are reused, not built.
