@@ -120,15 +120,38 @@ def test_guard_leaves_local_file_paths_alone() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_register_core_fetchers_empty_roster_is_safe() -> None:
-    # A2 ships no concrete fetcher yet — registering must be a no-op, not a
-    # crash, until A3-A6 populate the roster.
-    assert register_core_fetchers(ProtocolRegistry()) == 0
+def test_register_core_fetchers_registers_the_full_roster() -> None:
+    # A3-A6 (#229-#232) populate the roster: four generic transport
+    # adapters, one per AccessProtocol family.
+    reg = ProtocolRegistry()
+    assert register_core_fetchers(reg) == 4
+    for protocol in (
+        AccessProtocol.REMOTE_TABLE,
+        AccessProtocol.OGC_FEATURES,
+        AccessProtocol.STAC,
+        AccessProtocol.DOWNLOAD,
+    ):
+        assert isinstance(reg.get_fetcher(protocol), LazyFetcher)
 
 
 def test_register_core_fetchers_defaults_to_global_registry() -> None:
-    assert register_core_fetchers() == 0  # touches PROTOCOLS, registers nothing
-    assert isinstance(PROTOCOLS, ProtocolRegistry)
+    # register_core_fetchers() with no argument files the four core
+    # adapters into the process-wide PROTOCOLS registry. It is destructive
+    # (override=True) — snapshot and restore so this test does not bleed
+    # into the #192 adapters that self-register into PROTOCOLS at import.
+    saved_fetchers = dict(PROTOCOLS._fetchers)
+    saved_writers = dict(PROTOCOLS._writers)
+    try:
+        assert register_core_fetchers() == 4  # touches PROTOCOLS
+        assert isinstance(PROTOCOLS, ProtocolRegistry)
+        assert isinstance(
+            PROTOCOLS.get_fetcher(AccessProtocol.REMOTE_TABLE), LazyFetcher
+        )
+    finally:
+        PROTOCOLS._fetchers.clear()
+        PROTOCOLS._fetchers.update(saved_fetchers)
+        PROTOCOLS._writers.clear()
+        PROTOCOLS._writers.update(saved_writers)
 
 
 def test_fake_fetcher_registers_into_a_registry() -> None:
