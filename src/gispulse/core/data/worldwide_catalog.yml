@@ -1,0 +1,256 @@
+# GISPulse — Worldwide geo-data catalogue (curated seed)
+#
+# A8 / issue #234, EPIC #226 (v1.9.0 — worldwide aggregator). A small,
+# *curated* and version-controlled set of public geospatial datasets,
+# parsed into `SourceEntryRef`s by `WorldwideCatalogSource`
+# (`gispulse/plugins/worldwide_source.py`).
+#
+# Each entry carries the four classification axes the catalogue filters
+# on — `domain` / `payload` / `jurisdiction` and `access.protocol` —
+# plus a `family` grouping for the portal UI. `domain` must be a value
+# of `core.plugin_model.SourceDomain`, `payload` of `Payload`, and
+# `access.protocol` of `AccessProtocol`.
+#
+# `revision_token` is the freshness token returned by `revision()` for
+# a versioned release; leave it null for a live service — A14 (#240)
+# wires a live freshness probe into the SourceWatcherRegistry.
+#
+# Endpoints are SSRF-checked structurally at load (scheme allow-list +
+# no private/loopback host). The full DNS-resolving SSRF guard (#199)
+# runs per fetch inside `core/fetchers/`.
+
+version: 1
+
+entries:
+  # ---------------------------------------------------------------------
+  # Family 1 — Overture / GeoParquet (remote columnar tables, DuckDB httpfs)
+  # ---------------------------------------------------------------------
+  - id: overture-places
+    name: Overture Maps — Places (points of interest)
+    family: overture-geoparquet
+    domain: observation
+    payload: vector
+    jurisdiction: world
+    access:
+      protocol: remote-table
+      endpoint: s3://overturemaps-us-west-2/release/2025-09-24.0/theme=places/type=place/*
+      params:
+        hive_partitioning: true
+    revision_token: "2025-09-24.0"
+    metadata:
+      provider: Overture Maps Foundation
+      license: CDLA Permissive 2.0
+
+  - id: overture-buildings
+    name: Overture Maps — Buildings
+    family: overture-geoparquet
+    domain: base
+    payload: vector
+    jurisdiction: world
+    access:
+      protocol: remote-table
+      endpoint: s3://overturemaps-us-west-2/release/2025-09-24.0/theme=buildings/type=building/*
+      params:
+        hive_partitioning: true
+    revision_token: "2025-09-24.0"
+    metadata:
+      provider: Overture Maps Foundation
+      license: ODbL 1.0
+
+  - id: overture-transportation
+    name: Overture Maps — Transportation (road segments)
+    family: overture-geoparquet
+    domain: reseau
+    payload: vector
+    jurisdiction: world
+    access:
+      protocol: remote-table
+      endpoint: s3://overturemaps-us-west-2/release/2025-09-24.0/theme=transportation/type=segment/*
+      params:
+        hive_partitioning: true
+    revision_token: "2025-09-24.0"
+    metadata:
+      provider: Overture Maps Foundation
+      license: ODbL 1.0
+
+  - id: vida-open-buildings
+    name: VIDA — Google/Microsoft Open Buildings (combined)
+    family: overture-geoparquet
+    domain: base
+    payload: vector
+    jurisdiction: world
+    access:
+      protocol: remote-table
+      endpoint: s3://us-west-2.opendata.source.coop/vida/google-microsoft-open-buildings/geoparquet/by_country/*
+      params:
+        hive_partitioning: true
+    revision_token: null
+    metadata:
+      provider: VIDA
+      license: CC BY 4.0
+
+  # ---------------------------------------------------------------------
+  # Family 2 — OGC Features / WFS (paginated feature services)
+  # ---------------------------------------------------------------------
+  - id: ign-bdtopo-batiment
+    name: IGN — BD TOPO buildings (France)
+    family: ogc-features
+    domain: base
+    payload: vector
+    jurisdiction: FR
+    access:
+      protocol: wfs
+      endpoint: https://data.geopf.fr/wfs/ows
+      params:
+        typename: BDTOPO_V3:batiment
+      format: application/json
+    revision_token: null
+    metadata:
+      provider: IGN Géoplateforme
+
+  - id: ign-adminexpress-communes
+    name: IGN — Admin Express communes (France)
+    family: ogc-features
+    domain: base
+    payload: vector
+    jurisdiction: FR
+    access:
+      protocol: wfs
+      endpoint: https://data.geopf.fr/wfs/ows
+      params:
+        typename: ADMINEXPRESS-COG.LATEST:commune
+      format: application/json
+    revision_token: null
+    metadata:
+      provider: IGN Géoplateforme
+
+  - id: pdok-bag-panden
+    name: PDOK — BAG buildings (Netherlands)
+    family: ogc-features
+    domain: base
+    payload: vector
+    jurisdiction: NL
+    access:
+      protocol: ogc-features
+      endpoint: https://api.pdok.nl/lv/bag/ogc/v1
+      params:
+        collection: pand
+    revision_token: null
+    metadata:
+      provider: PDOK / Kadaster
+
+  - id: pdok-natura2000
+    name: PDOK — Natura 2000 protected areas (Netherlands)
+    family: ogc-features
+    domain: environnement
+    payload: vector
+    jurisdiction: NL
+    access:
+      protocol: ogc-features
+      endpoint: https://api.pdok.nl/rvo/natura2000/ogc/v1
+      params:
+        collection: natura2000
+    revision_token: null
+    metadata:
+      provider: PDOK / RVO
+
+  # ---------------------------------------------------------------------
+  # Family 3 — STAC imagery (COG assets, searched by extent)
+  # ---------------------------------------------------------------------
+  - id: earth-search-sentinel2-l2a
+    name: Element 84 — Sentinel-2 L2A (earth-search)
+    family: stac-imagery
+    domain: imagerie
+    payload: raster
+    jurisdiction: world
+    access:
+      protocol: stac
+      endpoint: https://earth-search.aws.element84.com/v1
+      params:
+        collection: sentinel-2-l2a
+        asset: visual
+    revision_token: null
+    metadata:
+      provider: Element 84 / AWS Open Data
+
+  - id: planetary-computer-landsat
+    name: Microsoft Planetary Computer — Landsat C2 L2
+    family: stac-imagery
+    domain: imagerie
+    payload: raster
+    jurisdiction: world
+    access:
+      protocol: stac
+      endpoint: https://planetarycomputer.microsoft.com/api/stac/v1
+      params:
+        collection: landsat-c2-l2
+    revision_token: null
+    metadata:
+      provider: Microsoft Planetary Computer
+      requires_signing: true
+      signer: planetary-computer
+
+  - id: planetary-computer-naip
+    name: Microsoft Planetary Computer — NAIP aerial imagery (US)
+    family: stac-imagery
+    domain: imagerie
+    payload: raster
+    jurisdiction: US
+    access:
+      protocol: stac
+      endpoint: https://planetarycomputer.microsoft.com/api/stac/v1
+      params:
+        collection: naip
+    revision_token: null
+    metadata:
+      provider: Microsoft Planetary Computer
+      requires_signing: true
+      signer: planetary-computer
+
+  # ---------------------------------------------------------------------
+  # Family 4 — French open data (direct file download via /vsicurl)
+  # ---------------------------------------------------------------------
+  - id: dvf-geolocalise
+    name: DVF — geolocated property transactions (France)
+    family: opendata-fr
+    domain: statistique
+    payload: vector
+    jurisdiction: FR
+    access:
+      protocol: download
+      endpoint: https://files.data.gouv.fr/geo-dvf/latest/csv/2024/full.csv.gz
+      params:
+        lat: latitude
+        lon: longitude
+    revision_token: latest
+    metadata:
+      provider: Etalab / Cerema
+
+  - id: sirene-geolocalise
+    name: Sirene — geolocated establishments (France)
+    family: opendata-fr
+    domain: statistique
+    payload: vector
+    jurisdiction: FR
+    access:
+      protocol: download
+      endpoint: https://files.data.gouv.fr/insee-sirene-geo/StockEtablissementActif_utf8_geo.csv.gz
+      params:
+        lat: latitude
+        lon: longitude
+    revision_token: null
+    metadata:
+      provider: INSEE / Etalab
+
+  - id: cadastre-etalab-parcelles
+    name: Cadastre Etalab — parcels (France)
+    family: opendata-fr
+    domain: foncier
+    payload: vector
+    jurisdiction: FR
+    access:
+      protocol: download
+      endpoint: https://cadastre.data.gouv.fr/data/etalab-cadastre/latest/geojson/france/cadastre-france-parcelles.json.gz
+    revision_token: latest
+    metadata:
+      provider: Etalab / DGFiP
