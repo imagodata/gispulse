@@ -29,14 +29,22 @@ def _core_fetchers() -> list[LazyFetcher]:
 
     Each of issues A3-A6 appends its adapter import here. Kept as a
     function (not a module-level list) so the heavy per-protocol imports
-    stay lazy — ``import gispulse`` must not pull DuckDB / httpx.
+    stay lazy — ``import gispulse`` must not pull DuckDB / httpx. The
+    fetcher *modules* themselves only import the stdlib + ``core`` at
+    module scope; their DuckDB / httpx / client imports are deferred into
+    the fetch methods, so this roster is cheap to build.
     """
-    fetchers: list[LazyFetcher] = []
-    # A3 #229 — from .geoparquet_s3 import GeoParquetS3Fetcher; fetchers.append(...)
-    # A4 #230 — from .ogc_features  import OGCFeaturesFetcher;  fetchers.append(...)
-    # A5 #231 — from .stac          import STACFetcher;         fetchers.append(...)
-    # A6 #232 — from .http_file     import HttpFileFetcher;     fetchers.append(...)
-    return fetchers
+    from .geoparquet_s3 import GeoParquetS3Fetcher  # A3 #229 — REMOTE_TABLE
+    from .http_file import HttpFileFetcher          # A6 #232 — DOWNLOAD
+    from .ogc_features import OGCFeaturesFetcher    # A4 #230 — OGC_FEATURES
+    from .stac import STACFetcher                   # A5 #231 — STAC
+
+    return [
+        GeoParquetS3Fetcher(),
+        OGCFeaturesFetcher(),
+        STACFetcher(),
+        HttpFileFetcher(),
+    ]
 
 
 def register_core_fetchers(
