@@ -327,9 +327,143 @@ class GISPulseApp:
             for m in ExtensionHub.get().data_pack_manifests()
         ]
 
+    def list_sources(self) -> list[dict]:
+        """Return the ETL data-source plugins registered with the hub.
+
+        Data sources are the *extract* leg of the ETL plugin model —
+        plugins published under the ``gispulse.data_sources`` entry-point
+        group (:data:`core.plugin_model.ENTRYPOINT_GROUPS`). Each dict is
+        the JSON-safe :meth:`PluginRecord.as_dict` projection of one
+        :class:`~gispulse.core.plugin_model.PluginKind.SOURCE` record.
+        """
+        from gispulse.core.plugin_hub import ExtensionHub
+        from gispulse.core.plugin_model import PluginKind
+
+        hub = ExtensionHub.get()
+        return [rec.as_dict() for rec in hub.records_by_kind(PluginKind.SOURCE)]
+
     # ------------------------------------------------------------------
     # Trigger runtime (CDC / watch)
     # ------------------------------------------------------------------
+    def load_trigger_config(
+        self,
+        config_path: "str | Path",
+        *,
+        gpkg_override: "str | Path | None" = None,
+    ) -> Any:
+        """Load + schema-validate a ``triggers.yaml`` config.
+
+        Thin pass-through to :func:`runtime.config_loader.load_config`.
+        Returns the validated :class:`~gispulse.runtime.config_loader.
+        GISPulseConfig`; raises :class:`~gispulse.runtime.config_loader.
+        ConfigError` on a traversal / schema violation.
+        """
+        from gispulse.runtime.config_loader import load_config
+
+        return load_config(config_path, gpkg_override=gpkg_override)
+
+    def validate_trigger_config(
+        self,
+        config_path: "str | Path",
+        *,
+        gpkg_override: "str | Path | None" = None,
+    ) -> list[str]:
+        """Structurally validate a ``triggers.yaml`` against its GPKG.
+
+        Chains :func:`runtime.config_loader.load_config` and
+        :func:`runtime.config_loader.validate_against_gpkg`. Returns the
+        list of human-readable error strings (empty list = valid). A
+        :class:`ConfigError` from the loader is converted into a
+        single-element error list so the caller gets a uniform shape.
+        """
+        from gispulse.runtime.config_loader import (
+            ConfigError,
+            load_config,
+            validate_against_gpkg,
+        )
+
+        try:
+            config = load_config(config_path, gpkg_override=gpkg_override)
+        except ConfigError as exc:
+            return [str(exc)]
+        return validate_against_gpkg(config)
+
+    def changelog_status(
+        self, gpkg_path: "str | Path", *, limit: int = 50
+    ) -> dict[str, Any]:
+        """Summarise the GPKG change-log without booting the runtime.
+
+        Opens the GeoPackage read-only (the same WAL pragmas every other
+        code path uses, via :func:`persistence.gpkg_connection.connect_gpkg`)
+        and reports whether change-tracking is installed, how many rows
+        are still unprocessed, the latest sequence id and the most recent
+        rows.
+
+        Args:
+            gpkg_path: Path to the ``.gpkg`` file.
+            limit:     Max recent rows to return (clamped to 1..10000).
+
+        Returns:
+            ``{tracked, pending, latest_seq, recent: [...]}``.
+        """
+        import sqlite3
+
+        from gispulse.persistence.gpkg_connection import connect_gpkg
+
+        limit = max(1, min(int(limit), 10_000))
+        conn = connect_gpkg(Path(gpkg_path), row_factory=sqlite3.Row)
+        try:
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='_gispulse_change_log'"
+            ).fetchone()
+            if exists is None:
+                return {
+                    "tracked": False,
+                    "pending": 0,
+                    "latest_seq": 0,
+                    "recent": [],
+                }
+            agg = conn.execute(
+                "SELECT COUNT(*) FILTER (WHERE processed = 0) AS pending, "
+                "COALESCE(MAX(id), 0) AS latest FROM _gispulse_change_log"
+            ).fetchone()
+            pending = int(agg["pending"] or 0) if agg else 0
+            latest = int(agg["latest"] or 0) if agg else 0
+            rows = conn.execute(
+                "SELECT id, table_name, operation, row_pk, changed_at, "
+                "processed FROM _gispulse_change_log "
+                "ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            recent = [dict(r) for r in rows]
+            return {
+                "tracked": True,
+                "pending": pending,
+                "latest_seq": latest,
+                "recent": recent,
+            }
+        finally:
+            conn.close()
+
+    def tracked_layers(self, gpkg_path: "str | Path") -> dict[str, list[str]]:
+        """Return ``{layer: [installed trigger ops]}`` for a GeoPackage.
+
+        Thin pass-through to :func:`cli_track._installed_triggers` — the
+        same scan ``gispulse track doctor`` uses — so the MCP
+        ``watch_status`` tool and the CLI agree on what "tracked" means.
+        """
+        import sqlite3
+
+        from gispulse.cli_track import _installed_triggers
+        from gispulse.persistence.gpkg_connection import connect_gpkg
+
+        conn = connect_gpkg(Path(gpkg_path), row_factory=sqlite3.Row)
+        try:
+            return _installed_triggers(conn)
+        finally:
+            conn.close()
+
     def build_watch_runtime(
         self,
         gpkg_path: "str | Path",

@@ -153,6 +153,7 @@ const frSidebar = {
       items: [
         { text: 'Add-in ArcGIS', link: '/plugins/arcgis' },
         { text: 'Développer un plugin', link: '/plugins/developing' },
+        { text: 'Contribuer des outils MCP', link: '/plugins/mcp-tools' },
       ],
     },
   ],
