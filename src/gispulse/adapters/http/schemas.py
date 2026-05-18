@@ -390,6 +390,45 @@ class CatalogImportRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Worldwide aggregator schemas (EPIC #226 — A10 #236)
+# ---------------------------------------------------------------------------
+
+
+class VirtualDatasetCreate(BaseModel):
+    """Create a lazy virtual dataset from one worldwide-catalogue entry."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {"entry_id": "overture-places", "source": "worldwide"}
+        },
+    )
+
+    entry_id: str = Field(..., description="Catalogue entry id (e.g. 'overture-places').")
+    source: str = Field("worldwide", description="Data source name the entry belongs to.")
+
+
+class VirtualDatasetMaterialize(BaseModel):
+    """Materialise a virtual dataset into a real local project dataset."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {"name": "Overture places — Paris", "bbox": [2.2, 48.8, 2.5, 48.9]}
+        },
+    )
+
+    name: str | None = Field(None, description="Override name for the created dataset.")
+    bbox: list[float] | None = Field(
+        None,
+        description="Bounding box [west, south, east, north] pushed into the fetch.",
+        min_length=4,
+        max_length=4,
+    )
+    crs: str = Field("EPSG:4326", description="Target CRS for the materialised data.")
+
+
+# ---------------------------------------------------------------------------
 # Scenario schemas
 # ---------------------------------------------------------------------------
 
