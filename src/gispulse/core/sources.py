@@ -184,6 +184,13 @@ class SourceEntryRef:
     This is the *minimal* internal handle a :class:`DeclarativeSource`
     indexes. The richer ``catalog.models.CatalogEntry`` is mapped onto
     these by issue #179.
+
+    The ``domain`` / ``payload`` / ``jurisdiction`` fields (issue #227,
+    EPIC #226) are the per-entry classification axes the worldwide
+    catalogue filters on. They are **additive and optional**: every
+    pre-#227 ``SourceEntryRef`` keeps working, and a source that does not
+    classify an entry simply leaves them ``None``. The fourth filter axis
+    — the transport protocol — is already carried by ``access.protocol``.
     """
 
     id: str
@@ -191,6 +198,10 @@ class SourceEntryRef:
     access: AccessSpec
     revision_token: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    domain: SourceDomain | None = None
+    payload: Payload | None = None
+    jurisdiction: str | None = None
+    """Coverage area as a free code — e.g. ``"FR"``, ``"EU"``, ``"world"``."""
 
 
 @runtime_checkable

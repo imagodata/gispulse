@@ -53,16 +53,30 @@ class DuckDBSession(SpatialEngine):
 
     def open(self) -> None:
         self._conn = duckdb.connect(self.database)
+        self._load_extension("spatial")
+        # httpfs powers the v1.9.0 worldwide aggregator (EPIC #226): it lets
+        # DuckDB read remote GeoParquet / S3 sources zero-copy. It is best
+        # effort — a missing httpfs (no network, locked-down host) must not
+        # break the offline GPKG path, which goes through GeoPandas/Fiona.
+        self._load_extension("httpfs")
+        log.debug("duckdb_session_opened", database=self.database)
+
+    def _load_extension(self, name: str) -> None:
+        """Load a DuckDB extension, installing it once if needed.
+
+        A failure is logged and swallowed: the session stays usable for
+        the local GPKG path even when an extension is unavailable.
+        """
         try:
-            self._conn.load_extension("spatial")
+            self._conn.load_extension(name)  # type: ignore[union-attr]
         except Exception:
             try:
-                self._conn.install_extension("spatial")
-                self._conn.load_extension("spatial")
+                self._conn.install_extension(name)  # type: ignore[union-attr]
+                self._conn.load_extension(name)  # type: ignore[union-attr]
             except Exception as exc:
-                log.warning("duckdb_spatial_extension_failed", error=str(exc))
-                # Continue without spatial extension — GPKG I/O uses GeoPandas/Fiona
-        log.debug("duckdb_session_opened", database=self.database)
+                log.warning(
+                    "duckdb_extension_failed", extension=name, error=str(exc)
+                )
 
     def close(self) -> None:
         if self._conn is not None:

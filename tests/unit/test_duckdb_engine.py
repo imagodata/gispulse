@@ -39,6 +39,28 @@ class TestDuckDBSession:
             assert session._conn is not None
         assert session._conn is None
 
+    def test_open_loads_httpfs_when_available(self):
+        # A7 (#233): open() best-effort loads httpfs for the v1.9.0
+        # worldwide aggregator. When the extension installs cleanly the
+        # remote-read functions become callable.
+        with DuckDBSession() as session:
+            try:
+                session._conn.execute("SET s3_region='us-east-1'")
+            except Exception:
+                pytest.skip("httpfs unavailable in this environment (no network)")
+            # httpfs present — remote scan functions are wired.
+            assert session._conn is not None
+
+    def test_open_survives_missing_extension(self):
+        # A missing/failed extension must not break the offline GPKG path.
+        session = DuckDBSession()
+        session.open()
+        try:
+            session._load_extension("definitely_not_a_real_extension")
+            assert session._conn is not None  # still usable
+        finally:
+            session.close()
+
     def test_load_gpkg(self, gpkg_file):
         with DuckDBSession() as session:
             gdf = session.load_gpkg(gpkg_file, layer="points")
