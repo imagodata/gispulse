@@ -1116,3 +1116,53 @@ def _jsonable(value):
     if isinstance(value, (pd.Timestamp,)):
         return value.isoformat()
     return str(value)
+
+
+# ---------------------------------------------------------------------------
+# ELT Lot 2 (#245) — DuckDB / PostGIS SQL push-down strategies
+# ---------------------------------------------------------------------------
+
+from gispulse.capabilities import _attribute_sql as _asql  # noqa: E402
+from gispulse.capabilities.sql_pushdown import attach_sql_pushdown  # noqa: E402
+
+attach_sql_pushdown(
+    SelectColumnsCapability,
+    _asql.build_select_columns,
+    gate=lambda p: bool(p.get("fields")),
+)
+attach_sql_pushdown(
+    DropFieldCapability,
+    _asql.build_drop_field,
+    gate=lambda p: bool(p.get("fields")),
+)
+attach_sql_pushdown(
+    RenameFieldCapability,
+    _asql.build_rename_field,
+    gate=lambda p: bool(p.get("mapping")),
+)
+attach_sql_pushdown(
+    AddFieldCapability,
+    _asql.build_add_field,
+    gate=lambda p: bool(p.get("fields")),
+)
+attach_sql_pushdown(
+    CastFieldCapability,
+    _asql.build_cast_field,
+    gate=lambda p: bool(p.get("casts")),
+)
+attach_sql_pushdown(
+    CoalesceFieldsCapability,
+    _asql.build_coalesce_fields,
+    gate=lambda p: bool(p.get("sources")) and bool(p.get("target_col")),
+)
+attach_sql_pushdown(
+    CaseWhenCapability,
+    _asql.build_case_when,
+    gate=lambda p: bool(p.get("target_col")) and bool(p.get("cases")),
+)
+attach_sql_pushdown(
+    AttributeJoinCapability,
+    _asql.build_attribute_join,
+    gate=lambda p: p.get("ref_gdf") is not None and bool(p.get("left_on")),
+    extra_inputs={"ref": "ref_gdf"},
+)
