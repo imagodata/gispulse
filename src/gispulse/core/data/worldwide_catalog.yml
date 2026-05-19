@@ -225,6 +225,10 @@ entries:
     revision_token: latest
     metadata:
       provider: Etalab / Cerema
+      # `datagouv_dataset` opts this entry into the A13 (#239) freshness
+      # probe — the `refresh_worldwide_catalog` MCP tool reports drift
+      # between `revision_token` and the live data.gouv.fr publication.
+      datagouv_dataset: demandes-de-valeurs-foncieres-geolocalisees
 
   - id: sirene-geolocalise
     name: Sirene — geolocated establishments (France)
@@ -254,3 +258,4 @@ entries:
     revision_token: latest
     metadata:
       provider: Etalab / DGFiP
+      datagouv_dataset: cadastre

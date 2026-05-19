@@ -291,6 +291,91 @@ class WorldwideCatalogSource(DeclarativeSource):
             result.append(entry)
         return result
 
+    def revision(self, entry_id: str) -> str | None:
+        """Freshness token for ``entry_id`` (A14, #240).
+
+        For a *versioned* entry the declared ``revision_token`` (a release
+        millésime) is authoritative — it only changes when the catalogue
+        YAML is edited, so it is returned as-is. For a *live* entry
+        (``revision_token: null``) a cheap HTTP ``HEAD`` probes the remote
+        endpoint and derives a token from its ``ETag`` / ``Last-Modified``
+        / ``Content-Length`` headers. The probe is best-effort: any
+        failure (non-HTTP scheme, network error, headerless response)
+        yields ``None`` so the :class:`SourceWatcherRegistry` simply sees
+        no change rather than crashing.
+        """
+        entry = self._entry(entry_id)
+        if entry.revision_token:
+            return entry.revision_token
+        return _probe_revision(entry.access.endpoint)
+
+
+def _probe_revision(endpoint: str) -> str | None:
+    """Best-effort live freshness token from an HTTP ``HEAD`` (A14, #240).
+
+    Only ``http(s)`` endpoints are probed; the request is SSRF-guarded
+    (#199) and short-timeout. Returns a token built from the validator
+    headers, or ``None`` when the endpoint is non-HTTP, unreachable, or
+    exposes no usable header.
+    """
+    scheme = urlparse(endpoint).scheme.lower()
+    if scheme not in ("http", "https"):
+        return None  # s3:// and friends are not HEAD-probeable here
+    try:
+        from gispulse.core.ssrf import guard_outbound_url
+
+        guard_outbound_url(endpoint)
+    except Exception as exc:  # noqa: BLE001 — a blocked URL is never probed
+        log.warning("worldwide_revision_probe_blocked", endpoint=endpoint, error=str(exc))
+        return None
+    try:
+        import httpx
+
+        resp = httpx.head(endpoint, follow_redirects=True, timeout=10.0)
+    except Exception as exc:  # noqa: BLE001 — an unreachable source ⇒ no change
+        log.warning("worldwide_revision_probe_failed", endpoint=endpoint, error=str(exc))
+        return None
+    headers = resp.headers
+    for header in ("etag", "last-modified", "content-length"):
+        value = headers.get(header)
+        if value:
+            return f"{header}:{value}"
+    return None
+
+
+def register_worldwide_watches(
+    watcher: Any,
+    source: WorldwideCatalogSource | None = None,
+    *,
+    entry_ids: list[str] | None = None,
+) -> list[str]:
+    """Register worldwide catalogue entries on a :class:`SourceWatcherRegistry`.
+
+    Wires :meth:`WorldwideCatalogSource.revision` into the freshness
+    watcher (A14, #240): on the next poll an entry whose remote source has
+    moved emits a ``source.changed`` event. Each entry's poll interval is
+    taken from its ``metadata.update_frequency`` label (``quotidien`` /
+    ``hebdomadaire`` / …), defaulting to the watcher's 6 h baseline.
+
+    Args:
+        watcher:   The :class:`SourceWatcherRegistry` to register against.
+        source:    Catalogue source. A fresh :class:`WorldwideCatalogSource`
+                   is built when omitted.
+        entry_ids: Optional allow-list — only these entry ids are watched.
+
+    Returns:
+        The registration keys, one per watched entry.
+    """
+    src = source or WorldwideCatalogSource()
+    keys: list[str] = []
+    for entry in src.entries():
+        if entry_ids is not None and entry.id not in entry_ids:
+            continue
+        frequency = entry.metadata.get("update_frequency")
+        keys.append(watcher.register(src, entry.id, frequency=frequency))
+    log.info("worldwide_watches_registered", count=len(keys))
+    return keys
+
 
 def register() -> None:
     """Entry-point hook for the ``gispulse.data_sources`` group.
@@ -310,4 +395,5 @@ __all__ = [
     "WorldwideCatalogSource",
     "load_worldwide_catalog",
     "register",
+    "register_worldwide_watches",
 ]
