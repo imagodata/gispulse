@@ -160,6 +160,14 @@ class GpuSource(DeclarativeSource):
                 # revision() probes the WFS live (#198) — no stale
                 # token hard-coded here.
                 revision_token=None,
+                # Per-entry classification axes (#227, EPIC #226) — the
+                # worldwide catalogue filters on these. Every wfs_du
+                # layer in this pilot shares the source-level
+                # classification, so repeat it here rather than leave
+                # the entry unclassified (axes default to None).
+                domain=self.domain,
+                payload=self.payload,
+                jurisdiction=self.jurisdiction,
                 metadata={
                     "provider": "IGN / DGALN",
                     "platform": "Géoportail de l'Urbanisme",

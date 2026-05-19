@@ -13,14 +13,14 @@ if str(_PKG) not in sys.path:
 
 from gispulse_src_gpu.source import GpuSource  # noqa: E402
 
-from core.plugin_model import (  # noqa: E402
+from gispulse.core.plugin_model import (  # noqa: E402
     AccessProtocol,
     FetchMode,
     Payload,
     SourceDomain,
     SourceResult,
 )
-from core.sources import DataSource, ProtocolRegistry  # noqa: E402
+from gispulse.core.sources import DataSource, ProtocolRegistry  # noqa: E402
 
 
 class FakeWFS:
@@ -113,6 +113,17 @@ def test_every_entry_targets_wfs_du_typename(source: GpuSource) -> None:
             f"{entry.id}: typename should be under wfs_du namespace, "
             f"got {access.params['typename']!r}"
         )
+
+
+def test_every_entry_carries_classification_axes(source: GpuSource) -> None:
+    """Each entry must carry the per-entry domain / payload / jurisdiction
+    axes (#227, EPIC #226) so the worldwide catalogue can index it
+    directly — leaving them ``None`` would drop the entry from the
+    domain / payload / jurisdiction filters."""
+    for entry in source.catalog():
+        assert entry.domain is SourceDomain.REGLEMENTAIRE, entry.id
+        assert entry.payload is Payload.VECTOR, entry.id
+        assert entry.jurisdiction == "FR", entry.id
 
 
 # --------------------------------------------------------------------------
