@@ -13,14 +13,14 @@ if str(_PKG) not in sys.path:
 
 from gispulse_src_dvf.source import DvfSource  # noqa: E402
 
-from core.plugin_model import (  # noqa: E402
+from gispulse.core.plugin_model import (  # noqa: E402
     AccessProtocol,
     FetchMode,
     Payload,
     SourceDomain,
     SourceResult,
 )
-from core.sources import DataSource, ProtocolRegistry  # noqa: E402
+from gispulse.core.sources import DataSource, ProtocolRegistry  # noqa: E402
 
 
 class FakeRemoteTable:
