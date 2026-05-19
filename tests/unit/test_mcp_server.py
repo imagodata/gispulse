@@ -70,9 +70,24 @@ def test_tools_registered():
         "inspect_changelog",
         "watch_status",
         "dryrun_trigger",
+        # v1.9.0 worldwide aggregator (A13, #239) — data.gouv.fr probe.
+        "refresh_worldwide_catalog",
     }
     missing = expected - tool_names
     assert not missing, f"Missing tools: {missing}"
+
+
+def test_refresh_worldwide_catalog_tool(monkeypatch):
+    """The A13 (#239) catalogue-freshness tool runs without touching the net."""
+    from gispulse.plugins import datagouv_refresh
+
+    monkeypatch.setattr(
+        datagouv_refresh, "_probe_datagouv", lambda ref, *, base: "2026-01-01"
+    )
+    report = mcp_server.refresh_worldwide_catalog()
+    assert "error" not in report
+    assert report["checked"] >= 1
+    assert all("id" in rec for rec in report["entries"])
 
 
 def test_plugin_tool_registered(monkeypatch):

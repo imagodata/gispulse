@@ -319,6 +319,183 @@ def load_pipeline(path: str | Path, *, validate: bool = True) -> PipelineSpec:
     )
 
 
+# ---------------------------------------------------------------------------
+# Pipeline-prepare hook — virtual datasets as pipeline inputs (A11, #237)
+# ---------------------------------------------------------------------------
+
+#: Prefix marking a ``ref_layers`` value or ``input_path`` as a virtual
+#: dataset id (``virtual:<source>/<entry>``) rather than a file path.
+VIRTUAL_REF_PREFIX = "virtual:"
+
+
+def is_virtual_ref(value: Any) -> bool:
+    """True when ``value`` is a virtual-dataset id (``virtual:…``)."""
+    return isinstance(value, str) and value.startswith(VIRTUAL_REF_PREFIX)
+
+
+def virtual_refs(spec: PipelineSpec) -> dict[str, str]:
+    """Return the ``alias → virtual_id`` subset of ``spec.ref_layers``.
+
+    These ref layers are not files on disk — the pipeline-prepare hook
+    :func:`prepare_virtual_inputs` materialises each into a GeoDataFrame.
+    """
+    return {a: v for a, v in spec.ref_layers.items() if is_virtual_ref(v)}
+
+
+def _worldwide_protocols() -> Any:
+    """A standalone protocol registry holding only the core worldwide fetchers.
+
+    Kept separate from the process-wide ``PROTOCOLS`` so resolving a
+    virtual dataset never disturbs the legacy catalog-import adapters
+    (mirrors ``catalog_router._worldwide_fetchers``).
+    """
+    from gispulse.core.fetchers import register_core_fetchers
+    from gispulse.core.sources import ProtocolRegistry
+
+    registry = ProtocolRegistry()
+    register_core_fetchers(registry)
+    return registry
+
+
+def _resolve_virtual_dataset(virtual_id: str, *, protocols: Any) -> Any:
+    """Return the :class:`VirtualDataset` behind ``virtual_id``.
+
+    Looks the id up in the process-wide ``VIRTUAL_DATASETS`` registry; if
+    it is not filed yet, the backing catalogue entry is resolved from its
+    ``DataSource`` and a virtual dataset is created on the fly.
+
+    Raises:
+        KeyError: the id is unknown to both the registry and its source.
+    """
+    from gispulse.persistence.virtual_dataset import VIRTUAL_DATASETS, parse_virtual_id
+
+    try:
+        return VIRTUAL_DATASETS.get(virtual_id)
+    except KeyError:
+        pass
+
+    from gispulse.core.sources import SOURCES
+
+    source_name, entry_id = parse_virtual_id(virtual_id)
+    source = SOURCES.get(source_name)  # KeyError surfaces to the caller
+    entry = next((e for e in source.catalog() if e.id == entry_id), None)
+    if entry is None:
+        raise KeyError(
+            f"virtual dataset {virtual_id!r}: source {source_name!r} has no "
+            f"entry {entry_id!r}"
+        )
+    return VIRTUAL_DATASETS.create(
+        entry, source_name=source_name, protocols=protocols
+    )
+
+
+def prepare_virtual_input(
+    virtual_id: str,
+    *,
+    bbox: tuple[float, float, float, float] | None = None,
+    protocols: Any | None = None,
+    session_factory: Any | None = None,
+) -> Any:
+    """Resolve one virtual dataset id into a GeoDataFrame (A11, #237).
+
+    Materialises the bbox-scoped lazy DuckDB view backing ``virtual_id``
+    and reads it back as a GeoDataFrame, ready to feed a pipeline step.
+    This is the per-id half of the :func:`prepare_virtual_inputs` hook.
+
+    Args:
+        virtual_id:      A ``virtual:<source>/<entry>`` id.
+        bbox:            Optional ``(minx, miny, maxx, maxy)`` pushed into
+                         the scan — mandatory for global sources.
+        protocols:       Fetcher registry. Defaults to a fresh registry
+                         carrying only the core worldwide fetchers.
+        session_factory: Callable returning a context-manageable DuckDB
+                         session. Defaults to :class:`DuckDBSession`.
+
+    Returns:
+        A GeoDataFrame of the bbox-scoped rows.
+    """
+    from gispulse.persistence.duckdb_engine import DuckDBSession
+    from gispulse.persistence.virtual_dataset import materialize_virtual_view
+
+    registry = protocols if protocols is not None else _worldwide_protocols()
+    vds = _resolve_virtual_dataset(virtual_id, protocols=registry)
+    make_session = session_factory or DuckDBSession
+    with make_session() as session:
+        view = materialize_virtual_view(
+            session, vds, bbox=bbox, protocols=registry
+        )
+        return _view_to_gdf(session, view, crs=vds.crs)
+
+
+def _view_to_gdf(session: Any, view: str, *, crs: str) -> Any:
+    """Read a materialised DuckDB view into a GeoDataFrame.
+
+    The geometry of a worldwide scan (GeoParquet, OGC Features, …) lands
+    in the view as a WKB ``BLOB`` column — by name (``geometry`` /
+    ``geom`` / …) or, failing that, detected as the first binary column.
+    It is decoded with Shapely; a view with no geometry yields a plain
+    (geometry-less) frame so a non-spatial source still flows through.
+    """
+    import geopandas as gpd
+    from shapely import wkb as _wkb
+
+    from gispulse.persistence.duckdb_engine import _find_geom_column
+
+    df = session.conn.execute(f'SELECT * FROM "{view}"').fetchdf()
+    geom_col = _find_geom_column(df)
+    if geom_col is None:
+        return gpd.GeoDataFrame(df)
+    geometries = [
+        _wkb.loads(bytes(b)) if b is not None else None for b in df[geom_col]
+    ]
+    df = df.drop(columns=[geom_col])
+    return gpd.GeoDataFrame(df, geometry=geometries, crs=crs)
+
+
+def prepare_virtual_inputs(
+    spec: PipelineSpec,
+    *,
+    bbox: tuple[float, float, float, float] | None = None,
+    protocols: Any | None = None,
+    session_factory: Any | None = None,
+) -> dict[str, Any]:
+    """Pipeline-prepare hook (A11, #237) — virtual ref layers → GeoDataFrames.
+
+    Scans ``spec.ref_layers`` for values that are virtual-dataset ids
+    (:func:`is_virtual_ref`) and materialises each into a GeoDataFrame
+    keyed by its ref-layer alias. The result is merged into the
+    executor's ``inputs`` dict *before* execution, so a ``datasetSource``
+    node bound to that alias feeds a capability real geometry without any
+    local file ever touching disk.
+
+    File-path ref layers are left untouched — the caller still loads
+    those with :func:`~gispulse.persistence.io.read_vector`.
+
+    Args:
+        spec:            The pipeline whose ``ref_layers`` are scanned.
+        bbox:            Optional bbox pushed into every virtual scan.
+        protocols:       Shared fetcher registry (built once if omitted).
+        session_factory: DuckDB session factory (test seam).
+
+    Returns:
+        ``alias → GeoDataFrame`` for every virtual ref layer; empty when
+        the pipeline declares none.
+    """
+    refs = virtual_refs(spec)
+    if not refs:
+        return {}
+    registry = protocols if protocols is not None else _worldwide_protocols()
+    return {
+        alias: prepare_virtual_input(
+            virtual_id,
+            bbox=bbox,
+            protocols=registry,
+            session_factory=session_factory,
+        )
+        for alias, virtual_id in refs.items()
+    }
+
+
 def pipeline_to_dict(spec: PipelineSpec) -> dict[str, Any]:
     """Serialize a PipelineSpec to a dict (for JSON export)."""
     steps = []

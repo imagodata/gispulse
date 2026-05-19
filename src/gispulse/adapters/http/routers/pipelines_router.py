@@ -78,8 +78,19 @@ class PipelineExecuteRequest(BaseModel):
     triggers: list[TriggerSpecIn] = Field(default_factory=list, description="Inline triggers.")
     ref_layers: dict[str, str] = Field(default_factory=dict, description="Named reference layers.")
     dataset_id: UUID | None = Field(None, description="Dataset UUID to execute against.")
-    input_path: str | None = Field(None, description="Direct file path (alternative to dataset_id).")
+    input_path: str | None = Field(
+        None,
+        description="Direct file path, or a 'virtual:<source>/<entry>' id "
+        "(alternative to dataset_id).",
+    )
     layer: str | None = Field(None, description="Layer name for multi-layer inputs.")
+    bbox: list[float] | None = Field(
+        None,
+        description="Bounding box [minx, miny, maxx, maxy] pushed down into "
+        "virtual-dataset ref layers / inputs (mandatory for global sources).",
+        min_length=4,
+        max_length=4,
+    )
 
 
 class StepResultOut(BaseModel):
@@ -226,6 +237,46 @@ def _validate_pipeline(steps: list[StepSpecIn], ref_layers: dict[str, str] | Non
 
 
 # ---------------------------------------------------------------------------
+# Virtual-dataset pipeline-prepare hook (A11, #237)
+# ---------------------------------------------------------------------------
+
+
+def _bbox_tuple(payload: PipelineExecuteRequest) -> tuple | None:
+    """The request bbox as a tuple, or ``None``."""
+    return tuple(payload.bbox) if payload.bbox else None
+
+
+def _resolve_virtual_primary(virtual_id: str, bbox: tuple | None):
+    """Materialise a ``virtual:`` ``input_path`` into the primary GeoDataFrame."""
+    from gispulse.core.pipeline import prepare_virtual_input
+
+    try:
+        return prepare_virtual_input(virtual_id, bbox=bbox)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Virtual dataset not found: {exc}")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Failed to materialise virtual input: {exc}"
+        )
+
+
+def _add_virtual_ref_layers(spec: "PipelineSpec", inputs: dict, bbox: tuple | None) -> None:
+    """Run the pipeline-prepare hook — merge virtual ref layers into ``inputs``."""
+    from gispulse.core.pipeline import prepare_virtual_inputs
+
+    try:
+        inputs.update(prepare_virtual_inputs(spec, bbox=bbox))
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404, detail=f"Virtual ref layer not found: {exc}"
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Failed to materialise virtual ref layer: {exc}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -256,10 +307,15 @@ def execute_pipeline(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Failed to load dataset: {exc}")
     elif payload.input_path:
-        try:
-            gdf = read_vector(payload.input_path, layer=payload.layer)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Failed to load file: {exc}")
+        from gispulse.core.pipeline import is_virtual_ref
+
+        if is_virtual_ref(payload.input_path):
+            gdf = _resolve_virtual_primary(payload.input_path, _bbox_tuple(payload))
+        else:
+            try:
+                gdf = read_vector(payload.input_path, layer=payload.layer)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Failed to load file: {exc}")
     else:
         raise HTTPException(status_code=422, detail="Provide either dataset_id or input_path.")
 
@@ -275,9 +331,16 @@ def execute_pipeline(
         payload.triggers, payload.ref_layers,
     )
 
-    # Load ref_layers as GeoDataFrames
+    # Load ref_layers as GeoDataFrames. Virtual ref layers
+    # ('virtual:<source>/<entry>') are materialised by the prepare hook;
+    # file-path ref layers go through read_vector.
+    from gispulse.core.pipeline import is_virtual_ref
+
     inputs: dict[str, gpd.GeoDataFrame] = {"input": gdf}
+    _add_virtual_ref_layers(spec, inputs, _bbox_tuple(payload))
     for alias, source_path in spec.ref_layers.items():
+        if is_virtual_ref(source_path):
+            continue
         try:
             inputs[alias] = read_vector(source_path)
         except Exception as exc:
@@ -369,10 +432,15 @@ def execute_pipeline_steps(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Failed to load dataset: {exc}")
     elif payload.input_path:
-        try:
-            gdf = read_vector(payload.input_path, layer=payload.layer)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Failed to load file: {exc}")
+        from gispulse.core.pipeline import is_virtual_ref
+
+        if is_virtual_ref(payload.input_path):
+            gdf = _resolve_virtual_primary(payload.input_path, _bbox_tuple(payload))
+        else:
+            try:
+                gdf = read_vector(payload.input_path, layer=payload.layer)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Failed to load file: {exc}")
     else:
         raise HTTPException(status_code=422, detail="Provide either dataset_id or input_path.")
 
@@ -400,7 +468,14 @@ def execute_pipeline_steps(
     if dataset_source is None and payload.input_path:
         dataset_source = payload.input_path
 
+    # Virtual ref layers are materialised by the prepare hook (A11, #237);
+    # file / layer-name ref layers go through read_vector below.
+    from gispulse.core.pipeline import is_virtual_ref
+
+    _add_virtual_ref_layers(spec, inputs, _bbox_tuple(payload))
     for alias, source_path in spec.ref_layers.items():
+        if is_virtual_ref(source_path):
+            continue
         try:
             # If source_path looks like a layer name (no path separator, no
             # file extension) and we have a container file, resolve from

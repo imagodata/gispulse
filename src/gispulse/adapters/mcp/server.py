@@ -45,6 +45,7 @@ Triggers / change-log (workdir-scoped reads; dryrun has no side effects):
 Plugins / sources:
   list_plugins()               -> ExtensionHub inventory records
   list_sources()               -> registered ETL data-source plugins
+  refresh_worldwide_catalog()  -> data.gouv.fr freshness probe of FR entries
 
 Resources
 ---------
@@ -121,6 +122,7 @@ def register_builtin_mcp_surface(server: Any) -> None:
         inspect_changelog,
         watch_status,
         dryrun_trigger,
+        refresh_worldwide_catalog,
     ):
         server.tool()(fn)
     server.resource("gispulse://capabilities")(resource_capabilities)
@@ -565,6 +567,33 @@ def list_sources() -> list[dict[str, Any]]:
         One dict per data-source plugin record.
     """
     return _app.list_sources()
+
+
+def refresh_worldwide_catalog() -> dict[str, Any]:
+    """Probe data.gouv.fr for stale French entries of the worldwide catalogue.
+
+    Walks the worldwide aggregator catalogue (EPIC #226) and, for every
+    entry that declares a ``datagouv_dataset`` slug, queries data.gouv.fr
+    for its current publication timestamp — reporting which curated
+    ``revision_token`` values have drifted (A13, #239).
+
+    The probe is **read-only and idempotent**: it mutates nothing and two
+    calls against an unchanged remote return the same report. The MCP
+    server exposes no URL argument, so the probe is pinned to the
+    data.gouv.fr API host.
+
+    Returns:
+        ``{catalog, checked, entries: [...], stale: [...]}`` — each entry
+        record carries ``current_token`` / ``datagouv_revision`` /
+        ``up_to_date``, or an ``error`` key when its slug failed to
+        resolve.
+    """
+    from gispulse.plugins.datagouv_refresh import refresh_datagouv_entries
+
+    try:
+        return refresh_datagouv_entries()
+    except Exception as exc:  # noqa: BLE001 - report cleanly to the model
+        return {"error": f"Catalogue refresh failed: {exc}"}
 
 
 # ===========================================================================
