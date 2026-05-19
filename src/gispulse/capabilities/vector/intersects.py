@@ -6,6 +6,8 @@ import geopandas as gpd
 from gispulse.capabilities.base import Capability
 from gispulse.capabilities.registry import register
 from gispulse.capabilities.strategy import ExecutionContext, ExecutionStrategy, StrategyMode
+from gispulse.persistence.sql_dialect import get_dialect
+from gispulse.persistence.spatial_queries import intersects_select
 
 
 # ---------------------------------------------------------------------------
@@ -80,10 +82,14 @@ class _IntersectsDuckDBStrategy(ExecutionStrategy):
         ref_gdf = gpd.GeoDataFrame(geometry=[ref_geom], crs=gdf.crs)
         ctx.engine.register("_is_input", gdf)
         ctx.engine.register("_is_ref", ref_gdf)
-        return ctx.engine.sql_to_gdf(
-            "SELECT i.* FROM _is_input i, _is_ref r "
-            "WHERE ST_Intersects(ST_GeomFromWKB(i.__wkb), ST_GeomFromWKB(r.__wkb))"
-        ).reset_index(drop=True)
+        # Dialect-aware SQL (persistence.sql_dialect / spatial_queries) —
+        # ELT Lot 1, ADR 0005.
+        query = intersects_select(
+            get_dialect(ctx.engine.backend_name),
+            source_table="_is_input",
+            ref_table="_is_ref",
+        )
+        return ctx.engine.sql_to_gdf(query.sql).reset_index(drop=True)
 
     @property
     def priority(self) -> int:
@@ -112,10 +118,14 @@ class _IntersectsPostGISStrategy(ExecutionStrategy):
         ref_gdf = gpd.GeoDataFrame(geometry=[ref_geom], crs=gdf.crs)
         ctx.engine.register("_is_input", gdf)
         ctx.engine.register("_is_ref", ref_gdf)
-        return ctx.engine.sql_to_gdf(
-            "SELECT i.* FROM _is_input i, _is_ref r "
-            "WHERE ST_Intersects(i.geometry::geometry, r.geometry::geometry)"
-        ).reset_index(drop=True)
+        # Dialect-aware SQL (persistence.sql_dialect / spatial_queries) —
+        # ELT Lot 1, ADR 0005.
+        query = intersects_select(
+            get_dialect(ctx.engine.backend_name),
+            source_table="_is_input",
+            ref_table="_is_ref",
+        )
+        return ctx.engine.sql_to_gdf(query.sql).reset_index(drop=True)
 
     @property
     def priority(self) -> int:

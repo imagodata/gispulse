@@ -6,6 +6,8 @@ import geopandas as gpd
 from gispulse.capabilities.base import Capability
 from gispulse.capabilities.registry import register
 from gispulse.capabilities.strategy import ExecutionContext, ExecutionStrategy, StrategyMode
+from gispulse.persistence.sql_dialect import get_dialect
+from gispulse.persistence.spatial_queries import clip_select
 
 
 # ---------------------------------------------------------------------------
@@ -78,14 +80,14 @@ class _ClipDuckDBStrategy(ExecutionStrategy):
 
         ctx.engine.register("_clip_input", gdf)
         ctx.engine.register("_clip_mask", mask_gdf)
-        result = ctx.engine.sql_to_gdf(
-            "SELECT i.* REPLACE ("
-            "  ST_Intersection(ST_GeomFromWKB(i.__wkb), ST_GeomFromWKB(m.__wkb)) "
-            "  AS __wkb"
-            ") "
-            "FROM _clip_input i, _clip_mask m "
-            "WHERE ST_Intersects(ST_GeomFromWKB(i.__wkb), ST_GeomFromWKB(m.__wkb))"
+        # Dialect-aware SQL (persistence.sql_dialect / spatial_queries) —
+        # ELT Lot 1, ADR 0005.
+        query = clip_select(
+            get_dialect(ctx.engine.backend_name),
+            source_table="_clip_input",
+            mask_table="_clip_mask",
         )
+        result = ctx.engine.sql_to_gdf(query.sql)
         return result.reset_index(drop=True)
 
     @property
@@ -114,15 +116,16 @@ class _ClipPostGISStrategy(ExecutionStrategy):
 
         ctx.engine.register("_clip_input", gdf)
         ctx.engine.register("_clip_mask", mask_gdf)
-        result = ctx.engine.sql_to_gdf(
-            "SELECT i.*, ST_Intersection(i.geometry::geometry, m.geometry::geometry) "
-            "AS geometry_clip "
-            "FROM _clip_input i, _clip_mask m "
-            "WHERE ST_Intersects(i.geometry::geometry, m.geometry::geometry)"
+        # Dialect-aware SQL (persistence.sql_dialect / spatial_queries) —
+        # ELT Lot 1, ADR 0005.
+        dialect = get_dialect(ctx.engine.backend_name)
+        query = clip_select(
+            dialect, source_table="_clip_input", mask_table="_clip_mask"
         )
-        if "geometry_clip" in result.columns:
-            result = result.set_geometry("geometry_clip").drop(
-                columns=["geometry"], errors="ignore"
+        result = ctx.engine.sql_to_gdf(query.sql)
+        if query.geom_column in result.columns:
+            result = result.set_geometry(query.geom_column).drop(
+                columns=[dialect.geom_column], errors="ignore"
             ).rename_geometry("geometry")
         return result.reset_index(drop=True)
 

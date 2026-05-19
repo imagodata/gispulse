@@ -6,6 +6,8 @@ import geopandas as gpd
 from gispulse.capabilities.base import Capability
 from gispulse.capabilities.registry import register
 from gispulse.capabilities.strategy import ExecutionContext, ExecutionStrategy, StrategyMode
+from gispulse.persistence.sql_dialect import BufferStyle, get_dialect
+from gispulse.persistence.spatial_queries import buffer_select
 
 
 # ---------------------------------------------------------------------------
@@ -45,23 +47,6 @@ def _buffer_kwargs(
         join_style=_BUFFER_JOIN_STYLES[join_style],
         mitre_limit=float(mitre_limit),
         single_sided=bool(single_sided),
-    )
-
-
-def _buffer_style_sql(
-    quad_segs: int,
-    cap_style: str,
-    join_style: str,
-    mitre_limit: float,
-    single_sided: bool,
-) -> str:
-    """Build the PostGIS/DuckDB ST_Buffer style string."""
-    side = "left" if single_sided else "both"
-    # DuckDB spatial implements ST_Buffer(geom, dist) — no style string yet.
-    # For PostGIS this returns the 3rd parameter.
-    return (
-        f"quad_segs={int(quad_segs)} endcap={cap_style} "
-        f"join={join_style} mitre_limit={float(mitre_limit):.3f} side={side}"
     )
 
 
@@ -156,16 +141,17 @@ class _BufferDuckDBStrategy(ExecutionStrategy):
             gdf = gdf.to_crs(crs_meters)
 
         ctx.engine.register("_input", gdf)
-        # register_gdf stores geometry as __wkb binary column;
-        # convert back to GEOMETRY via ST_GeomFromWKB before ST_Buffer
-        result = ctx.engine.sql_to_gdf(
-            f"SELECT *, ST_Buffer(ST_GeomFromWKB(__wkb), {distance}) AS __wkb_buf "
-            f"FROM _input"
-        )
-        # Replace geometry column with the buffered one
-        if "__wkb_buf" in result.columns:
-            result = result.set_geometry("__wkb_buf").drop(
-                columns=["__wkb"], errors="ignore"
+        # SQL generation is delegated to the dialect-aware layer
+        # (persistence.sql_dialect / spatial_queries) — ELT Lot 1,
+        # ADR 0005. A default-style buffer is the only kind DuckDB can
+        # express; can_execute() already deferred styled buffers to the
+        # Python strategy.
+        dialect = get_dialect(ctx.engine.backend_name)
+        query = buffer_select(dialect, source_table="_input", distance=distance)
+        result = ctx.engine.sql_to_gdf(query.sql)
+        if query.geom_column in result.columns:
+            result = result.set_geometry(query.geom_column).drop(
+                columns=[dialect.geom_column], errors="ignore"
             )
             result = result.rename_geometry("geometry")
 
@@ -189,12 +175,12 @@ class _BufferPostGISStrategy(ExecutionStrategy):
     def execute(self, gdf: gpd.GeoDataFrame, ctx: ExecutionContext) -> gpd.GeoDataFrame:
         distance = float(ctx.params.get("distance", 0.0))
         crs_meters: str = ctx.params.get("crs_meters", "EPSG:3857")
-        style = _buffer_style_sql(
-            int(ctx.params.get("quad_segs", 8)),
-            ctx.params.get("cap_style", "round"),
-            ctx.params.get("join_style", "round"),
-            float(ctx.params.get("mitre_limit", 5.0)),
-            bool(ctx.params.get("single_sided", False)),
+        style = BufferStyle(
+            quad_segs=int(ctx.params.get("quad_segs", 8)),
+            cap_style=ctx.params.get("cap_style", "round"),
+            join_style=ctx.params.get("join_style", "round"),
+            mitre_limit=float(ctx.params.get("mitre_limit", 5.0)),
+            single_sided=bool(ctx.params.get("single_sided", False)),
         )
 
         original_crs = gdf.crs
@@ -202,15 +188,17 @@ class _BufferPostGISStrategy(ExecutionStrategy):
             gdf = gdf.to_crs(crs_meters)
 
         ctx.engine.register("_input", gdf)
-        # Style string is built from validated params (enum-constrained),
-        # safe to inline. Distance is a numeric literal.
-        result = ctx.engine.sql_to_gdf(
-            f"SELECT *, ST_Buffer(geometry::geometry, {distance}, '{style}') "
-            f"AS geometry_buf FROM _input"
+        # Dialect-aware SQL (persistence.sql_dialect / spatial_queries) —
+        # ELT Lot 1, ADR 0005. PostGIS expresses the full ST_Buffer style
+        # string; the style is built from enum-constrained, validated params.
+        dialect = get_dialect(ctx.engine.backend_name)
+        query = buffer_select(
+            dialect, source_table="_input", distance=distance, style=style
         )
-        if "geometry_buf" in result.columns:
-            result = result.set_geometry("geometry_buf").drop(
-                columns=["geometry"], errors="ignore"
+        result = ctx.engine.sql_to_gdf(query.sql)
+        if query.geom_column in result.columns:
+            result = result.set_geometry(query.geom_column).drop(
+                columns=[dialect.geom_column], errors="ignore"
             )
             result = result.rename_geometry("geometry")
 
