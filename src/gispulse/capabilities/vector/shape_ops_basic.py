@@ -200,3 +200,18 @@ class EnvelopeCapability(Capability):
                 },
             },
         }
+
+
+# ---------------------------------------------------------------------------
+# ELT Lot 3 (#246) — DuckDB / PostGIS SQL push-down strategies
+# ---------------------------------------------------------------------------
+
+from gispulse.capabilities import _geometry_sql as _gsql  # noqa: E402
+from gispulse.capabilities.sql_pushdown import attach_sql_pushdown  # noqa: E402
+
+# by_group / dissolve are N:1 aggregations — not 1:1 — and stay on Python.
+_per_feature = lambda p: not p.get("by_group") and not p.get("dissolve")  # noqa: E731
+
+attach_sql_pushdown(MakeValidCapability, _gsql.build_make_valid)
+attach_sql_pushdown(ConvexHullCapability, _gsql.build_convex_hull, gate=_per_feature)
+attach_sql_pushdown(EnvelopeCapability, _gsql.build_envelope, gate=_per_feature)
