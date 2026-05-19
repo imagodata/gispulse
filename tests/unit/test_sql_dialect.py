@@ -4,10 +4,17 @@ from __future__ import annotations
 import pytest
 
 from gispulse.persistence.sql_dialect import (
+    BufferStyle,
     DuckDBDialect,
     PostGISDialect,
     SpatiaLiteDialect,
+    UnsupportedInDialect,
     get_dialect,
+)
+from gispulse.persistence.spatial_queries import (
+    buffer_select,
+    clip_select,
+    intersects_select,
 )
 
 
@@ -138,3 +145,217 @@ class TestCrossBackendConsistency:
     def test_name_is_string(self, d):
         assert isinstance(d.name, str)
         assert d.name in ("postgis", "duckdb", "spatialite")
+
+
+# ===========================================================================
+# ELT Lot 1 (#244) — the five audited DuckDB/PostGIS divergences
+# ===========================================================================
+
+
+class TestDivergence1WkbVsNative:
+    """Divergence #1 — registered geometry: WKB blob vs native column."""
+
+    def test_duckdb_lifts_wkb_blob(self):
+        d = DuckDBDialect()
+        assert d.geom_column == "__wkb"
+        assert d.geom_ref() == "ST_GeomFromWKB(__wkb)"
+        assert d.geom_ref(table="i") == "ST_GeomFromWKB(i.__wkb)"
+
+    def test_postgis_casts_native_column(self):
+        d = PostGISDialect()
+        assert d.geom_column == "geometry"
+        assert d.geom_ref() == "geometry::geometry"
+        assert d.geom_ref(table="m") == "m.geometry::geometry"
+
+    def test_geom_ref_rejects_hostile_identifier(self):
+        with pytest.raises(ValueError):
+            DuckDBDialect().geom_ref("__wkb); DROP TABLE x --")
+        with pytest.raises(ValueError):
+            PostGISDialect().geom_ref(table='i" UNION SELECT')
+
+
+class TestDivergence2StyledBuffer:
+    """Divergence #2 — styled ST_Buffer: PostGIS only."""
+
+    def test_default_style_both_dialects(self):
+        assert DuckDBDialect().st_buffer_styled("g", 100.0) == "ST_Buffer(g, 100.0)"
+        assert PostGISDialect().st_buffer_styled("g", 100.0) == "ST_Buffer(g, 100.0)"
+
+    def test_negative_distance_is_erosion(self):
+        assert DuckDBDialect().st_buffer_styled("g", -25.0) == "ST_Buffer(g, -25.0)"
+
+    def test_styled_postgis_emits_style_string(self):
+        style = BufferStyle(quad_segs=16, cap_style="flat", join_style="mitre")
+        assert PostGISDialect().st_buffer_styled("g", 5.0, style) == (
+            "ST_Buffer(g, 5.0, 'quad_segs=16 endcap=flat join=mitre "
+            "mitre_limit=5.000 side=both')"
+        )
+
+    def test_styled_duckdb_raises(self):
+        with pytest.raises(UnsupportedInDialect):
+            DuckDBDialect().st_buffer_styled("g", 5.0, BufferStyle(quad_segs=16))
+
+    def test_unsupported_is_a_notimplementederror(self):
+        # New callers catch the precise type; legacy callers catching the
+        # broad NotImplementedError keep working.
+        assert issubclass(UnsupportedInDialect, NotImplementedError)
+
+    def test_default_style_object_accepted_by_duckdb(self):
+        assert DuckDBDialect().st_buffer_styled("g", 5.0, BufferStyle()) == (
+            "ST_Buffer(g, 5.0)"
+        )
+
+    def test_capability_flag(self):
+        assert PostGISDialect().supports_styled_buffer is True
+        assert DuckDBDialect().supports_styled_buffer is False
+
+
+class TestBufferStyle:
+    def test_single_sided_renders_left(self):
+        assert "side=left" in BufferStyle(single_sided=True).to_postgis_style()
+        assert "side=both" in BufferStyle().to_postgis_style()
+
+    def test_validates_enums(self):
+        with pytest.raises(ValueError):
+            BufferStyle(cap_style="pointy")
+        with pytest.raises(ValueError):
+            BufferStyle(join_style="weird")
+        with pytest.raises(ValueError):
+            BufferStyle(quad_segs=0)
+
+    def test_is_default_flag(self):
+        assert BufferStyle().is_default is True
+        assert BufferStyle(quad_segs=16).is_default is False
+        assert BufferStyle(single_sided=True).is_default is False
+
+
+class TestDivergence3Knn:
+    """Divergence #3 — KNN <-> operator: PostGIS only."""
+
+    def test_postgis_emits_operator(self):
+        assert PostGISDialect().supports_knn is True
+        assert PostGISDialect().st_knn_distance("a.geom", "b.geom") == (
+            "(a.geom <-> b.geom)"
+        )
+
+    def test_duckdb_raises(self):
+        assert DuckDBDialect().supports_knn is False
+        with pytest.raises(UnsupportedInDialect):
+            DuckDBDialect().st_knn_distance("a", "b")
+
+
+class TestDivergence4Transform:
+    """Divergence #4 — ST_Transform arity / axis order."""
+
+    def test_duckdb_uses_four_arg_always_xy(self):
+        assert DuckDBDialect().st_transform(
+            "g", src_srid=4326, dst_srid=2154
+        ) == "ST_Transform(g, 'EPSG:4326', 'EPSG:2154', always_xy := true)"
+
+    def test_postgis_uses_two_arg_target_srid(self):
+        assert PostGISDialect().st_transform(
+            "g", src_srid=4326, dst_srid=2154
+        ) == "ST_Transform(g, 2154)"
+
+
+class TestDivergence5Coverage:
+    """Divergence #5 — topological coverage capability flag."""
+
+    def test_coverage_flags(self):
+        assert PostGISDialect().supports_coverage is True
+        assert DuckDBDialect().supports_coverage is False
+
+
+@pytest.mark.parametrize("dialect", [DuckDBDialect(), PostGISDialect()])
+def test_intersection_portable_across_sql_engines(dialect):
+    assert dialect.st_intersection("a", "b") == "ST_Intersection(a, b)"
+
+
+# ===========================================================================
+# ELT Lot 1 — statement builders (spatial_queries) — golden SQL
+# ===========================================================================
+
+
+class TestBufferSelect:
+    def test_duckdb_golden(self):
+        # DuckDB derives the geometry via `* REPLACE` so the result keeps
+        # the canonical __wkb name the result decoder keys on.
+        q = buffer_select(DuckDBDialect(), source_table="_input", distance=100.0)
+        assert q.sql == (
+            "SELECT * REPLACE (ST_Buffer(ST_GeomFromWKB(__wkb), 100.0) AS __wkb) "
+            "FROM _input"
+        )
+        assert q.geom_column == "__wkb"
+
+    def test_postgis_golden_with_style(self):
+        q = buffer_select(
+            PostGISDialect(),
+            source_table="_input",
+            distance=100.0,
+            style=BufferStyle(),
+        )
+        assert q.sql == (
+            "SELECT *, ST_Buffer(geometry::geometry, 100.0, "
+            "'quad_segs=8 endcap=round join=round mitre_limit=5.000 side=both') "
+            "AS geometry_buf FROM _input"
+        )
+        assert q.geom_column == "geometry_buf"
+
+
+class TestClipSelect:
+    def test_duckdb_uses_replace_projection(self):
+        q = clip_select(
+            DuckDBDialect(), source_table="_clip_input", mask_table="_clip_mask"
+        )
+        assert q.sql == (
+            "SELECT i.* REPLACE (ST_Intersection(ST_GeomFromWKB(i.__wkb), "
+            "ST_GeomFromWKB(m.__wkb)) AS __wkb) "
+            "FROM _clip_input i, _clip_mask m "
+            "WHERE ST_Intersects(ST_GeomFromWKB(i.__wkb), ST_GeomFromWKB(m.__wkb))"
+        )
+        assert q.geom_column == "__wkb"
+
+    def test_postgis_appends_geometry_clip(self):
+        q = clip_select(
+            PostGISDialect(), source_table="_clip_input", mask_table="_clip_mask"
+        )
+        assert q.sql == (
+            "SELECT i.*, ST_Intersection(i.geometry::geometry, "
+            "m.geometry::geometry) AS geometry_clip "
+            "FROM _clip_input i, _clip_mask m "
+            "WHERE ST_Intersects(i.geometry::geometry, m.geometry::geometry)"
+        )
+        assert q.geom_column == "geometry_clip"
+
+
+class TestIntersectsSelect:
+    def test_duckdb_golden(self):
+        q = intersects_select(
+            DuckDBDialect(), source_table="_is_input", ref_table="_is_ref"
+        )
+        assert q.sql == (
+            "SELECT i.* FROM _is_input i, _is_ref r "
+            "WHERE ST_Intersects(ST_GeomFromWKB(i.__wkb), ST_GeomFromWKB(r.__wkb))"
+        )
+        assert q.geom_column == "__wkb"
+
+    def test_postgis_golden(self):
+        q = intersects_select(
+            PostGISDialect(), source_table="_is_input", ref_table="_is_ref"
+        )
+        assert q.sql == (
+            "SELECT i.* FROM _is_input i, _is_ref r "
+            "WHERE ST_Intersects(i.geometry::geometry, r.geometry::geometry)"
+        )
+        assert q.geom_column == "geometry"
+
+
+@pytest.mark.parametrize("backend", ["duckdb", "postgis"])
+def test_builders_reject_hostile_table_names(backend):
+    d = get_dialect(backend)
+    with pytest.raises(ValueError):
+        buffer_select(d, source_table="x; DROP TABLE t", distance=1.0)
+    with pytest.raises(ValueError):
+        clip_select(d, source_table="ok", mask_table='m"--')
+    with pytest.raises(ValueError):
+        intersects_select(d, source_table="ok", ref_table="r;SELECT")

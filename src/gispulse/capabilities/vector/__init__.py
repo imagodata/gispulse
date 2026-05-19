@@ -38,7 +38,6 @@ from gispulse.capabilities.vector.buffer import (  # noqa: F401
     BufferCapability,
     _buffer_kwargs,
     _buffer_params_are_default,
-    _buffer_style_sql,
 )
 
 # Union / Reproject ----------------------------------------------------------
