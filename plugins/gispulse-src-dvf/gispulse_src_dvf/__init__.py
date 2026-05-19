@@ -12,10 +12,11 @@ def register() -> None:
     """Entry-point hook for the ``gispulse.data_sources`` group.
 
     Registers a :class:`DvfSource` instance in the process-wide
-    ``core.sources.SOURCES`` registry so the source watcher (issue #197)
-    can resolve ``dvf://<entry>`` URIs declared in ``triggers.yaml``.
+    ``gispulse.core.sources.SOURCES`` registry so the source watcher
+    (issue #197) can resolve ``dvf://<entry>`` URIs declared in
+    ``triggers.yaml``.
     """
-    from core.sources import SOURCES
+    from gispulse.core.sources import SOURCES
     from gispulse_src_dvf.source import DvfSource
 
     SOURCES.register(DvfSource())
