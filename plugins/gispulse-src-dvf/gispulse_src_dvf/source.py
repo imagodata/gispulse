@@ -43,11 +43,14 @@ from gispulse.plugins.api import (
     SourceEntryRef,
 )
 
-# Etalab geo-DVF mirror — the rolling-window full export as a gzipped
-# CSV, geocoded (latitude/longitude). Stable URL: ``latest`` is the
-# millésime symlink rotated each release.
-_DVF_GEO_CSV = (
-    "https://files.data.gouv.fr/geo-dvf/latest/csv/full.csv.gz"
+# Etalab geo-DVF mirror — the rolling-window full export. ``latest`` is
+# a millésime symlink rotated each release. The parquet variant is the
+# preferred entry: ``GeoParquetS3Fetcher`` (shipped in #256 with v1.9.0)
+# scans it via DuckDB ``read_parquet`` + ``httpfs`` and pushes the bbox
+# predicate into the row-group selection — a foncier query on one
+# département touches a few MB of the national parquet, not 2 GB.
+_DVF_GEO_PARQUET = (
+    "https://files.data.gouv.fr/geo-dvf/latest/parquet/full.parquet"
 )
 
 # Dataset metadata endpoint on data.gouv.fr — returns JSON with a
@@ -113,18 +116,25 @@ class DvfSource(DeclarativeSource):
             name=label,
             access=AccessSpec(
                 protocol=AccessProtocol.REMOTE_TABLE,
-                endpoint=_DVF_GEO_CSV,
-                # Static params — the AccessSpec is a declaration, not
-                # a query. Downstream filtering on commune / section /
-                # date / type_local is performed by the consumer
-                # (capability, pipeline) on the materialised table.
-                params={"format": "csv.gz", "separator": ","},
-                format="text/csv",
+                endpoint=_DVF_GEO_PARQUET,
+                # Static params — the AccessSpec is a declaration. Bbox
+                # predicate pushdown is handled by
+                # :class:`GeoParquetS3Fetcher` at scan time, not encoded
+                # here.
+                params={},
+                format="application/parquet",
             ),
             # revision() probes data.gouv.fr live (issue #198); the
             # declared token stays None so nothing hard-codes a stale
             # millésime.
             revision_token=None,
+            # Per-entry classification axes (#227, EPIC #226) — repeat
+            # the source-level domain/payload/jurisdiction so the
+            # worldwide catalogue can index this entry directly without
+            # a hop through ``DvfSource``.
+            domain=SourceDomain.STATISTIQUE,
+            payload=Payload.TABLE,
+            jurisdiction="FR",
             metadata={
                 "provider": "Etalab",
                 "dataset": "Demandes de Valeurs Foncières",
