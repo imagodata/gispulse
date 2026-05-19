@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gispulse-src-gpu"
+version = "0.1.0"
+description = "Géoportail de l'Urbanisme data source for GISPulse (PLU, prescriptions, informations)"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "GISPulse", email = "dev@gispulse.io" }]
+dependencies = [
+    "gispulse",
+]
+
+# Registered as a data source — discovered by core.plugin_hub.PluginHub.
+[project.entry-points."gispulse.data_sources"]
+gpu = "gispulse_src_gpu:register"
+
+[tool.gispulse.plugin]
+kind = "source"
+protocol = ">=1.0,<2.0"
+domain = "reglementaire"
+jurisdiction = "FR"
+display_name = "GPU — Géoportail de l'Urbanisme (France)"
