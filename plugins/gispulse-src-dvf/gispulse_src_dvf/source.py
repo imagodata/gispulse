@@ -21,15 +21,15 @@ schema synthesises from ``code_commune`` + ``prefixe_section`` +
 .. note::
    :data:`AccessProtocol.REMOTE_TABLE` is declared **deliberately**:
    DVF is a tabular dataset published as CSV (Etalab) or GeoParquet
-   (Cerema/IGN derivatives). Wiring a transport adapter for that
-   protocol — most plausibly a DuckDB ``httpfs`` adapter over the
-   Etalab CSV mirror — is left to a follow-up plugin of
-   ``kind = "protocol"``. Until that adapter ships, calling
-   :meth:`fetch` on this source will raise ``LookupError`` from
-   :class:`ProtocolRegistry` ("no adapter registered for
-   AccessProtocol.REMOTE_TABLE"). The declaration, schema and
-   :meth:`revision` plumbing are usable today by the source watcher
-   and any catalog/marketplace consumer.
+   (Cerema/IGN derivatives). The transport adapter for that protocol
+   ships in the core distribution since v1.9.0 —
+   :class:`~gispulse.core.fetchers.geoparquet_s3.GeoParquetS3Fetcher`
+   (issue #256), registered into the :data:`ProtocolRegistry` by
+   :func:`~gispulse.core.fetchers.register_core_fetchers`. Against the
+   ``full.parquet`` mirror this declaration targets, :meth:`fetch`
+   resolves to that fetcher and scans the file with bbox predicate
+   pushdown via DuckDB ``httpfs`` — no follow-up ``kind = "protocol"``
+   plugin is required.
 """
 
 from __future__ import annotations
