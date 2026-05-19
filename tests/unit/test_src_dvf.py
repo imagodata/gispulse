@@ -72,14 +72,15 @@ def test_catalog_search(source: DvfSource) -> None:
 
 
 def test_access_spec_targets_etalab_geo_dvf(source: DvfSource) -> None:
-    """The declared endpoint must point at the geo-dvf CSV mirror so
-    the future REMOTE_TABLE adapter (DuckDB httpfs) has a stable URL."""
+    """The declared endpoint must point at the geo-dvf parquet mirror so
+    the shipped GeoParquetS3Fetcher (#256) can scan it with bbox
+    pushdown via DuckDB httpfs."""
     entry = next(iter(source.catalog()))
     access = entry.access
     assert access.protocol is AccessProtocol.REMOTE_TABLE
     assert "files.data.gouv.fr/geo-dvf" in access.endpoint
-    assert access.endpoint.endswith(".csv.gz")
-    assert access.format == "text/csv"
+    assert access.endpoint.endswith(".parquet")
+    assert access.format == "application/parquet"
 
 
 # --------------------------------------------------------------------------
