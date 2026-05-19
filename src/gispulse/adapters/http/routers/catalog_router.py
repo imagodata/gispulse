@@ -14,7 +14,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from gispulse import get_app
 from gispulse.catalog.models import CatalogDomain, FluxEntry, FluxProtocol, OpenDataEntry
 from gispulse.catalog import registry as catalog_registry
-from gispulse.adapters.http.schemas import CatalogImportRequest
+from gispulse.adapters.http.schemas import (
+    CatalogImportRequest,
+    VirtualDatasetCreate,
+    VirtualDatasetMaterialize,
+)
 
 log = logging.getLogger(__name__)
 
@@ -425,3 +429,260 @@ async def _import_opendata_download(
         }
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Worldwide aggregator — lazy catalogue + virtual datasets (EPIC #226, A10 #236)
+# ---------------------------------------------------------------------------
+
+_WORLDWIDE_FETCHERS = None
+
+
+def _worldwide_fetchers():
+    """A dedicated registry of the core worldwide fetchers.
+
+    Kept *separate* from the process-wide ``PROTOCOLS`` so the worldwide
+    aggregator never overrides the legacy #192 catalog-import adapters
+    that share the STAC / OGC-Features protocol slots. Built once.
+    """
+    global _WORLDWIDE_FETCHERS
+    if _WORLDWIDE_FETCHERS is None:
+        from gispulse.core.fetchers import register_core_fetchers
+        from gispulse.core.sources import ProtocolRegistry
+
+        registry = ProtocolRegistry()
+        register_core_fetchers(registry)
+        _WORLDWIDE_FETCHERS = registry
+    return _WORLDWIDE_FETCHERS
+
+
+def _worldwide_source(name: str = "worldwide"):
+    """Resolve a worldwide-style ``DataSource`` from :data:`SOURCES`.
+
+    The first-party ``worldwide`` catalogue is registered on first use so
+    the endpoint is self-sufficient even when the ``gispulse.data_sources``
+    entry-point hooks have not been run. A test may pre-register a mock
+    under the same name and it is honoured here.
+    """
+    from gispulse.core.sources import SOURCES
+
+    try:
+        return SOURCES.get(name)
+    except KeyError:
+        if name != "worldwide":
+            raise HTTPException(404, f"Unknown data source '{name}'") from None
+        from gispulse.plugins.worldwide_source import WorldwideCatalogSource
+
+        source = WorldwideCatalogSource()
+        SOURCES.register(source)
+        return source
+
+
+def _serialize_worldwide_entry(entry) -> dict:
+    """Flat JSON projection of a catalogue entry — the four axes inline."""
+    return {
+        "id": entry.id,
+        "name": entry.name,
+        "domain": entry.domain.value if entry.domain else None,
+        "payload": entry.payload.value if entry.payload else None,
+        "jurisdiction": entry.jurisdiction,
+        "protocol": entry.access.protocol.value,
+        "family": entry.metadata.get("family"),
+        "endpoint": entry.access.endpoint,
+        "revision_token": entry.revision_token,
+        "metadata": entry.metadata,
+    }
+
+
+def _parse_bbox(raw: str | None) -> tuple[float, float, float, float] | None:
+    """Parse a ``minx,miny,maxx,maxy`` query string into a bbox tuple."""
+    if not raw:
+        return None
+    parts = raw.split(",")
+    if len(parts) != 4:
+        raise HTTPException(400, "bbox must be 'minx,miny,maxx,maxy'")
+    try:
+        minx, miny, maxx, maxy = (float(p) for p in parts)
+    except ValueError:
+        raise HTTPException(400, "bbox components must be numbers") from None
+    return (minx, miny, maxx, maxy)
+
+
+@router.get("/worldwide")
+def list_worldwide(
+    search: str | None = None,
+    domain: str | None = Query(None, description="SourceDomain value"),
+    payload: str | None = Query(None, description="Payload value"),
+    jurisdiction: str | None = Query(None, description="Coverage code, e.g. FR / world"),
+    protocol: str | None = Query(None, description="AccessProtocol value"),
+    family: str | None = Query(None, description="Catalogue family grouping"),
+):
+    """List the worldwide catalogue, filtered on the four classification axes."""
+    source = _worldwide_source()
+    try:
+        entries = source.catalog(
+            search,
+            domain=domain,
+            payload=payload,
+            jurisdiction=jurisdiction,
+            protocol=protocol,
+            family=family,
+        )
+    except Exception as exc:  # noqa: BLE001 — surface a bad catalogue as 502
+        raise HTTPException(502, f"worldwide catalogue unavailable: {exc}") from exc
+    return [_serialize_worldwide_entry(e) for e in entries]
+
+
+@router.post("/virtual", status_code=201)
+def create_virtual_dataset(body: VirtualDatasetCreate):
+    """Create a lazy virtual dataset from one worldwide-catalogue entry."""
+    from gispulse.core.sources import ProtocolNotSupported
+    from gispulse.persistence.virtual_dataset import VIRTUAL_DATASETS, to_dataset_meta
+
+    source = _worldwide_source(body.source)
+    entry = next(
+        (e for e in source.catalog() if e.id == body.entry_id), None
+    )
+    if entry is None:
+        raise HTTPException(404, f"Catalogue entry '{body.entry_id}' not found")
+
+    try:
+        vds = VIRTUAL_DATASETS.create(
+            entry, source_name=body.source, protocols=_worldwide_fetchers()
+        )
+    except ProtocolNotSupported as exc:
+        raise HTTPException(
+            422, f"no fetcher for entry '{body.entry_id}': {exc}"
+        ) from exc
+    return to_dataset_meta(vds)
+
+
+@router.get("/virtual/{virtual_id:path}/preview")
+def preview_virtual_dataset(virtual_id: str, bbox: str | None = None):
+    """Preview a virtual dataset — materialise the bbox-scoped view and count."""
+    from gispulse.persistence.duckdb_engine import DuckDBSession
+    from gispulse.persistence.virtual_dataset import (
+        VIRTUAL_DATASETS,
+        VirtualDatasetError,
+        count_features,
+        materialize_virtual_view,
+        to_dataset_meta,
+    )
+
+    try:
+        vds = VIRTUAL_DATASETS.get(virtual_id)
+    except KeyError:
+        raise HTTPException(404, f"Virtual dataset '{virtual_id}' not found") from None
+
+    box = _parse_bbox(bbox)
+    try:
+        with DuckDBSession() as session:
+            view = materialize_virtual_view(
+                session, vds, bbox=box, protocols=_worldwide_fetchers()
+            )
+            count = count_features(session, view)
+    except VirtualDatasetError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — a remote-scan failure ⇒ 502
+        raise HTTPException(502, f"preview failed: {exc}") from exc
+    return to_dataset_meta(vds, feature_count=count, bbox=box)
+
+
+@router.post("/virtual/{virtual_id:path}/materialize", status_code=201)
+def materialize_virtual_dataset(
+    virtual_id: str, body: VirtualDatasetMaterialize, request: Request
+):
+    """Materialise a virtual dataset into a real local project dataset."""
+    from gispulse.core.plugin_model import FetchMode
+    from gispulse.persistence.virtual_dataset import VIRTUAL_DATASETS
+
+    try:
+        vds = VIRTUAL_DATASETS.get(virtual_id)
+    except KeyError:
+        raise HTTPException(404, f"Virtual dataset '{virtual_id}' not found") from None
+
+    box = tuple(body.bbox) if body.bbox else None
+    # Re-run the same fetcher in MATERIALIZE mode — vds.entry carries the
+    # declarative access block, so no DataSource lookup is needed.
+    try:
+        result = _worldwide_fetchers().dispatch_fetch(
+            vds.entry.access, extent=box, mode=FetchMode.MATERIALIZE
+        )
+    except Exception as exc:  # noqa: BLE001 — fetch transport error ⇒ 502
+        raise HTTPException(502, f"materialisation failed: {exc}") from exc
+    return _register_materialized(result, vds, body, box, request)
+
+
+def _register_materialized(
+    result, vds, body: VirtualDatasetMaterialize, bbox, request: Request
+) -> dict:
+    """Register a materialised :class:`SourceResult` as a local dataset."""
+    from gispulse.core.models import Dataset
+    from gispulse.persistence.io import dataset_from_file
+
+    dataset_repo = request.app.state.dataset_repo
+    data_dir: Path = request.app.state.data_dir
+    layer_cache: dict = getattr(request.app.state, "layer_cache", {})
+
+    dataset_id = uuid4()
+    dest_dir = data_dir / str(dataset_id)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    ds_name = body.name or vds.name
+    metadata = {
+        "virtual_id": vds.id,
+        "catalog_entry": vds.entry_id,
+        "source": vds.source_name,
+        "bbox": list(bbox) if bbox else None,
+    }
+
+    data = result.data
+    if isinstance(data, (str, Path)) and Path(data).exists():
+        final_path = dest_dir / Path(data).name
+        shutil.copy2(str(data), str(final_path))
+    elif hasattr(data, "to_file"):  # a GeoDataFrame
+        gdf = data
+        if body.crs and body.crs != "EPSG:4326" and getattr(gdf, "crs", None):
+            try:
+                gdf = gdf.to_crs(body.crs)
+            except Exception:  # noqa: BLE001 — keep source CRS on failure
+                pass
+        safe_layer = "".join(c if c.isalnum() else "_" for c in vds.entry_id)
+        final_path = dest_dir / f"{safe_layer}.gpkg"
+        gdf.to_file(str(final_path), driver="GPKG", layer=safe_layer)
+    else:
+        shutil.rmtree(dest_dir, ignore_errors=True)
+        raise HTTPException(502, "materialisation returned no usable data")
+
+    try:
+        dataset = dataset_from_file(str(final_path))
+    except Exception:  # noqa: BLE001 — non-vector payload (e.g. parquet)
+        dataset = Dataset(format=final_path.suffix.lstrip(".").upper() or None)
+    dataset.id = dataset_id
+    dataset.name = ds_name
+    dataset.source_path = str(final_path)
+    dataset.metadata = metadata
+    dataset_repo.save(dataset)
+
+    try:
+        from gispulse.adapters.http.layer_utils import build_layer_meta, load_layers
+
+        layers = load_layers(str(final_path))
+        layer_metas = [build_layer_meta(str(final_path), ln) for ln in layers]
+        layer_cache[str(dataset_id)] = layer_metas
+    except Exception:  # noqa: BLE001 — layer cache is best-effort
+        layer_metas = []
+
+    return {
+        "id": str(dataset_id),
+        "name": ds_name,
+        "source_path": str(final_path),
+        "source_type": "materialized",
+        "format": dataset.format,
+        "crs": dataset.crs,
+        "file_size": final_path.stat().st_size,
+        "layers": layer_metas,
+        "virtual_id": vds.id,
+        "catalog_entry": vds.entry_id,
+        "bbox": list(bbox) if bbox else None,
+        "created_at": dataset.created_at.isoformat(),
+    }
