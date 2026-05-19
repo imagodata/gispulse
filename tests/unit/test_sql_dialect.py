@@ -359,3 +359,43 @@ def test_builders_reject_hostile_table_names(backend):
         clip_select(d, source_table="ok", mask_table='m"--')
     with pytest.raises(ValueError):
         intersects_select(d, source_table="ok", ref_table="r;SELECT")
+
+
+# ===========================================================================
+# ELT Lot 3 (#246) — single-layer geometry transform spellings
+# ===========================================================================
+
+
+@pytest.mark.parametrize("dialect", [DuckDBDialect(), PostGISDialect()])
+def test_lot3_geometry_functions_spelled_identically(dialect):
+    # DuckDB-spatial and PostGIS share the ST_* spelling for these.
+    assert dialect.st_boundary("g") == "ST_Boundary(g)"
+    assert dialect.st_envelope("g") == "ST_Envelope(g)"
+    assert dialect.st_convex_hull("g") == "ST_ConvexHull(g)"
+    assert dialect.st_make_valid("g") == "ST_MakeValid(g)"
+    assert dialect.st_simplify("g", 0.5) == "ST_Simplify(g, 0.5)"
+    assert dialect.st_is_empty("g") == "ST_IsEmpty(g)"
+
+
+@pytest.mark.parametrize("dialect", [DuckDBDialect(), PostGISDialect()])
+def test_concave_hull_uses_three_arg_form(dialect):
+    # The 2-arg form is rejected by DuckDB-spatial — always emit 3 args.
+    assert dialect.st_concave_hull("g", 0.5) == "ST_ConcaveHull(g, 0.5, false)"
+    assert (
+        dialect.st_concave_hull("g", 0.3, allow_holes=True)
+        == "ST_ConcaveHull(g, 0.3, true)"
+    )
+
+
+def test_geometry_functions_raise_on_gpkg():
+    from gispulse.persistence.sql_dialect import get_dialect
+
+    gpkg = get_dialect("gpkg")
+    for call in (
+        lambda: gpkg.st_boundary("g"),
+        lambda: gpkg.st_convex_hull("g"),
+        lambda: gpkg.st_make_valid("g"),
+        lambda: gpkg.st_simplify("g", 1.0),
+    ):
+        with pytest.raises(NotImplementedError):
+            call()
