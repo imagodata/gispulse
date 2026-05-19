@@ -26,10 +26,29 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-# Single source of truth lives in ``core.plugin_model`` (epic #175).
-# Re-exported (redundant alias) so existing importers of
-# ``core.plugin_contracts`` — notably ``core.plugin_hub`` — keep working.
+# --- compat 1.x -> 2.0 (retirer en 2.1) -----------------------------------
+# B-4 (audit breaking-changes 2.0.0, 2026-05-19).
+#
+# The v1.8.0 consolidation introduced ``core.plugin_model`` as the single,
+# import-free source of truth for the plugin vocabulary. ``PROTOCOL_VERSION``
+# was the *only* symbol that physically moved out of this module — every
+# Protocol and ``LicenceState`` below were defined here in 1.6.2 and still
+# are. It is re-exported here so 1.x importers of ``core.plugin_contracts``
+# (notably ``core.plugin_hub``) keep resolving the name unchanged.
+#
+# NOTE — scope intentionally narrow. The enums/dataclasses ``Tier``,
+# ``Origin``, ``PluginKind``, ``PluginManifest``, ``DataPackManifest`` etc.
+# were *never* importable from this module in 1.6.2 (verified against the
+# published wheel: 1.6.2 ``plugin_contracts.py`` exposed only the 8 names
+# in ``__all__`` below; ``Tier`` lived in ``persistence/tier.py`` as plain
+# strings). They are net-new v1.8.0 symbols and live solely in
+# ``core.plugin_model``. They are deliberately NOT re-exported here — doing
+# so would invent a compat contract that never existed and permanently
+# widen this module's public surface. New code must import them from
+# ``gispulse.core.plugin_model`` directly.
 from gispulse.core.plugin_model import PROTOCOL_VERSION as PROTOCOL_VERSION
+
+# --------------------------------------------------------------------------
 
 if TYPE_CHECKING:
     from fastapi import APIRouter, FastAPI
@@ -202,3 +221,31 @@ class McpResourceFactory(Protocol):
 
     def register(self, mcp: Any) -> None:
         ...
+
+
+# The eight names below are the public surface 1.6.2 exposed from this
+# module (it shipped no ``__all__``). They MUST stay importable from
+# ``gispulse.core.plugin_contracts`` for the whole 2.x line — see the
+# regression test ``test_plugin_contracts_compat``. ``PROTOCOL_VERSION`` is
+# re-exported from ``plugin_model`` (compat block above); the seven
+# Protocols / ``LicenceState`` are defined in this module. The additive
+# v1.8.0 names (``PluginHostContext``, ``ContextAwareRouterFactory``,
+# ``LifecycleHook``, ``McpToolFactory``, ``McpResourceFactory``) are also
+# listed — they were absent in 1.6.2 but are part of the 2.0 surface.
+__all__ = [
+    # --- 1.6.2 public surface (B-4 compat guarantee) ---
+    "PROTOCOL_VERSION",
+    "RouterFactory",
+    "MiddlewareFactory",
+    "AuthProvider",
+    "BillingProvider",
+    "LicenceState",
+    "LicenceProvider",
+    "Connector",
+    # --- additive since v1.8.0 ---
+    "PluginHostContext",
+    "ContextAwareRouterFactory",
+    "LifecycleHook",
+    "McpToolFactory",
+    "McpResourceFactory",
+]

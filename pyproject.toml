@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gispulse"
-version = "1.6.2"
+version = "2.0.0"
 description = "Modular geospatial engine with business rules, triggers, and dual operating modes (DuckDB/PostGIS)"
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.10"
