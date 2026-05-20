@@ -106,6 +106,18 @@ _DATA_PACKS_DIR_ENV = "GISPULSE_DATA_PACKS_DIR"
 # Single-string returns are also accepted for the common one-manifest case.
 _DATA_PACK_ENTRYPOINT_GROUP = "gispulse.data_packs"
 
+# G1a (#271) — Ed25519 public key (base64 DER) used to verify the
+# ``signature`` field of an EXTERNAL data-pack manifest. Mirrors the
+# operational shape of ``GISPULSE_LICENCE_PUBLIC_KEY`` so the same
+# rotation tooling can configure both.
+_DATA_PACK_PUBLIC_KEY_ENV = "GISPULSE_DATA_PACK_PUBLIC_KEY"
+
+# When true, EXTERNAL manifests without a ``signature`` are refused.
+# Default false so a fresh install with no rotation tooling still loads
+# the bundled packs and unsigned community packs. Recommended in CI for
+# any deploy that ships gated content.
+_DATA_PACK_REQUIRE_SIGNATURE_ENV = "GISPULSE_DATA_PACK_REQUIRE_SIGNATURE"
+
 
 def _tier_from_str(value: object) -> Tier:
     """Map a tier string to :class:`Tier`, defaulting to community."""
@@ -425,19 +437,25 @@ class ExtensionHub:
     def _discover_data_packs(self) -> None:
         """Discover declarative data packs — the data regime of the hub.
 
-        The v1.8.0 ExtensionHub refonte (Chantier C) adds a second
-        discovery regime alongside Python entry-points: declarative
-        YAML/JSON manifests that ship *data* (templates, catalog sources,
-        basemaps, projections) and never code. Scans the bundled
-        first-party manifests plus any manifest files under the
-        ``GISPULSE_DATA_PACKS_DIR`` directory.
+        Three discovery channels are walked: bundled first-party manifests
+        (``Origin.INTERNAL``), third-party PyPI packs exposing the
+        ``gispulse.data_packs`` entry-point, and manifests under
+        ``GISPULSE_DATA_PACKS_DIR``.
 
         Each manifest becomes a :class:`~core.plugin_model.PluginRecord`
         of kind :attr:`~core.plugin_model.PluginKind.DATA_PACK` in the
         single unified inventory. No code is imported, so a data pack
-        never reaches ``FAILED`` — trust is trivially ``verified`` and
-        tier gating is fully data-driven; a malformed manifest is logged
-        and skipped.
+        never reaches ``FAILED`` — trust is data-driven; a malformed
+        manifest is logged and skipped.
+
+        G1a (#271) signature gate: an EXTERNAL manifest carrying
+        ``signature`` is verified against
+        ``GISPULSE_DATA_PACK_PUBLIC_KEY`` before being registered. A bad
+        signature is logged and dropped so a tampered pack never reaches
+        an ACTIVE record. Bundled INTERNAL manifests are exempt — the OSS
+        tree is the source of truth. Unsigned EXTERNAL manifests are
+        admitted by default (rollout-friendly); set
+        ``GISPULSE_DATA_PACK_REQUIRE_SIGNATURE=true`` to refuse them.
         """
         for path, origin in _data_pack_manifest_paths():
             raw = _read_manifest(path)
@@ -449,6 +467,10 @@ class ExtensionHub:
                 log.warning(
                     "data_pack_manifest_invalid", path=str(path), error=str(exc)
                 )
+                continue
+            if origin is Origin.EXTERNAL and not _accept_data_pack_signature(
+                manifest, raw, path
+            ):
                 continue
             rec = PluginRecord(
                 name=manifest.name,
@@ -701,6 +723,105 @@ def _read_manifest(path: Path) -> dict[str, Any] | None:
         log.warning("data_pack_manifest_not_a_mapping", path=str(path))
         return None
     return raw
+
+
+_DATA_PACK_PUBLIC_KEY_CACHE: dict[str, Any] = {}
+
+
+def _data_pack_public_key() -> Any | None:
+    """Return the configured Ed25519 public key, or ``None`` if absent.
+
+    Cached on the env-var value so a key rotation requires a restart but
+    repeated discovery calls during the same process are cheap.
+    """
+    raw = os.environ.get(_DATA_PACK_PUBLIC_KEY_ENV, "").strip()
+    if not raw:
+        return None
+    if raw in _DATA_PACK_PUBLIC_KEY_CACHE:
+        return _DATA_PACK_PUBLIC_KEY_CACHE[raw]
+    try:
+        from gispulse.core.data_pack_signature import load_public_key_b64
+
+        key = load_public_key_b64(raw)
+    except Exception as exc:  # noqa: BLE001 — gracefully degrade
+        log.warning(
+            "data_pack_public_key_unavailable",
+            env=_DATA_PACK_PUBLIC_KEY_ENV,
+            error=str(exc),
+        )
+        return None
+    _DATA_PACK_PUBLIC_KEY_CACHE[raw] = key
+    return key
+
+
+def _require_data_pack_signature() -> bool:
+    """True when ``GISPULSE_DATA_PACK_REQUIRE_SIGNATURE`` is truthy."""
+    raw = os.environ.get(_DATA_PACK_REQUIRE_SIGNATURE_ENV, "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _accept_data_pack_signature(
+    manifest: "DataPackManifest", raw: dict[str, Any], path: Path
+) -> bool:
+    """Gate an EXTERNAL data-pack on its Ed25519 signature.
+
+    Returns:
+        ``True`` if the manifest should be registered; ``False`` if it
+        must be dropped (bad signature, or signature required but missing
+        / unverifiable). Always logs the decision.
+
+    Policy (G1a, #271):
+
+    * unsigned manifest + signature not required → admit;
+    * unsigned manifest + signature required → drop;
+    * signed manifest but no public key configured → drop (we cannot
+      validate the claim, so refusing is the safe default);
+    * signed manifest + key configured + valid signature → admit;
+    * signed manifest + key configured + invalid signature → drop.
+    """
+    public_key = _data_pack_public_key()
+    has_sig = bool(manifest.signature)
+
+    if not has_sig:
+        if _require_data_pack_signature():
+            log.warning(
+                "data_pack_signature_required_missing",
+                name=manifest.name,
+                path=str(path),
+            )
+            return False
+        return True
+
+    if public_key is None:
+        log.warning(
+            "data_pack_signature_no_public_key",
+            name=manifest.name,
+            path=str(path),
+        )
+        return False
+
+    from gispulse.core.data_pack_signature import (
+        DataPackSignatureError,
+        verify_manifest_dict,
+    )
+
+    try:
+        verify_manifest_dict(raw, manifest.signature or "", public_key)
+    except DataPackSignatureError as exc:
+        log.warning(
+            "data_pack_signature_invalid",
+            name=manifest.name,
+            path=str(path),
+            error=str(exc),
+        )
+        return False
+
+    log.debug(
+        "data_pack_signature_verified",
+        name=manifest.name,
+        path=str(path),
+    )
+    return True
 
 
 def _eps(group: str):

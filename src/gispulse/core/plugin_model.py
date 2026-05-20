@@ -251,6 +251,10 @@ class DataPackManifest:
     tier: Tier = Tier.COMMUNITY
     entries: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # G1a (#271): Ed25519 signature of the canonical JSON of the manifest
+    # *without* this field. Optional — bundled OSS manifests don't carry
+    # one; third-party PyPI packs sign with the gispulse-enterprise key.
+    signature: str | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "DataPackManifest":
@@ -271,6 +275,12 @@ class DataPackManifest:
         except ValueError:
             tier = Tier.COMMUNITY
         entries = list(raw.get("entries", []) or [])
+        signature = raw.get("signature")
+        if signature is not None and not isinstance(signature, str):
+            raise ValueError(
+                f"data pack {name!r}: 'signature' must be a string, "
+                f"got {type(signature).__name__}"
+            )
         return cls(
             name=name,
             content=content,
@@ -280,6 +290,7 @@ class DataPackManifest:
             tier=tier,
             entries=entries,
             metadata=dict(raw.get("metadata", {}) or {}),
+            signature=signature,
         )
 
 
