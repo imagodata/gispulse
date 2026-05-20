@@ -231,6 +231,8 @@ def translate_expression(expr: str) -> str:
 SqlBuilder = Callable[[SQLDialect, gpd.GeoDataFrame, dict, dict], str]
 # An optional eligibility gate evaluated on params alone (no frame).
 SqlGate = Callable[[dict], bool]
+# An optional (result, params) -> result hook run on the decoded result.
+SqlPost = Callable[[gpd.GeoDataFrame, dict], gpd.GeoDataFrame]
 
 
 class _SqlPushdownStrategy(ExecutionStrategy):
@@ -244,12 +246,14 @@ class _SqlPushdownStrategy(ExecutionStrategy):
         *,
         gate: SqlGate | None,
         extra_inputs: dict[str, str],
+        post: "SqlPost | None" = None,
     ):
         self._backend = backend
         self._capability = capability
         self._build = build
         self._gate = gate
         self._extra_inputs = extra_inputs  # logical name -> param key
+        self._post = post
         self.mode = _MODE[backend]
 
     def can_execute(self, ctx: ExecutionContext) -> bool:
@@ -276,7 +280,10 @@ class _SqlPushdownStrategy(ExecutionStrategy):
         except Untranslatable as exc:
             log.debug("sql_pushdown_declined", backend=self._backend, reason=str(exc))
             return self._python_fallback(gdf, ctx.params)
-        return engine.sql_to_gdf(sql)
+        result = engine.sql_to_gdf(sql)
+        if self._post is not None:
+            result = self._post(result, ctx.params)
+        return result
 
     def _python_fallback(self, gdf: gpd.GeoDataFrame, params: dict) -> gpd.GeoDataFrame:
         from gispulse.capabilities.base import safe_execute
@@ -295,6 +302,7 @@ def attach_sql_pushdown(
     *,
     gate: SqlGate | None = None,
     extra_inputs: dict[str, str] | None = None,
+    post: "SqlPost | None" = None,
 ) -> None:
     """Wire DuckDB + PostGIS push-down strategies onto a capability class.
 
@@ -309,14 +317,17 @@ def attach_sql_pushdown(
             ``False`` to defer to Python (e.g. required params absent).
         extra_inputs:   Logical-name → param-key map of additional
             GeoDataFrame inputs to register (e.g. ``{"ref": "ref_gdf"}``).
+        post:           Optional ``(result, params) -> result`` hook run on
+            the decoded GeoDataFrame — e.g. ``reproject`` re-stamps the
+            target CRS, which the engine's result decoder cannot infer.
     """
     instance = capability_cls()
     extras = extra_inputs or {}
     capability_cls._strategies = [
         _SqlPushdownStrategy(
-            "postgis", instance, build, gate=gate, extra_inputs=extras
+            "postgis", instance, build, gate=gate, extra_inputs=extras, post=post
         ),
         _SqlPushdownStrategy(
-            "duckdb", instance, build, gate=gate, extra_inputs=extras
+            "duckdb", instance, build, gate=gate, extra_inputs=extras, post=post
         ),
     ]

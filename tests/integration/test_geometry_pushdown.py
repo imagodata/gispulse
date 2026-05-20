@@ -161,3 +161,95 @@ def test_postgis_geometry_pushdown_matches_duckdb(capability, params, layer, rel
     _assert_geom_equivalent(
         duck_result, pg_result, rel_tol=rel_tol, label=f"{capability.name} x-engine"
     )
+
+
+# ===========================================================================
+# Lot 3b — aggregating / two-layer / CRS caps
+# ===========================================================================
+
+
+from shapely.geometry import LineString  # noqa: E402
+
+from gispulse.capabilities.vector.diff import SymmetricDifferenceCapability  # noqa: E402
+from gispulse.capabilities.vector.reproject import ReprojectCapability  # noqa: E402
+from gispulse.capabilities.vector.simplify import SimplifyCapability  # noqa: E402
+from gispulse.capabilities.vector.union import UnionCapability  # noqa: E402
+
+
+def _ref_layer() -> gpd.GeoDataFrame:
+    from shapely.geometry import Polygon as _P
+
+    return gpd.GeoDataFrame(
+        {"id": [9]},
+        geometry=[_P([(3, 3), (8, 3), (8, 8), (3, 8)])],
+        crs="EPSG:2154",
+    )
+
+
+def _line_layer() -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(
+        {"id": [1]},
+        geometry=[
+            LineString([(0, 0), (1, 0.1), (2, -0.1), (3, 0.05), (4, 0)]),
+        ],
+        crs="EPSG:2154",
+    )
+
+
+def test_union_duckdb_matches_python():
+    gdf = _polys()
+    py = UnionCapability().execute(gdf.copy())
+    with DuckDBSession() as eng:
+        sql = UnionCapability().execute_with_context(gdf, _ctx(eng, gdf, {}))
+    assert len(sql) == len(py) == 1
+    a, b = sql.geometry.iloc[0], py.geometry.iloc[0]
+    assert abs(a.area - b.area) <= 1e-6 * max(b.area, 1.0)
+
+
+def test_reproject_duckdb_matches_python():
+    gdf = _polys()
+    params = {"target_crs": "EPSG:4326"}
+    py = ReprojectCapability().execute(gdf.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = ReprojectCapability().execute_with_context(gdf, _ctx(eng, gdf, params))
+    assert str(sql.crs) == str(py.crs) == "EPSG:4326"
+    for a, b in zip(sorted(sql.geometry, key=lambda g: g.centroid.x),
+                    sorted(py.geometry, key=lambda g: g.centroid.x)):
+        assert abs(a.centroid.x - b.centroid.x) <= 1e-6
+        assert abs(a.centroid.y - b.centroid.y) <= 1e-6
+
+
+def test_symmetric_difference_duckdb_matches_python():
+    gdf, ref = _polys(), _ref_layer()
+    params = {"ref_gdf": ref}
+    py = SymmetricDifferenceCapability().execute(gdf.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = SymmetricDifferenceCapability().execute_with_context(
+            gdf, _ctx(eng, gdf, params)
+        )
+    _assert_geom_equivalent(sql, py, rel_tol=1e-6, label="symmetric_difference duckdb")
+
+
+def test_simplify_duckdb_matches_python():
+    gdf = _line_layer()
+    params = {"tolerance": 0.5}
+    py = SimplifyCapability().execute(gdf.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = SimplifyCapability().execute_with_context(gdf, _ctx(eng, gdf, params))
+    # GEOS TopologyPreservingSimplifier in both — vertex counts must match.
+    assert len(sql) == len(py) == 1
+    assert (
+        len(sql.geometry.iloc[0].coords) == len(py.geometry.iloc[0].coords)
+    )
+
+
+def test_simplify_non_dp_falls_back_to_python():
+    gdf = _line_layer()
+    params = {"tolerance": 0.5, "algorithm": "vw"}
+    with DuckDBSession() as eng:
+        result = SimplifyCapability().execute_with_context(
+            gdf, _ctx(eng, gdf, params)
+        )
+    # The vw path is Python-only; behaviour must equal the plain execute.
+    expected = SimplifyCapability().execute(gdf.copy(), **params)
+    assert len(result) == len(expected)
