@@ -1625,6 +1625,56 @@ def migrate(
             typer.echo(_yaml.safe_dump(v3, sort_keys=False, allow_unicode=True))
 
 
+# ---------------------------------------------------------------------------
+# explain — inspect a v3 manifest's DAG + per-node strategy dispatch
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def explain(
+    manifest_file: Path = typer.Argument(
+        ..., help="v3 manifest file (.yaml/.yml/.json)."
+    ),
+    engine: str | None = typer.Option(
+        None, "--engine", "-e",
+        help="Override the engine used to score strategy eligibility "
+             "(defaults to staging.engine, then 'duckdb').",
+    ),
+    fmt: str = typer.Option(
+        "text", "--format", "-f",
+        help="Output format: 'text' (default) or 'json'.",
+    ),
+) -> None:
+    """Inspect a v3 manifest's DAG and per-node ELT/ETL dispatch.
+
+    Walks the manifest's compiled DAG and surfaces, for each step,
+    which :class:`ExecutionStrategy` ``select_strategy()`` would pick
+    on the configured engine — making the SQL push-down vs Python
+    fallback choice **predictable before any execution**.
+    """
+    import json as _json
+    from dataclasses import asdict
+
+    from gispulse.core.explain import explain_manifest, format_explanation_text
+    from gispulse.core.manifest_v3 import load_manifest_v3
+
+    if not manifest_file.exists():
+        typer.echo(f"Error: manifest file not found: {manifest_file}", err=True)
+        raise typer.Exit(1)
+
+    try:
+        manifest = load_manifest_v3(manifest_file)
+    except Exception as exc:
+        typer.echo(f"Error: cannot load manifest — {exc}", err=True)
+        raise typer.Exit(1)
+
+    explanation = explain_manifest(manifest, engine=engine)
+    if fmt == "json":
+        typer.echo(_json.dumps(asdict(explanation), indent=2, ensure_ascii=False))
+    else:
+        typer.echo(format_explanation_text(explanation))
+
+
 def main() -> None:
     from gispulse._pyogrio_warnings import silence_gispulse_extension_warnings
 
