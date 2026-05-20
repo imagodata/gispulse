@@ -215,8 +215,16 @@ class PluginManifest:
 
 # Recognised data-pack content types. Open set — a new content type is a
 # new value and needs no contract change, mirroring the SourceDomain axiom.
+# ``regulatory-zoning`` (T3, #270) ships urban-planning zonage manifests
+# consumed by the data-pack regulatory pack (gispulse-data-regulatory).
 DATA_PACK_CONTENTS: frozenset[str] = frozenset(
-    {"template-pack", "source-catalog", "basemap-pack", "projection-pack"}
+    {
+        "template-pack",
+        "source-catalog",
+        "basemap-pack",
+        "projection-pack",
+        "regulatory-zoning",
+    }
 )
 
 
