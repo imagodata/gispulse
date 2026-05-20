@@ -147,3 +147,71 @@ def build_area_length(dialect, gdf, params, tables) -> str:
             f"(ST_Length({geom}) + ST_Perimeter({geom})) AS {qi(length_col)}"
         )
     return f"SELECT *, {', '.join(adds)} FROM {tables['input']}"
+
+
+# ===========================================================================
+# ELT Lot 3b (#246) — aggregating / two-layer / CRS geometry capabilities
+# ===========================================================================
+
+
+def build_union(dialect, gdf, params, tables) -> str:
+    """``union`` — dissolve every feature into one geometry (attrs dropped)."""
+    reg = _geom_reg(dialect, gdf)
+    agg = dialect.st_union_agg(dialect.geom_ref())
+    return f"SELECT {agg} AS {qi(reg)} FROM {tables['input']}"
+
+
+def build_reproject(dialect, gdf, params, tables) -> str:
+    """``reproject`` — ST_Transform to a target CRS (CRS re-stamped post-hoc)."""
+    if gdf.crs is None:
+        raise Untranslatable("reproject: source layer has no CRS")
+    src = gdf.crs.to_epsg()
+    if src is None:
+        raise Untranslatable("reproject: source CRS has no EPSG code")
+    dst = _epsg(params.get("target_crs", "EPSG:4326"))
+    expr = dialect.st_transform(dialect.geom_ref(), src_srid=src, dst_srid=dst)
+    return f"SELECT {_replace_geom_projection(dialect, gdf, expr)} FROM {tables['input']}"
+
+
+def reproject_post(result, params):
+    """Stamp the target CRS — the result decoder infers the *source* CRS."""
+    return result.set_crs(params.get("target_crs", "EPSG:4326"), allow_override=True)
+
+
+def build_symmetric_difference(dialect, gdf, params, tables) -> str:
+    """``symmetric_difference`` — A XOR (unioned reference layer), per feature."""
+    ref_union = (
+        f"(SELECT {dialect.st_union_agg(dialect.geom_ref())} FROM {tables['ref']})"
+    )
+    geom = dialect.geom_ref()
+    xor = dialect.st_sym_difference(geom, ref_union)
+    # Empty / null geometries are passed through unchanged, as in Python.
+    expr = (
+        f"CASE WHEN {geom} IS NULL OR {dialect.st_is_empty(geom)} "
+        f"THEN {geom} ELSE {xor} END"
+    )
+    return f"SELECT {_replace_geom_projection(dialect, gdf, expr)} FROM {tables['input']}"
+
+
+def build_simplify(dialect, gdf, params, tables) -> str:
+    """``simplify`` — Douglas-Peucker, in a metric CRS, round-tripped back."""
+    algorithm = params.get("algorithm", "dp")
+    if algorithm != "dp":
+        raise Untranslatable(f"simplify algorithm {algorithm!r} is not SQL-pushable")
+    tol = params.get("tolerance", 1.0)
+    if tol is None or float(tol) <= 0:
+        raise Untranslatable("simplify requires tolerance > 0")
+    geom = dialect.geom_ref()
+    src = gdf.crs.to_epsg() if gdf.crs is not None else None
+    if gdf.crs is not None and src is None:
+        raise Untranslatable("simplify: source CRS has no EPSG code")
+    if src is not None:
+        meters = _epsg(params.get("crs_meters", "EPSG:3857"))
+        geom = dialect.st_transform(geom, src_srid=src, dst_srid=meters)
+    if params.get("preserve_topology", True):
+        geom = dialect.st_simplify_preserve_topology(geom, tol)
+    else:
+        geom = dialect.st_simplify(geom, tol)
+    if src is not None:
+        geom = dialect.st_transform(geom, src_srid=meters, dst_srid=src)
+    return f"SELECT {_replace_geom_projection(dialect, gdf, geom)} FROM {tables['input']}"

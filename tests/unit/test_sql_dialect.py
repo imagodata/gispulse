@@ -399,3 +399,45 @@ def test_geometry_functions_raise_on_gpkg():
     ):
         with pytest.raises(NotImplementedError):
             call()
+
+
+# ===========================================================================
+# ELT Lot 3b (#246) — aggregating / two-layer / topology divergences
+# ===========================================================================
+
+
+def test_st_difference_and_topology_simplify_spelled_identically():
+    for d in (DuckDBDialect(), PostGISDialect()):
+        assert d.st_difference("a", "b") == "ST_Difference(a, b)"
+        assert d.st_simplify_preserve_topology("g", 0.5) == (
+            "ST_SimplifyPreserveTopology(g, 0.5)"
+        )
+
+
+def test_st_union_agg_diverges_between_dialects():
+    # PostGIS spells the aggregate ST_Union(col); DuckDB needs ST_Union_Agg.
+    assert PostGISDialect().st_union_agg("geom") == "ST_Union(geom)"
+    assert DuckDBDialect().st_union_agg("geom") == "ST_Union_Agg(geom)"
+
+
+def test_st_sym_difference_emulated_on_duckdb():
+    # PostGIS has native ST_SymDifference; DuckDB composes it from
+    # the two one-sided differences via ST_Union.
+    assert PostGISDialect().st_sym_difference("a", "b") == "ST_SymDifference(a, b)"
+    assert DuckDBDialect().st_sym_difference("a", "b") == (
+        "ST_Union(ST_Difference(a, b), ST_Difference(b, a))"
+    )
+
+
+def test_lot3b_methods_raise_on_gpkg():
+    from gispulse.persistence.sql_dialect import get_dialect
+
+    gpkg = get_dialect("gpkg")
+    for call in (
+        lambda: gpkg.st_difference("a", "b"),
+        lambda: gpkg.st_simplify_preserve_topology("g", 1.0),
+        lambda: gpkg.st_union_agg("g"),
+        lambda: gpkg.st_sym_difference("a", "b"),
+    ):
+        with pytest.raises(NotImplementedError):
+            call()

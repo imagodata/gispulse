@@ -220,3 +220,22 @@ class VectorDiffCapability(Capability):
         }
 
 
+# ---------------------------------------------------------------------------
+# ELT Lot 3 (#246) — DuckDB / PostGIS SQL push-down strategy
+# ---------------------------------------------------------------------------
+# Only symmetric_difference pushes down — it is a clean per-feature XOR
+# against the unioned reference. vector_diff stays on Python: its
+# row-by-row added/removed/modified diff with Hausdorff tolerance is not
+# a SQL-pure operation.
+
+from gispulse.capabilities import _geometry_sql as _gsql  # noqa: E402
+from gispulse.capabilities.sql_pushdown import attach_sql_pushdown  # noqa: E402
+
+attach_sql_pushdown(
+    SymmetricDifferenceCapability,
+    _gsql.build_symmetric_difference,
+    gate=lambda p: p.get("ref_gdf") is not None,
+    extra_inputs={"ref": "ref_gdf"},
+)
+
+
