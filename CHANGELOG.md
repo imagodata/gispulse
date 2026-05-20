@@ -7,6 +7,124 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0]
+
+The first **major** release. Numerically it's a jump from `1.6.2`, but in
+practice the API surface is the same as `1.7.0` / `1.8.0` / `1.9.0` —
+features that accumulated on `main` without ever being published to
+PyPI. We promote the whole stack in one tag and reset the public version
+to match the product story.
+
+Three threads converge here:
+
+1. **Foundations** (was tagged internally `v1.8.0`) — `gispulse.*`
+   mono-package, `ExtensionHub` replacing `PluginHub`, `GISPulseApp`
+   façade, full MCP server, data-pack regime, CLI / HTTP / template
+   routers.
+2. **Worldwide aggregator** (was tagged internally `v1.9.0`) — lazy
+   DuckDB-backed fetcher network covering 4 protocol families
+   (`GeoParquetS3`, `OGCFeatures`, `STAC`, `HttpFile`) and a curated
+   `worldwide_catalog.yml` listing France / EU / world data sources.
+3. **Data-pack rails** — the first *third-party* data-packs can now ship
+   on PyPI: a discovery channel via the `gispulse.data_packs` entry-point,
+   an Ed25519 signature gate on EXTERNAL manifests, and a shared licence
+   payload format that also covers the future SaaS tenant licence.
+
+The full migration path is in [`MIGRATION-2.0.md`](MIGRATION-2.0.md). The
+short version: **no application code change is strictly required** — the
+`_compat.py` meta-path shim absorbs the import-path move and the
+`PluginHub` rename keeps a working alias until 2.1.
+
+### Added
+
+- **Data-pack regime — PyPI discovery channel (T5).** A third channel
+  alongside the bundled OSS manifests and `GISPULSE_DATA_PACKS_DIR`: a
+  Python entry-point group `gispulse.data_packs` lets a third-party
+  package register its manifests at install time. One bad pack never
+  locks out the others (every failure path is isolated and logged).
+  (#269)
+- **Data-pack regime — Ed25519 signature gate (G1a).** `DataPackManifest`
+  gains an optional `signature` field. An EXTERNAL manifest carrying a
+  signature is verified against the public key in
+  `GISPULSE_DATA_PACK_PUBLIC_KEY` before being registered; tampered or
+  foreign-signed manifests are dropped with explicit log events
+  (`data_pack_signature_invalid`,
+  `data_pack_signature_no_public_key`). INTERNAL (bundled) manifests
+  are exempt — the OSS tree is the source of truth. Unsigned EXTERNAL
+  packs are admitted by default (rollout-friendly); set
+  `GISPULSE_DATA_PACK_REQUIRE_SIGNATURE=true` to refuse them. (#271)
+- **Unified Ed25519 licence payload format (L0).** New
+  `gispulse.core.licence_format` defines the single payload schema
+  shared by the per-machine licence key (Mode A), the future SaaS
+  tenant licence (Mode B) and the data-pack manifest signature.
+  Versioned via `schema_version`, forward-compat (unknown fields land
+  in `LicencePayload.extra`, never crash an older verifier),
+  canonicalised JSON (sort-keys, compact, UTF-8) so bytes-to-sign are
+  stable across runs and Python versions. (#266)
+- **High-level OGC client for data packs (T1).** New
+  `gispulse.core.fetchers.ogc_client.fetch_features(...)` — a one-liner
+  any data-pack can use without building an `AccessSpec`. Thin layer
+  over the consolidated transport: argument normalisation, WFS vs OGC
+  API Features dispatch, **typed network-error surface**
+  (`OGCEndpointUnreachable`, `OGCClientError`) so callers don't depend
+  on httpx classes. (#267)
+- **Declarative ZoningElement normaliser (T2).** New
+  `gispulse.core.zoning_normalizer` maps heterogeneous source records
+  into a common 8-field schema (`geometry, zone_code, zone_label,
+  hilucs_class, plan_id, plan_date, regulation_ref, source_country`)
+  inspired by INSPIRE PlannedLandUse. `ZoningMapping` is a flat
+  declarative `{target -> source_key}` table plus an optional
+  best-effort HILUCS lookup. CRS is mandatory and must be explicit
+  (`EPSG:XXXX`). HILUCS misses leave the column `None`, never crash
+  the batch. (#268)
+- **`regulatory-zoning` data-pack content type (T3).** New value in
+  `DATA_PACK_CONTENTS` so a manifest of that type is recognised by the
+  discovery and signature gate. New `RegulatoryZoningEntry` dataclass
+  + `from_dict()` validator: required-field set, no unknown fields,
+  ISO-3166-1 alpha-2 country, known protocol, explicit `EPSG:` CRS,
+  bbox 4-numbers. `DataPackManifest.entries` stays a list of opaque
+  dicts — entries are validated on demand so the pack format can
+  evolve without changing the manifest loader. (#270)
+
+### Changed
+
+- **`PluginHub` renamed to `ExtensionHub`.** The class lives in the
+  same module (`gispulse.core.plugin_hub`); a `PluginHub = ExtensionHub`
+  alias preserves existing imports. The alias is scheduled for removal
+  in **2.1.0**. The data-pack regime (`_discover_data_packs`) is wired
+  into both bundled discovery and the new PyPI channel.
+- **`gispulse.core.plugin_contracts` public surface frozen via
+  `__all__`.** The 8 symbols actually exported by the 1.6.2 wheel are
+  gelled with an explicit `__all__` and an anti-regression test. The
+  types that moved to `plugin_model.py` during the consolidation
+  (`Tier`, `PluginManifest`, `DataPackManifest`, …) were never in
+  `plugin_contracts` in 1.6.2 — no compat shim is needed.
+- **`_compat.py` deprecation horizon corrected.** The docstring and
+  `DeprecationWarning` message had carried over a stale "removed in
+  1.9.0" line; both now correctly point at **2.1.0**, in step with
+  the release plan.
+
+### Fixed
+
+- **`security-audit` job — silence two disputed upstream advisories.**
+  `pip-audit` was failing on `joblib` PYSEC-2024-277 (disputed by
+  upstream, only triggered when loading untrusted cache content) and
+  `pyjwt` PYSEC-2025-183 (disputed by upstream, the key length is
+  chosen by the application, not the library). Both are added to the
+  `--ignore-vuln` allowlist with a re-evaluation note. No code change.
+
+### Migration
+
+See [`MIGRATION-2.0.md`](MIGRATION-2.0.md). TL;DR:
+
+- imports under top-level `core.*`, `capabilities.*`, `rules.*`,
+  `orchestration.*`, `persistence.*`, `catalog.*` continue to work via
+  the `_compat.py` meta-path shim with a one-time `DeprecationWarning`;
+- `PluginHub` continues to work via the `PluginHub = ExtensionHub`
+  alias;
+- both will be removed in **2.1.0** — migrate to `gispulse.*` /
+  `ExtensionHub` at your leisure.
+
 ## [1.7.0]
 
 The "Wiring the ETL platform" release. EPIC #175 (PR #189) landed the unified plugin model as a *skeleton*; v1.7.0 makes it work end to end — a data source can be declared, fetched over the network through a protocol registry, and watched for freshness so an external revision fires a trigger. GISPulse gains an "Extract" stage alongside its existing local-CDC triggers.
