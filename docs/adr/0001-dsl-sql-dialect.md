@@ -4,6 +4,7 @@
 **Date:** 2026-05-07
 **Deciders:** GISPulse maintainers
 **Issue:** [#140](https://github.com/imagodata/gispulse/issues/140) (Q1 of EPIC [#139](https://github.com/imagodata/gispulse/issues/139))
+**Cross-reference:** [ADR 0005 — unified `version: 3` manifest](./0005-unified-manifest.md). The v3 manifest's per-node ELT/ETL dispatch ([Lot 1-3 push-down](../../docs-site/guide/elt-manifest.md#frontière-etl--elt--select_strategy), [`gispulse explain`](../../docs-site/guide/elt-manifest.md#gispulse-explain--inspecter-le-dag-avant-de-courir)) is the user-facing surface of the contract-dialect choice fixed here.
 
 ## Context
 
