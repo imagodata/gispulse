@@ -11,8 +11,11 @@ It is installed by :mod:`gispulse`'s package ``__init__``, so it only ever
 resolves names *after* ``import gispulse`` has run — no top-level module is
 added to the wheel and there is no PyPI namespace collision.
 
-TRANSITIONAL — to be removed in v1.9.0 once ``gispulse-enterprise`` and any
-out-of-tree consumers have migrated to the ``gispulse.*`` paths.
+TRANSITIONAL — retained through the whole 2.0.x line and removed in v2.1.0,
+once ``gispulse-enterprise`` and any out-of-tree consumers have migrated to
+the ``gispulse.*`` paths. (The earlier "1.9.0" deadline was superseded: the
+1.7.x/1.8.x/1.9.x line was never published — the consolidation ships
+directly in the major release 2.0.0, so the shim must outlive 2.0.)
 """
 
 from __future__ import annotations
@@ -63,7 +66,7 @@ class _LegacyTopLevelFinder(MetaPathFinder):
             warnings.warn(
                 f"Importing the top-level `{root}` package is deprecated since "
                 f"GISPulse 1.8.0 — import `gispulse.{root}` instead. This "
-                f"compatibility shim will be removed in 1.9.0.",
+                f"compatibility shim will be removed in 2.1.0.",
                 DeprecationWarning,
                 stacklevel=2,
             )
