@@ -24,6 +24,7 @@ import geopandas as gpd
 from gispulse.capabilities.sql_pushdown import (
     Untranslatable,
     qi,
+    sql_literal,
     translate_expression,
 )
 from gispulse.persistence.sql_dialect import SQLDialect
@@ -487,4 +488,111 @@ def build_erase(dialect, gdf, params, tables) -> str:
         f"SELECT {projection} FROM {tables['input']} "
         f"WHERE {erased} IS NOT NULL "
         f"AND NOT {dialect.st_is_empty(erased)}"
+    )
+
+
+# ===========================================================================
+# ELT Lot 3e (#246) — temporal_filter + temporal_join (exact strategy)
+# ===========================================================================
+
+
+def build_temporal_filter(dialect, gdf, params, tables) -> str:
+    """``temporal_filter`` — WHERE clause on a datetime column.
+
+    The column is cast to ``TIMESTAMP`` so string-typed time columns
+    (common when GPKG / CSV inputs are not auto-parsed) work too.
+    ``invert=True`` flips the keep-window into an exclude-window while
+    still dropping NULL timestamps — matching the Python ``~mask &
+    times.notna()`` semantics.
+    """
+    time_col = params.get("time_col", "")
+    if not time_col:
+        raise Untranslatable("temporal_filter missing time_col")
+    start = params.get("start")
+    end = params.get("end")
+    if start is None and end is None:
+        raise Untranslatable("temporal_filter needs at least start or end")
+    if time_col not in gdf.columns:
+        raise Untranslatable(f"temporal_filter time_col {time_col!r} absent")
+
+    include_start = params.get("include_start", True)
+    include_end = params.get("include_end", True)
+    col_expr = f"CAST({qi(time_col)} AS TIMESTAMP)"
+    clauses: list[str] = []
+    if start is not None:
+        op = ">=" if include_start else ">"
+        clauses.append(
+            f"{col_expr} {op} CAST({sql_literal(str(start))} AS TIMESTAMP)"
+        )
+    if end is not None:
+        op = "<=" if include_end else "<"
+        clauses.append(
+            f"{col_expr} {op} CAST({sql_literal(str(end))} AS TIMESTAMP)"
+        )
+    window = " AND ".join(clauses)
+
+    if params.get("invert", False):
+        # Mirror the Python ``~mask & times.notna()`` — NULL timestamps
+        # are excluded regardless of inversion.
+        where = f"{qi(time_col)} IS NOT NULL AND NOT ({window})"
+    else:
+        where = window
+    return f"SELECT * FROM {tables['input']} WHERE {where}"
+
+
+def build_temporal_join_exact(dialect, gdf, params, tables) -> str:
+    """``temporal_join`` strategy=``exact`` — equality join on a time key.
+
+    Asof strategies (``backward`` / ``forward`` / ``nearest``) defer to
+    Python: they need LATERAL + tolerance INTERVAL arithmetic with
+    enough dialect divergences (tolerance string parsing, ``by`` groups)
+    that the SQL push-down's risk/reward is poor for now.
+    """
+    strategy = params.get("strategy", "backward")
+    if strategy != "exact":
+        raise Untranslatable(
+            f"temporal_join push-down handles strategy='exact' only (got {strategy!r})"
+        )
+    ref = params.get("ref_gdf")
+    left_on = params.get("left_on", "")
+    if ref is None or not left_on:
+        raise Untranslatable("temporal_join missing ref_gdf / left_on")
+    right_on = params.get("right_on") or left_on
+    if left_on not in gdf.columns:
+        raise Untranslatable(f"temporal_join left_on {left_on!r} absent")
+    if right_on not in getattr(ref, "columns", []):
+        raise Untranslatable(f"temporal_join right_on {right_on!r} absent")
+
+    left_geom = gdf.geometry.name
+    left_attrs = [c for c in gdf.columns if c != left_geom]
+    right_geom = (
+        ref.geometry.name if hasattr(ref, "geometry") else None
+    )
+    # The right key is merged into the left's column — Python drops the
+    # right-side copy unconditionally — so we exclude it from the ref
+    # projection in both `same key name` and `different key name` cases.
+    right_attrs = [
+        c for c in ref.columns
+        if c != right_geom and c != right_on
+    ]
+    columns = params.get("columns")
+    if columns is not None:
+        right_attrs = [c for c in right_attrs if c in columns]
+    collisions = set(left_attrs) & set(right_attrs)
+
+    geom_reg = _geom_reg(dialect, gdf)
+    parts: list[str] = [f"l.{qi(c)} AS {qi(c)}" for c in left_attrs]
+    parts.append(f"l.{qi(geom_reg)} AS {qi(geom_reg)}")
+    for col in right_attrs:
+        alias = f"{col}_ref" if col in collisions else col
+        parts.append(f"r.{qi(col)} AS {qi(alias)}")
+
+    on_clause = (
+        f"CAST(l.{qi(left_on)} AS TIMESTAMP) = "
+        f"CAST(r.{qi(right_on)} AS TIMESTAMP)"
+    )
+    return (
+        f"SELECT {', '.join(parts)} "
+        f"FROM {tables['input']} l "
+        f"LEFT JOIN {tables['ref']} r ON {on_clause}"
     )

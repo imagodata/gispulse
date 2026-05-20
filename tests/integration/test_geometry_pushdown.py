@@ -486,3 +486,123 @@ def test_nearest_neighbor_postgis_matches_python():
         pg.close()
     assert set(sql.columns) == set(py.columns)
     assert len(sql) == len(py)
+
+
+# ===========================================================================
+# Lot 3e — temporal_filter + temporal_join (exact strategy)
+# ===========================================================================
+
+
+import pandas as pd  # noqa: E402
+
+from gispulse.capabilities.temporal import (  # noqa: E402
+    TemporalFilterCapability,
+    TemporalJoinCapability,
+)
+
+
+def _temporal_layer() -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(
+        {
+            "id": [1, 2, 3, 4],
+            "ts": pd.to_datetime(
+                ["2025-01-01", "2025-06-01", "2025-12-01", "2026-03-01"]
+            ),
+            "name": ["a", "b", "c", "d"],
+        },
+        geometry=[Point(i, i) for i in range(4)],
+        crs="EPSG:4326",
+    )
+
+
+def _temporal_ref() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "ts": pd.to_datetime(["2025-06-01", "2026-03-01"]),
+            "id": [10, 20],
+            "weather": ["sunny", "rainy"],
+        }
+    )
+
+
+def test_temporal_filter_window_duckdb_matches_python():
+    gdf = _temporal_layer()
+    params = {"time_col": "ts", "start": "2025-06-01", "end": "2025-12-31"}
+    py = TemporalFilterCapability().execute(gdf.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = TemporalFilterCapability().execute_with_context(
+            gdf, _ctx(eng, gdf, params)
+        )
+    assert set(sql.columns) == set(py.columns)
+    assert sorted(sql["id"].tolist()) == sorted(py["id"].tolist())
+
+
+def test_temporal_filter_invert_drops_nulls_like_python():
+    gdf = _temporal_layer()
+    params = {
+        "time_col": "ts",
+        "start": "2025-06-01",
+        "end": "2025-12-31",
+        "invert": True,
+    }
+    py = TemporalFilterCapability().execute(gdf.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = TemporalFilterCapability().execute_with_context(
+            gdf, _ctx(eng, gdf, params)
+        )
+    assert sorted(sql["id"].tolist()) == sorted(py["id"].tolist())
+
+
+def test_temporal_filter_open_end_pushed():
+    gdf = _temporal_layer()
+    params = {"time_col": "ts", "start": "2025-06-01"}
+    py = TemporalFilterCapability().execute(gdf.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = TemporalFilterCapability().execute_with_context(
+            gdf, _ctx(eng, gdf, params)
+        )
+    assert sorted(sql["id"].tolist()) == sorted(py["id"].tolist())
+
+
+def test_temporal_join_exact_duckdb_matches_python():
+    gdf = _temporal_layer()
+    ref = _temporal_ref()
+    params = {
+        "ref_gdf": ref,
+        "left_on": "ts",
+        "right_on": "ts",
+        "strategy": "exact",
+    }
+    py = TemporalJoinCapability().execute(gdf.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = TemporalJoinCapability().execute_with_context(
+            gdf, _ctx(eng, gdf, params)
+        )
+    assert set(sql.columns) == set(py.columns)
+    assert len(sql) == len(py)
+    sql_pairs = sorted(
+        zip(sql["id"], sql["weather"].fillna("-")), key=lambda t: t[0]
+    )
+    py_pairs = sorted(
+        zip(py["id"], py["weather"].fillna("-")), key=lambda t: t[0]
+    )
+    assert sql_pairs == py_pairs
+
+
+def test_temporal_join_asof_falls_back_to_python():
+    """Asof strategies (backward / forward / nearest) stay on Python."""
+    gdf = _temporal_layer()
+    ref = _temporal_ref()
+    params = {
+        "ref_gdf": ref,
+        "left_on": "ts",
+        "right_on": "ts",
+        "strategy": "backward",
+    }
+    py = TemporalJoinCapability().execute(gdf.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = TemporalJoinCapability().execute_with_context(
+            gdf, _ctx(eng, gdf, params)
+        )
+    assert set(sql.columns) == set(py.columns)
+    assert len(sql) == len(py)
