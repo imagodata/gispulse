@@ -253,3 +253,125 @@ def test_simplify_non_dp_falls_back_to_python():
     # The vw path is Python-only; behaviour must equal the plain execute.
     expected = SimplifyCapability().execute(gdf.copy(), **params)
     assert len(result) == len(expected)
+
+
+# ===========================================================================
+# Lot 3c — dissolve + spatial_join
+# ===========================================================================
+
+
+from shapely.geometry import Point  # noqa: E402
+
+from gispulse.capabilities.vector.dissolve import DissolveCapability  # noqa: E402
+from gispulse.capabilities.vector.spatial_join import (  # noqa: E402
+    SpatialJoinCapability,
+)
+
+
+def _group_layer() -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(
+        {
+            "id": [1, 2, 3, 4],
+            "name": ["a", "b", "c", "d"],
+            "pop": [10, 20, 30, 40],
+            "grp": ["x", "x", "y", "y"],
+        },
+        geometry=[Point(0, 0), Point(1, 1), Point(5, 5), Point(6, 6)],
+        crs="EPSG:2154",
+    )
+
+
+def _zone_layer() -> gpd.GeoDataFrame:
+    from shapely.geometry import Polygon as _P
+
+    return gpd.GeoDataFrame(
+        {"id": [10, 20], "region": ["XX", "YY"]},
+        geometry=[
+            _P([(-1, -1), (3, -1), (3, 3), (-1, 3)]),
+            _P([(4, 4), (8, 4), (8, 8), (4, 8)]),
+        ],
+        crs="EPSG:2154",
+    )
+
+
+def test_dissolve_by_group_duckdb_matches_python():
+    gdf = _group_layer()
+    params = {"by": "grp"}
+    py = DissolveCapability().execute(gdf.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = DissolveCapability().execute_with_context(
+            gdf, _ctx(eng, gdf, params)
+        )
+    assert set(sql.columns) == set(py.columns)
+    assert sorted(sql["grp"].tolist()) == sorted(py["grp"].tolist())
+    # Each unioned geometry covers the same envelope.
+    py_b = dict(zip(py["grp"], py.geometry))
+    sql_b = dict(zip(sql["grp"], sql.geometry))
+    for grp, geom in py_b.items():
+        a = sql_b[grp]
+        ref = max(geom.envelope.area, 1e-9)
+        sym = geom.symmetric_difference(a).area
+        assert sym / ref <= 1e-6, f"dissolve grp={grp}: geometries diverge"
+
+
+def test_dissolve_no_by_falls_back_to_python():
+    """by=None pushes through Python (avoids the .reset_index() 'index' col)."""
+    gdf = _group_layer()
+    with DuckDBSession() as eng:
+        sql = DissolveCapability().execute_with_context(
+            gdf, _ctx(eng, gdf, {})
+        )
+    py = DissolveCapability().execute(gdf.copy())
+    assert len(sql) == len(py) == 1
+    assert set(sql.columns) == set(py.columns)
+
+
+def test_spatial_join_duckdb_matches_python():
+    gdf = _group_layer()
+    ref = _zone_layer()
+    params = {"ref_gdf": ref, "predicate": "intersects"}
+    py = SpatialJoinCapability().execute(gdf.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = SpatialJoinCapability().execute_with_context(
+            gdf, _ctx(eng, gdf, params)
+        )
+    assert set(sql.columns) == set(py.columns), (
+        f"spatial_join columns differ — sql {sorted(sql.columns)} vs "
+        f"py {sorted(py.columns)}"
+    )
+    assert len(sql) == len(py)
+    # Compare rows by (id_left, id_right) pairs — order-independent.
+    pairs_sql = sorted(zip(sql["id_left"], sql["id_right"]))
+    pairs_py = sorted(zip(py["id_left"], py["id_right"]))
+    assert pairs_sql == pairs_py
+
+
+def test_spatial_join_crs_mismatch_falls_back_to_python():
+    """SQL declines when the two layers don't share a CRS — Python reprojects."""
+    gdf = _group_layer()
+    ref = _zone_layer().to_crs("EPSG:4326")
+    params = {"ref_gdf": ref, "predicate": "intersects"}
+    py = SpatialJoinCapability().execute(gdf.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = SpatialJoinCapability().execute_with_context(
+            gdf, _ctx(eng, gdf, params)
+        )
+    assert set(sql.columns) == set(py.columns)
+    assert len(sql) == len(py)
+
+
+def test_spatial_join_ref_filter_translates():
+    gdf = _group_layer()
+    ref = _zone_layer()
+    params = {
+        "ref_gdf": ref,
+        "predicate": "intersects",
+        "ref_filter": "region == 'XX'",
+    }
+    py = SpatialJoinCapability().execute(gdf.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = SpatialJoinCapability().execute_with_context(
+            gdf, _ctx(eng, gdf, params)
+        )
+    assert len(sql) == len(py)
+    assert set(sql["region"].dropna().unique()) == {"XX"}
