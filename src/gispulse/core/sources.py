@@ -152,12 +152,24 @@ class ProtocolRegistry:
     ) -> SourceResult:
         """Resolve ``access.protocol`` to a fetcher and run it.
 
-        The endpoint is SSRF-checked first (issue #199): a declared
-        source — or a third-party plugin — must not steer a fetch at an
-        internal address. Non-HTTP endpoints (file paths) are left alone.
+        Resolution order:
+
+        1. **Endpoint templating** (:func:`resolve_access_endpoint`) —
+           ``{key}`` placeholders in ``access.endpoint`` are interpolated
+           from ``access.params`` so every adapter, ``LazyFetcher``
+           subclass *or* structural ``Fetcher`` (REST/WFS/STAC adapters
+           registered into ``PROTOCOLS`` by #192), sees a concrete URL.
+        2. **SSRF guard** (issue #199) — runs against the *resolved*
+           endpoint, so a template host (e.g. ``{host}``) cannot bypass
+           the policy by deferring its concrete form.
+        3. **Dispatch** to the registered fetcher.
+
+        Non-HTTP endpoints (file paths) skip the SSRF guard.
         """
+        from gispulse.core.plugin_model import resolve_access_endpoint
         from gispulse.core.ssrf import guard_outbound_url
 
+        access = resolve_access_endpoint(access)
         guard_outbound_url(getattr(access, "endpoint", None))
         return self.get_fetcher(access.protocol).fetch(access, extent=extent, mode=mode)
 

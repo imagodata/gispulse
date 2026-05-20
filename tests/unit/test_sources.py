@@ -138,6 +138,50 @@ def test_dispatch_fetch_resolves_and_runs(registry: ProtocolRegistry) -> None:
     assert result.mode is FetchMode.REFERENCE
 
 
+def test_dispatch_fetch_interpolates_endpoint_template(
+    registry: ProtocolRegistry,
+) -> None:
+    # Even a structural ``Fetcher`` (here ``FakeWFS``) that does not
+    # subclass ``LazyFetcher`` benefits from ``{key}`` resolution: the
+    # registry resolves once before SSRF + dispatch so every adapter
+    # — Lazy or structural — sees a concrete URL.
+    access = AccessSpec(
+        protocol=AccessProtocol.WFS,
+        endpoint="https://93.184.216.34/{collection}",
+        params={"collection": "parcelles"},
+    )
+    result = registry.dispatch_fetch(access, mode=FetchMode.REFERENCE)
+    assert result.data == "rows@https://93.184.216.34/parcelles"
+
+
+def test_dispatch_fetch_ssrf_guards_resolved_endpoint(
+    registry: ProtocolRegistry,
+) -> None:
+    # A template host resolving to a private literal must still be
+    # rejected — SSRF policy applies to the URL the adapter will reach.
+    from gispulse.core.ssrf import SSRFError
+
+    access = AccessSpec(
+        protocol=AccessProtocol.WFS,
+        endpoint="http://{addr}/wfs",
+        params={"addr": "127.0.0.1"},
+    )
+    with pytest.raises(SSRFError):
+        registry.dispatch_fetch(access, mode=FetchMode.REFERENCE)
+
+
+def test_dispatch_fetch_rejects_missing_template_param(
+    registry: ProtocolRegistry,
+) -> None:
+    access = AccessSpec(
+        protocol=AccessProtocol.WFS,
+        endpoint="https://93.184.216.34/{collection}",
+        params={},
+    )
+    with pytest.raises(ValueError, match=r"requires params \['collection'\]"):
+        registry.dispatch_fetch(access, mode=FetchMode.REFERENCE)
+
+
 def test_dispatch_write_resolves_and_runs(registry: ProtocolRegistry) -> None:
     spec = WriteSpec(protocol=AccessProtocol.DB, destination="postgis://analyse.t")
     report = registry.dispatch_write(SourceResult(payload=Payload.TABLE), spec)
