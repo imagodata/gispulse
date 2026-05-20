@@ -124,3 +124,17 @@ class SimplifyCapability(Capability):
             },
             "required": ["tolerance"],
         }
+
+
+# ---------------------------------------------------------------------------
+# ELT Lot 3 (#246) — DuckDB / PostGIS SQL push-down strategy (dp algorithm)
+# ---------------------------------------------------------------------------
+
+from gispulse.capabilities import _geometry_sql as _gsql  # noqa: E402
+from gispulse.capabilities.sql_pushdown import attach_sql_pushdown  # noqa: E402
+
+attach_sql_pushdown(
+    SimplifyCapability,
+    _gsql.build_simplify,
+    gate=lambda p: p.get("algorithm", "dp") == "dp",
+)

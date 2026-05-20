@@ -326,6 +326,31 @@ class SQLDialect(ABC):
         """Boolean — whether a geometry is empty."""
         return f"ST_IsEmpty({geom})"
 
+    def st_difference(self, a: str, b: str) -> str:
+        """Geometric difference ``a - b``."""
+        return f"ST_Difference({a}, {b})"
+
+    def st_simplify_preserve_topology(self, geom: str, tolerance: float) -> str:
+        """Topology-preserving Douglas-Peucker simplification."""
+        return f"ST_SimplifyPreserveTopology({geom}, {float(tolerance)})"
+
+    def st_union_agg(self, geom_col: str) -> str:
+        """Aggregate union of a geometry column.
+
+        Base spelling is the PostGIS aggregate ``ST_Union``;
+        :class:`DuckDBDialect` overrides with ``ST_Union_Agg``.
+        """
+        return f"ST_Union({geom_col})"
+
+    def st_sym_difference(self, a: str, b: str) -> str:
+        """Symmetric difference ``a XOR b``.
+
+        Base spelling is the PostGIS native ``ST_SymDifference``;
+        :class:`DuckDBDialect` — which lacks it — overrides with the
+        equivalent ``(a - b) UNION (b - a)``.
+        """
+        return f"ST_SymDifference({a}, {b})"
+
 
 class PostGISDialect(SQLDialect):
     """PostgreSQL/PostGIS spatial SQL dialect."""
@@ -481,6 +506,15 @@ class DuckDBDialect(SQLDialect):
             f"{star} REPLACE ({geom_expr} AS {self.geom_column})",
             self.geom_column,
         )
+
+    def st_union_agg(self, geom_col: str) -> str:
+        # DuckDB-spatial spells the aggregate union ST_Union_Agg.
+        return f"ST_Union_Agg({geom_col})"
+
+    def st_sym_difference(self, a: str, b: str) -> str:
+        # DuckDB-spatial has no ST_SymDifference — compose it from the
+        # two one-sided differences: (a - b) unioned with (b - a).
+        return f"ST_Union(ST_Difference({a}, {b}), ST_Difference({b}, {a}))"
 
 
 class SpatiaLiteDialect(SQLDialect):
@@ -657,6 +691,18 @@ class GeoPackageDialect(SQLDialect):
 
     def st_is_empty(self, geom: str) -> str:
         return self._spatial_not_supported("ST_IsEmpty")
+
+    def st_difference(self, a: str, b: str) -> str:
+        return self._spatial_not_supported("ST_Difference")
+
+    def st_simplify_preserve_topology(self, geom: str, tolerance: float) -> str:
+        return self._spatial_not_supported("ST_SimplifyPreserveTopology")
+
+    def st_union_agg(self, geom_col: str) -> str:
+        return self._spatial_not_supported("ST_Union")
+
+    def st_sym_difference(self, a: str, b: str) -> str:
+        return self._spatial_not_supported("ST_SymDifference")
 
 
 # Singleton instances
