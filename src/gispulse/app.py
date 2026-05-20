@@ -37,6 +37,8 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     import geopandas as gpd
 
     from gispulse.catalog.models import CatalogEntry
+    from gispulse.core.explain import ManifestExplanation
+    from gispulse.core.manifest_v3 import ManifestV3
     from gispulse.core.pipeline import PipelineSpec
     from gispulse.core.plugin_model import PluginRecord
     from gispulse.runtime.headless_runtime import HeadlessRuntime
@@ -479,6 +481,33 @@ class GISPulseApp:
         from gispulse.runtime.headless_runtime import build_runtime
 
         return build_runtime(gpkg_path, triggers, **kwargs)
+
+    # ------------------------------------------------------------------
+    # ELT — manifest v3 introspection (Lot 4E / #251)
+    # ------------------------------------------------------------------
+    def explain(
+        self,
+        manifest: "str | Path | ManifestV3",
+        *,
+        engine: str | None = None,
+    ) -> "ManifestExplanation":
+        """Return a structured explanation of a v3 manifest.
+
+        Walks the manifest's compiled DAG and, for each step, surfaces
+        which :class:`ExecutionStrategy` ``select_strategy()`` would pick
+        under the configured engine. Capabilities with no SQL strategy
+        are flagged ``etl_strict``. See
+        :func:`gispulse.core.explain.explain_manifest` for the report
+        shape and :func:`format_explanation_text` to render it.
+        """
+        from gispulse.core.explain import explain_manifest
+        from gispulse.core.manifest_v3 import ManifestV3, load_manifest_v3
+
+        if isinstance(manifest, ManifestV3):
+            mf = manifest
+        else:
+            mf = load_manifest_v3(manifest)
+        return explain_manifest(mf, engine=engine)
 
 
 @lru_cache(maxsize=1)
