@@ -135,7 +135,17 @@ jobs:
         # default no-fix behaviour here.
         # CVE-2026-3219 (pip 26.x tar/ZIP confusion) has no fix release as of
         # 2026-04-28 — ignored until upstream patch lands. Re-evaluate quarterly.
-        run: pip-audit --desc on --ignore-vuln CVE-2026-3219
+        # PYSEC-2024-277 (joblib NumpyArrayWrapper) and PYSEC-2025-183 (pyjwt
+        # weak encryption) are both disputed by their upstream maintainers
+        # (the joblib case requires loading untrusted cache content; the pyjwt
+        # case is about a key length chosen by the application, not the
+        # library). No fix release exists. Re-evaluate when upstream publishes
+        # an advisory update.
+        run: |
+          pip-audit --desc on \
+            --ignore-vuln CVE-2026-3219 \
+            --ignore-vuln PYSEC-2024-277 \
+            --ignore-vuln PYSEC-2025-183
 
   # NB: the `build-portal` job was removed when the portal frontend was
   # split out to the sibling public repository imagodata/gispulse-portal
