@@ -32,6 +32,7 @@ from gispulse.core.plugin_model import (
     FetchMode,
     Payload,
     SourceResult,
+    resolve_access_endpoint,
 )
 from gispulse.core.ssrf import guard_outbound_url
 
@@ -82,6 +83,25 @@ class LazyFetcher(ABC):
         """
         guard_outbound_url(url)
 
+    # -- endpoint templating ----------------------------------------------
+
+    @staticmethod
+    def _resolve_endpoint(access: AccessSpec) -> AccessSpec:
+        """Thin wrapper over :func:`resolve_access_endpoint`.
+
+        Kept on :class:`LazyFetcher` for two reasons:
+
+        * direct fetcher invocations (tests, advanced consumers calling
+          ``HttpFileFetcher().fetch(access)`` outside the registry) still
+          go through it, so a templated access is resolved before the
+          SSRF guard fires;
+        * ``ProtocolRegistry.dispatch_fetch`` already resolves up-front,
+          so the call here is idempotent — an already-resolved endpoint
+          has no ``{`` and short-circuits in
+          :func:`resolve_access_endpoint`'s hot path.
+        """
+        return resolve_access_endpoint(access)
+
     # -- subclass hooks ----------------------------------------------------
 
     @abstractmethod
@@ -115,6 +135,7 @@ class LazyFetcher(ABC):
         ``metadata[DUCKDB_SCAN_KEY]``; the endpoint is echoed back in
         ``reference``.
         """
+        access = self._resolve_endpoint(access)
         self._guard(access.endpoint)
         scan = self._reference_scan(access, extent)
         log.debug("lazy_fetch_reference", protocol=self.protocol.value)
@@ -129,6 +150,7 @@ class LazyFetcher(ABC):
         self, access: AccessSpec, *, extent: Any | None = None
     ) -> SourceResult:
         """Run a full ``MATERIALIZE`` fetch — a local copy of the data."""
+        access = self._resolve_endpoint(access)
         self._guard(access.endpoint)
         log.debug("lazy_fetch_materialize", protocol=self.protocol.value)
         return self._materialize(access, extent)

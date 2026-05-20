@@ -49,8 +49,12 @@ class _FakeFetcher(LazyFetcher):
         )
 
 
-def _access(endpoint: str) -> AccessSpec:
-    return AccessSpec(protocol=AccessProtocol.REMOTE_TABLE, endpoint=endpoint)
+def _access(endpoint: str, **params: object) -> AccessSpec:
+    return AccessSpec(
+        protocol=AccessProtocol.REMOTE_TABLE,
+        endpoint=endpoint,
+        params=dict(params),
+    )
 
 
 # --------------------------------------------------------------------------
@@ -186,3 +190,134 @@ def test_source_entry_ref_accepts_classification_axes() -> None:
     assert ref.domain is SourceDomain.OBSERVATION
     assert ref.payload is Payload.VECTOR
     assert ref.jurisdiction == "world"
+
+
+# --------------------------------------------------------------------------
+# Endpoint templating — resolve {key} placeholders from access.params
+# --------------------------------------------------------------------------
+
+
+def test_resolve_endpoint_noop_when_no_placeholder() -> None:
+    # The hot path: untemplated endpoints must be returned unchanged so
+    # existing core entries (worldwide_catalog.yml) pay nothing.
+    access = _access("https://example.com/data.parquet")
+    assert LazyFetcher._resolve_endpoint(access) is access
+
+
+def test_resolve_endpoint_interpolates_single_placeholder() -> None:
+    access = _access(
+        "https://example.com/{region}/data.parquet", region="eu"
+    )
+    resolved = LazyFetcher._resolve_endpoint(access)
+    assert resolved.endpoint == "https://example.com/eu/data.parquet"
+    # ``params`` is preserved — protocol adapters still read ``layer``,
+    # ``lat``/``lon`` etc. from it after resolution.
+    assert resolved.params == {"region": "eu"}
+
+
+def test_resolve_endpoint_interpolates_multiple_placeholders() -> None:
+    access = _access(
+        "https://host/{a}/{b}/{a}-file.json",
+        a="01",
+        b="parcelles",
+    )
+    resolved = LazyFetcher._resolve_endpoint(access)
+    assert resolved.endpoint == "https://host/01/parcelles/01-file.json"
+
+
+def test_resolve_endpoint_missing_param_raises_with_clear_message() -> None:
+    access = _access(
+        "https://host/{departement}/file-{layer}.gz", departement="75"
+    )
+    with pytest.raises(ValueError, match=r"requires params \['layer'\]"):
+        LazyFetcher._resolve_endpoint(access)
+
+
+def test_resolve_endpoint_malformed_template_raises() -> None:
+    # An unclosed brace is a malformed Python format string — surface
+    # the error early instead of letting ``format_map`` crash deep down.
+    access = _access("https://host/{unterminated", value="x")
+    with pytest.raises(ValueError, match=r"malformed endpoint template"):
+        LazyFetcher._resolve_endpoint(access)
+
+
+def test_resolve_endpoint_rejects_empty_positional_placeholder() -> None:
+    # ``{}`` is a positional placeholder — meaningless for a URL template
+    # (callers must spell the key) and a silent no-op would hide bugs.
+    access = _access("https://host/{}/file.parquet", value="x")
+    with pytest.raises(ValueError, match=r"empty placeholder"):
+        LazyFetcher._resolve_endpoint(access)
+
+
+def test_resolve_endpoint_rejects_numeric_placeholder() -> None:
+    # ``{0}`` is a positional index — confusing and would interact with
+    # ``params["0"]`` in surprising ways. Reject up front.
+    access = AccessSpec(
+        protocol=AccessProtocol.REMOTE_TABLE,
+        endpoint="https://example.com/{0}/file.parquet",
+        params={"0": "value"},
+    )
+    with pytest.raises(ValueError, match=r"positional/attribute/index"):
+        LazyFetcher._resolve_endpoint(access)
+
+
+def test_resolve_endpoint_rejects_attribute_or_index_placeholder() -> None:
+    access = _access("https://example.com/{cfg.host}/file", cfg="x")
+    with pytest.raises(ValueError, match=r"positional/attribute/index"):
+        LazyFetcher._resolve_endpoint(access)
+
+
+def test_resolve_endpoint_rejects_conversion_flag() -> None:
+    # ``{key!r}`` would inject quotes around the value — not what a URL
+    # template author meant. Reject so the typo is loud.
+    access = _access("https://example.com/{key!r}/file.parquet", key="x")
+    with pytest.raises(ValueError, match=r"conversion flag"):
+        LazyFetcher._resolve_endpoint(access)
+
+
+def test_resolve_endpoint_rejects_format_spec() -> None:
+    # ``{key:>3}`` would pad the value — again not URL semantics.
+    access = _access("https://example.com/{key:>3}/file.parquet", key="x")
+    with pytest.raises(ValueError, match=r"format spec"):
+        LazyFetcher._resolve_endpoint(access)
+
+
+def test_resolve_endpoint_escaped_braces_are_not_placeholders() -> None:
+    # ``{{`` is a literal brace in ``str.format`` — leave the endpoint
+    # alone (no params lookup) and unescape via ``format_map`` at fetch.
+    access = _access("https://host/{{literal}}/data.parquet")
+    resolved = LazyFetcher._resolve_endpoint(access)
+    # ``{`` was present so we go through the parse path, but no fields
+    # were found → access returned unchanged.
+    assert resolved is access
+
+
+def test_virtual_table_resolves_template_before_dispatch() -> None:
+    result = _FakeFetcher().virtual_table(
+        _access("https://example.com/{dpt}/data.parquet", dpt="75")
+    )
+    # The scan SQL — built by ``_reference_scan`` from the resolved
+    # access — must show the interpolated endpoint, not the template.
+    assert result.metadata[DUCKDB_SCAN_KEY] == (
+        "read_parquet('https://example.com/75/data.parquet')"
+    )
+    assert result.reference == "https://example.com/75/data.parquet"
+
+
+def test_materialize_resolves_template_before_dispatch() -> None:
+    result = _FakeFetcher().fetch(
+        _access("https://example.com/{dpt}/data.parquet", dpt="75"),
+        mode=FetchMode.MATERIALIZE,
+    )
+    assert result.data == "rows@https://example.com/75/data.parquet"
+
+
+def test_ssrf_guard_runs_against_resolved_endpoint() -> None:
+    # A template resolving to a private address must still be rejected —
+    # SSRF policy must see the URL that will actually be reached, not
+    # the templated form.
+    with pytest.raises(SSRFError):
+        _FakeFetcher().fetch(
+            _access("http://{addr}/secret", addr="127.0.0.1"),
+            mode=FetchMode.REFERENCE,
+        )

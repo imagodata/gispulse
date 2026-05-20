@@ -307,7 +307,13 @@ class WorldwideCatalogSource(DeclarativeSource):
         entry = self._entry(entry_id)
         if entry.revision_token:
             return entry.revision_token
-        return _probe_revision(entry.access.endpoint)
+        # Resolve ``{key}`` templates so the live probe hits — and the
+        # SSRF guard inside ``_probe_revision`` sees — the concrete URL
+        # the dispatcher would reach for an actual fetch.
+        from gispulse.core.plugin_model import resolve_access_endpoint
+
+        resolved = resolve_access_endpoint(entry.access)
+        return _probe_revision(resolved.endpoint)
 
 
 def _probe_revision(endpoint: str) -> str | None:

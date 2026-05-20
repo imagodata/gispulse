@@ -13,7 +13,8 @@ must stay cheap to import and free of circular dependencies.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import string
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
@@ -283,6 +284,95 @@ class AccessSpec:
     params: dict[str, Any] = field(default_factory=dict)
     format: str | None = None
     auth: str | None = None  # token/key name, resolved via LicenceProvider for pro
+
+
+def resolve_access_endpoint(access: AccessSpec) -> AccessSpec:
+    """Interpolate ``{key}`` placeholders in ``access.endpoint`` from params.
+
+    A :class:`~gispulse.plugins.api.DeclarativeSource` can declare a
+    single entry per logical dataset and let the consumer choose a
+    sub-zone at fetch time::
+
+        AccessSpec(
+            protocol=AccessProtocol.DOWNLOAD,
+            endpoint=".../departements/{departement}/file-{departement}.gz",
+            params={"departement": "75"},
+        )
+
+    Idempotent for the supported inputs — a resolved endpoint has no
+    ``{`` and short-circuits on re-entry — and protocol-agnostic.
+    ``ProtocolRegistry.dispatch_fetch`` runs it before the SSRF guard so
+    every adapter — :class:`LazyFetcher` subclass or structural
+    ``Fetcher`` — receives a concrete URL. :class:`LazyFetcher` itself
+    re-runs it (no-op when the dispatch layer already resolved) so
+    direct fetcher invocations stay safe.
+
+    Precondition: ``params`` values are pre-encoded URL fragments — a
+    value that itself contains an unescaped ``{`` would re-templatise
+    the endpoint and trip the malformed/missing-param checks on the
+    next pass. Use ``urllib.parse.quote`` upstream if the value is
+    user-supplied.
+
+    Only bare ``{key}`` placeholders are accepted. Empty ``{}``, numeric
+    ``{0}``, attribute ``{a.b}``, index ``{a[0]}``, conversion
+    ``{key!r}`` and format-spec ``{key:>3}`` placeholders all alter the
+    rendered URL in ways callers rarely expect, and are rejected with a
+    contextual :class:`ValueError`. Escaped ``{{literal}}`` braces are
+    left untouched.
+
+    Raises:
+        ValueError: a placeholder is malformed, carries a conversion or
+            format spec, or has no matching ``params`` key.
+    """
+    endpoint = access.endpoint
+    # Hot path: untemplated endpoints pay nothing — no parse, no alloc.
+    if "{" not in endpoint:
+        return access
+    try:
+        parsed = list(string.Formatter().parse(endpoint))
+    except ValueError as exc:
+        raise ValueError(
+            f"malformed endpoint template {endpoint!r}: {exc}"
+        ) from exc
+    for _, name, format_spec, conversion in parsed:
+        if name is None:
+            continue
+        if name == "":
+            raise ValueError(
+                f"malformed endpoint template {endpoint!r}: "
+                f"empty placeholder; expected named '{{key}}'"
+            )
+        if name.isdigit() or "." in name or "[" in name:
+            raise ValueError(
+                f"malformed endpoint template {endpoint!r}: "
+                f"placeholder {{{name}}} must be a bare named key, "
+                f"not a positional/attribute/index reference"
+            )
+        if conversion:
+            raise ValueError(
+                f"malformed endpoint template {endpoint!r}: "
+                f"placeholder {{{name}!{conversion}}} carries a "
+                f"conversion flag; only bare '{{key}}' is accepted"
+            )
+        if format_spec:
+            raise ValueError(
+                f"malformed endpoint template {endpoint!r}: "
+                f"placeholder {{{name}:{format_spec}}} carries a "
+                f"format spec; only bare '{{key}}' is accepted"
+            )
+    fields = [name for _, name, _, _ in parsed if name]
+    if not fields:
+        # Only ``{{literal}}`` escapes — leave the access untouched on
+        # the hot path; ``format_map`` would copy and unescape, we
+        # avoid that allocation here.
+        return access
+    missing = [f for f in fields if f not in access.params]
+    if missing:
+        raise ValueError(
+            f"endpoint template {endpoint!r} requires params "
+            f"{missing!r}, got keys {sorted(access.params)!r}"
+        )
+    return replace(access, endpoint=endpoint.format_map(access.params))
 
 
 @dataclass

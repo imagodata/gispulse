@@ -153,6 +153,49 @@ def test_revision_unknown_entry_raises() -> None:
         WorldwideCatalogSource().revision("does-not-exist")
 
 
+def test_revision_live_entry_resolves_templated_endpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A live (``revision_token: null``) entry with a ``{key}`` template
+    # must probe the *resolved* URL, not the raw template — otherwise
+    # the HEAD goes to a URL no real fetch would ever reach.
+    catalog = _write_catalog(
+        tmp_path,
+        """
+        version: 1
+        entries:
+          - id: templated-live
+            name: Templated live probe
+            family: opendata-fr
+            domain: base
+            payload: vector
+            jurisdiction: FR
+            access:
+              protocol: download
+              endpoint: "https://example.com/{layer}/data.geojson"
+              params:
+                layer: parcels
+            revision_token: null
+        """,
+    )
+
+    captured: dict[str, str] = {}
+
+    def _fake_probe(endpoint: str) -> str | None:
+        captured["endpoint"] = endpoint
+        return "etag-xyz"
+
+    import gispulse.plugins.worldwide_source as ws
+
+    monkeypatch.setattr(ws, "_probe_revision", _fake_probe)
+
+    src = WorldwideCatalogSource(catalog_path=catalog)
+    token = src.revision("templated-live")
+    assert token == "etag-xyz"
+    # The probe saw the interpolated URL, not the ``{layer}`` template.
+    assert captured["endpoint"] == "https://example.com/parcels/data.geojson"
+
+
 # -- SSRF / structural endpoint validation ----------------------------------
 
 
