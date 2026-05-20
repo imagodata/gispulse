@@ -91,6 +91,21 @@ _BUNDLED_DATA_PACK_MANIFESTS: tuple[Path, ...] = (
 # (``*.yml`` / ``*.yaml`` / ``*.json``) — the user-dir discovery channel.
 _DATA_PACKS_DIR_ENV = "GISPULSE_DATA_PACKS_DIR"
 
+# Third-party PyPI data packs declare an entry-point here; the value must
+# be a callable that returns an iterable of file paths to manifest YAML/JSON.
+# Typical implementation in a sibling package::
+#
+#     def manifest_paths():
+#         from importlib.resources import files
+#         return [files("my_pack") / "manifests" / "zoning.yml"]
+#
+#     # pyproject.toml
+#     [project.entry-points."gispulse.data_packs"]
+#     my_pack = "my_pack._gispulse_entry:manifest_paths"
+#
+# Single-string returns are also accepted for the common one-manifest case.
+_DATA_PACK_ENTRYPOINT_GROUP = "gispulse.data_packs"
+
 
 def _tier_from_str(value: object) -> Tier:
     """Map a tier string to :class:`Tier`, defaulting to community."""
@@ -557,14 +572,28 @@ PluginHub = ExtensionHub
 def _data_pack_manifest_paths() -> list[tuple[Path, Origin]]:
     """Locate every data-pack manifest file, paired with its origin.
 
-    Bundled first-party manifests come first (``Origin.INTERNAL``);
-    manifests under ``GISPULSE_DATA_PACKS_DIR`` follow as
-    ``Origin.EXTERNAL``. Missing files / directories are silently
-    skipped — discovery must never hard-fail.
+    Three discovery channels, walked in this order so first-party always
+    wins on a duplicate name and PyPI packs are reproducible across
+    environments:
+
+    1. Bundled first-party manifests (``Origin.INTERNAL``).
+    2. Third-party PyPI distributions exposing the
+       ``gispulse.data_packs`` entry-point — story T5 (#269). Each
+       entry-point is a callable returning either a path or an iterable
+       of paths; a malformed entry is logged and skipped, never raised.
+    3. Manifests under ``GISPULSE_DATA_PACKS_DIR`` (``Origin.EXTERNAL``).
+
+    Missing files / directories are silently skipped — discovery must
+    never hard-fail, that would brick any ``pip install`` of the engine
+    on a partially-installed system.
     """
     paths: list[tuple[Path, Origin]] = [
         (p, Origin.INTERNAL) for p in _BUNDLED_DATA_PACK_MANIFESTS if p.is_file()
     ]
+
+    for ep_path in _entrypoint_data_pack_paths():
+        paths.append((ep_path, Origin.EXTERNAL))
+
     user_dir = os.environ.get(_DATA_PACKS_DIR_ENV, "").strip()
     if user_dir:
         root = Path(user_dir).expanduser()
@@ -573,6 +602,75 @@ def _data_pack_manifest_paths() -> list[tuple[Path, Origin]]:
                 for p in sorted(root.glob(pattern)):
                     paths.append((p, Origin.EXTERNAL))
     return paths
+
+
+def _entrypoint_data_pack_paths() -> list[Path]:
+    """Resolve every manifest path exposed via ``gispulse.data_packs``.
+
+    Each entry-point loads to a callable; the callable returns either a
+    single path-like or an iterable of path-likes. Any failure (load,
+    call, non-existent path, surprising return type) is logged and
+    contributes zero paths — *one* bad pack must not lock out the rest.
+    """
+    out: list[Path] = []
+    for ep in _eps(_DATA_PACK_ENTRYPOINT_GROUP):
+        try:
+            factory = ep.load()
+        except Exception as exc:  # noqa: BLE001 — isolate a bad pack
+            log.warning(
+                "data_pack_entrypoint_load_failed", name=ep.name, error=str(exc)
+            )
+            continue
+        if not callable(factory):
+            log.warning(
+                "data_pack_entrypoint_not_callable",
+                name=ep.name,
+                type=type(factory).__name__,
+            )
+            continue
+        try:
+            result = factory()
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "data_pack_entrypoint_call_failed",
+                name=ep.name,
+                error=str(exc),
+            )
+            continue
+        # Accept either a single path-like or an iterable of path-likes.
+        # ``str``/``os.PathLike`` are themselves iterable so handle them
+        # explicitly to avoid iterating their characters.
+        if isinstance(result, (str, os.PathLike)):
+            items: list[Any] = [result]
+        else:
+            try:
+                items = list(result)
+            except TypeError:
+                log.warning(
+                    "data_pack_entrypoint_bad_return",
+                    name=ep.name,
+                    type=type(result).__name__,
+                )
+                continue
+        for item in items:
+            try:
+                p = Path(os.fspath(item))
+            except TypeError:
+                log.warning(
+                    "data_pack_entrypoint_bad_item",
+                    name=ep.name,
+                    type=type(item).__name__,
+                )
+                continue
+            if not p.is_file():
+                log.warning(
+                    "data_pack_entrypoint_missing_file",
+                    name=ep.name,
+                    path=str(p),
+                )
+                continue
+            out.append(p)
+    return out
 
 
 def _read_manifest(path: Path) -> dict[str, Any] | None:
