@@ -351,6 +351,15 @@ class SQLDialect(ABC):
         """
         return f"ST_SymDifference({a}, {b})"
 
+    def first_agg(self, col: str) -> str:
+        """Pick one value per group — the GeoPandas ``dissolve`` aggfunc.
+
+        PostgreSQL has no ``first`` aggregate; the base spelling picks
+        the first element of ``array_agg``. :class:`DuckDBDialect`
+        overrides with the native ``first()`` aggregate.
+        """
+        return f"(array_agg({col}))[1]"
+
 
 class PostGISDialect(SQLDialect):
     """PostgreSQL/PostGIS spatial SQL dialect."""
@@ -515,6 +524,10 @@ class DuckDBDialect(SQLDialect):
         # DuckDB-spatial has no ST_SymDifference — compose it from the
         # two one-sided differences: (a - b) unioned with (b - a).
         return f"ST_Union(ST_Difference({a}, {b}), ST_Difference({b}, {a}))"
+
+    def first_agg(self, col: str) -> str:
+        # DuckDB has a native first() aggregate — pick one element per group.
+        return f"first({col})"
 
 
 class SpatiaLiteDialect(SQLDialect):
@@ -703,6 +716,9 @@ class GeoPackageDialect(SQLDialect):
 
     def st_sym_difference(self, a: str, b: str) -> str:
         return self._spatial_not_supported("ST_SymDifference")
+
+    def first_agg(self, col: str) -> str:
+        return self._spatial_not_supported("first_agg")
 
 
 # Singleton instances
