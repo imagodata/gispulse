@@ -189,5 +189,20 @@ class NearestNeighborCapability(Capability):
 
 
 # ---------------------------------------------------------------------------
+# ELT Lot 3 (#246) — PostGIS-only push-down (DuckDB lacks the <-> operator)
+# ---------------------------------------------------------------------------
+
+from gispulse.capabilities import _geometry_sql as _gsql  # noqa: E402
+from gispulse.capabilities.sql_pushdown import attach_sql_pushdown  # noqa: E402
+
+attach_sql_pushdown(
+    NearestNeighborCapability,
+    _gsql.build_nearest_neighbor,
+    gate=lambda p: p.get("ref_gdf") is not None,
+    extra_inputs={"ref": "ref_gdf"},
+)
+
+
+# ---------------------------------------------------------------------------
 # Advanced geometry constructions
 # ---------------------------------------------------------------------------
