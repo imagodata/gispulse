@@ -7,7 +7,7 @@ loop/branch/parallel composite nodes, and dataset/artifact endpoints.
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
@@ -338,24 +338,26 @@ class GraphExecutor:
         adj: dict[str, list[str]],
         in_degree: dict[str, int],
     ) -> list[str]:
-        """Kahn's algorithm for topological ordering."""
-        q: deque[str] = deque()
-        for n in nodes:
-            if in_degree.get(n.id, 0) == 0:
-                q.append(n.id)
-        order: list[str] = []
-        deg = dict(in_degree)
-        while q:
-            nid = q.popleft()
-            order.append(nid)
-            for child in adj.get(nid, []):
-                deg[child] -= 1
-                if deg[child] == 0:
-                    q.append(child)
-        if len(order) != len(nodes):
-            missing = {n.id for n in nodes} - set(order)
-            raise ValueError(f"Cycle detected in graph, unreachable nodes: {missing}")
-        return order
+        """Kahn's algorithm for topological ordering.
+
+        Thin wrapper over :func:`gispulse.core.dag.topological_sort` —
+        the algorithm now lives in :mod:`gispulse.core.dag` so the v3
+        manifest loader can reuse it for load-time cycle detection
+        (ELT Lot 4B / #248). The ``in_degree`` argument is accepted for
+        signature back-compat but recomputed from *adj* inside the
+        utility.
+        """
+        from gispulse.core.dag import CycleError, topological_sort
+
+        edges = [(src, dst) for src, targets in adj.items() for dst in targets]
+        try:
+            return topological_sort([n.id for n in nodes], edges)
+        except CycleError as exc:
+            # Preserve the legacy ValueError text so existing callers
+            # and tests keep matching.
+            raise ValueError(
+                f"Cycle detected in graph, unreachable nodes: {exc.cycle}"
+            ) from exc
 
     @staticmethod
     def _build_edge_index(edges: list[EdgeDef]) -> dict[str, list[EdgeDef]]:

@@ -39,6 +39,7 @@ from gispulse.core.pipeline import (
     StepSpec,
     TriggerSpec,
 )
+from gispulse.core.dag import CycleError, topological_sort
 from gispulse.core.pipeline_schema import validate_pipeline_json
 
 __all__ = [
@@ -47,6 +48,8 @@ __all__ = [
     "ModelSpec",
     "V3TriggerSpec",
     "ManifestV3",
+    "ManifestValidationError",
+    "validate_manifest",
     "load_manifest_v3",
     "compile_to_pipeline",
     "migrate_to_v3",
@@ -204,11 +207,17 @@ def load_manifest_v3(path: str | Path, *, validate: bool = True) -> ManifestV3:
     Args:
         path:     File path (``.yaml`` / ``.yml`` / ``.json``).
         validate: When ``True`` (default), validate against ``SCHEMA_V3``
-            before parsing. Validation errors are raised as ValueError.
+            **and** run the load-time graph check
+            (:func:`validate_manifest`) — unresolved ``select:``/``with:``
+            references and inter-model cycles raise
+            :class:`ManifestValidationError`. Orphan-model warnings are
+            logged through :mod:`gispulse.core.logging`.
 
     Returns:
         Typed :class:`ManifestV3`.
     """
+    from gispulse.core.logging import get_logger
+
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"Manifest file not found: {p}")
@@ -231,7 +240,7 @@ def load_manifest_v3(path: str | Path, *, validate: bool = True) -> ManifestV3:
                 msg += f"\n  ... and {len(errors) - 20} more errors"
             raise ValueError(msg)
 
-    return ManifestV3(
+    manifest = ManifestV3(
         name=raw.get("name", ""),
         description=raw.get("description", ""),
         sources=_parse_sources(raw.get("sources", {})),
@@ -241,6 +250,15 @@ def load_manifest_v3(path: str | Path, *, validate: bool = True) -> ManifestV3:
         security=dict(raw.get("security") or {}),
         runtime=dict(raw.get("runtime") or {}),
     )
+
+    if validate:
+        # Load-time graph check — raises ManifestValidationError on
+        # unresolved refs / cycles, logs orphan warnings.
+        log = get_logger(__name__)
+        for warning in validate_manifest(manifest):
+            log.warning("manifest_v3_warning", manifest=p.name, message=warning)
+
+    return manifest
 
 
 # ---------------------------------------------------------------------------
@@ -590,3 +608,118 @@ def manifest_to_dict(manifest: ManifestV3) -> dict[str, Any]:
 
 # Silence the unused-import warning when TYPE_CHECKING is False.
 _ = TriggerSpec
+
+
+# ---------------------------------------------------------------------------
+# Load-time validation (ELT Lot 4B — issue #248)
+# ---------------------------------------------------------------------------
+
+
+class ManifestValidationError(ValueError):
+    """One or more load-time problems in a v3 manifest.
+
+    Attributes:
+        errors: Human-readable error lines (unresolved refs, cycles).
+    """
+
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = list(errors)
+        super().__init__(
+            "v3 manifest validation failed:\n  - "
+            + "\n  - ".join(errors)
+        )
+
+
+def _extract_with_ref(params: object) -> str | None:
+    if isinstance(params, dict):
+        ref = params.get("with")
+        if isinstance(ref, str):
+            return ref
+    return None
+
+
+def validate_manifest(manifest: ManifestV3) -> list[str]:
+    """Validate a v3 manifest at load-time.
+
+    Catches the three load-time concerns ADR 0005 / #248 calls for:
+
+    - Unresolved ``select:`` and transform-level ``with:`` references —
+      a ``ModelSpec`` selecting a name that is neither a declared source
+      nor another model. Error (blocking).
+    - Cycles in the inter-model dependency graph, detected by
+      :func:`~gispulse.core.dag.topological_sort` (Kahn's algorithm,
+      shared with :class:`GraphExecutor`). Error (blocking).
+    - Orphan models — models nobody else selects. They are often the
+      pipeline's terminal outputs (perfectly legitimate), so this is
+      surfaced as a warning, not an error.
+
+    Returns the list of *warnings*. Errors raise
+    :class:`ManifestValidationError`.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    sources = set(manifest.sources)
+    models = set(manifest.models)
+    known = sources | models
+
+    referenced_models: set[str] = set()
+    inter_model_edges: list[tuple[str, str]] = []
+
+    for name, model in manifest.models.items():
+        if not isinstance(model.select, str) or not model.select:
+            errors.append(
+                f"models.{name}: missing or empty 'select' reference"
+            )
+        elif model.select not in known:
+            errors.append(
+                f"models.{name}: select={model.select!r} is not a "
+                "declared source or model"
+            )
+        elif model.select in models:
+            inter_model_edges.append((model.select, name))
+            referenced_models.add(model.select)
+
+        for i, step in enumerate(model.transform or []):
+            if not isinstance(step, dict) or len(step) != 1:
+                errors.append(
+                    f"models.{name}.transform[{i}]: must be a single-key "
+                    "{capability: params} object"
+                )
+                continue
+            (cap, params), = step.items()
+            with_ref = _extract_with_ref(params)
+            if with_ref is None:
+                continue
+            if with_ref not in known:
+                errors.append(
+                    f"models.{name}.transform[{i}].{cap}: with={with_ref!r} "
+                    "is not a declared source or model"
+                )
+            elif with_ref in models:
+                inter_model_edges.append((with_ref, name))
+                referenced_models.add(with_ref)
+
+    if errors:
+        raise ManifestValidationError(errors)
+
+    # Inter-model cycle detection (shared utility — same Kahn's algorithm
+    # GraphExecutor uses at execution time).
+    try:
+        topological_sort(list(models), inter_model_edges)
+    except CycleError as exc:
+        raise ManifestValidationError(
+            [
+                "model-dependency cycle involving: "
+                + ", ".join(repr(n) for n in sorted(exc.cycle))
+            ]
+        ) from exc
+
+    # Orphan models: nobody selects them. Often a pipeline's terminal
+    # outputs — emit as a warning so the user can confirm.
+    for name in sorted(models - referenced_models):
+        warnings.append(
+            f"models.{name}: nobody selects this model "
+            "(terminal output, or dead code?)"
+        )
+    return warnings
