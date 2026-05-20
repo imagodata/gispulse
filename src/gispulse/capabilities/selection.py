@@ -311,3 +311,27 @@ class TopNCapability(Capability):
             },
             "required": ["n"],
         }
+
+
+# ---------------------------------------------------------------------------
+# ELT Lot 2 (#245) — DuckDB / PostGIS SQL push-down strategies
+# ---------------------------------------------------------------------------
+
+from gispulse.capabilities import _attribute_sql as _asql  # noqa: E402
+from gispulse.capabilities.sql_pushdown import attach_sql_pushdown  # noqa: E402
+
+attach_sql_pushdown(
+    SortCapability,
+    _asql.build_sort,
+    gate=lambda p: bool(p.get("by")),
+)
+attach_sql_pushdown(
+    TopNCapability,
+    _asql.build_top_n,
+    gate=lambda p: bool(p.get("by")),
+)
+attach_sql_pushdown(
+    DeduplicateCapability,
+    _asql.build_deduplicate,
+    gate=lambda p: bool(p.get("keys")) and bool(p.get("order_by")),
+)

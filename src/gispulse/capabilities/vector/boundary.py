@@ -44,3 +44,13 @@ class BoundaryCapability(Capability):
             },
         }
 
+
+# ---------------------------------------------------------------------------
+# ELT Lot 3 (#246) — DuckDB / PostGIS SQL push-down strategy
+# ---------------------------------------------------------------------------
+
+from gispulse.capabilities import _geometry_sql as _gsql  # noqa: E402
+from gispulse.capabilities.sql_pushdown import attach_sql_pushdown  # noqa: E402
+
+attach_sql_pushdown(BoundaryCapability, _gsql.build_boundary)
+

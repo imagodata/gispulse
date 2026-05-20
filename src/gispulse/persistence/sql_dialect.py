@@ -287,6 +287,45 @@ class SQLDialect(ABC):
         validate_identifier(table_alias, "table alias")
         return f"{table_alias}.*"
 
+    # ------------------------------------------------------------------
+    # ELT Lot 3 (#246) — single-layer 1:1 geometry transforms
+    # ------------------------------------------------------------------
+    # DuckDB-spatial and PostGIS spell these identically (``ST_*``); they
+    # are concrete here. :class:`GeoPackageDialect` overrides them to
+    # raise. They are only ever invoked through the DuckDB/PostGIS
+    # push-down strategies, so the SpatiaLite spelling is not specialised.
+
+    def st_boundary(self, geom: str) -> str:
+        """Topological boundary of a geometry."""
+        return f"ST_Boundary({geom})"
+
+    def st_envelope(self, geom: str) -> str:
+        """Axis-aligned bounding-box envelope of a geometry."""
+        return f"ST_Envelope({geom})"
+
+    def st_convex_hull(self, geom: str) -> str:
+        """Convex hull of a geometry."""
+        return f"ST_ConvexHull({geom})"
+
+    def st_concave_hull(
+        self, geom: str, ratio: float, *, allow_holes: bool = False
+    ) -> str:
+        """Concave hull — three-arg form, the one DuckDB-spatial accepts."""
+        holes = "true" if allow_holes else "false"
+        return f"ST_ConcaveHull({geom}, {float(ratio)}, {holes})"
+
+    def st_make_valid(self, geom: str) -> str:
+        """Repaired (validity-corrected) geometry."""
+        return f"ST_MakeValid({geom})"
+
+    def st_simplify(self, geom: str, tolerance: float) -> str:
+        """Douglas-Peucker simplified geometry."""
+        return f"ST_Simplify({geom}, {float(tolerance)})"
+
+    def st_is_empty(self, geom: str) -> str:
+        """Boolean — whether a geometry is empty."""
+        return f"ST_IsEmpty({geom})"
+
 
 class PostGISDialect(SQLDialect):
     """PostgreSQL/PostGIS spatial SQL dialect."""
@@ -595,6 +634,29 @@ class GeoPackageDialect(SQLDialect):
         self, geom_expr: str, *, src_srid: int, dst_srid: int
     ) -> str:
         return self._spatial_not_supported("ST_Transform")
+
+    def st_boundary(self, geom: str) -> str:
+        return self._spatial_not_supported("ST_Boundary")
+
+    def st_envelope(self, geom: str) -> str:
+        return self._spatial_not_supported("ST_Envelope")
+
+    def st_convex_hull(self, geom: str) -> str:
+        return self._spatial_not_supported("ST_ConvexHull")
+
+    def st_concave_hull(
+        self, geom: str, ratio: float, *, allow_holes: bool = False
+    ) -> str:
+        return self._spatial_not_supported("ST_ConcaveHull")
+
+    def st_make_valid(self, geom: str) -> str:
+        return self._spatial_not_supported("ST_MakeValid")
+
+    def st_simplify(self, geom: str, tolerance: float) -> str:
+        return self._spatial_not_supported("ST_Simplify")
+
+    def st_is_empty(self, geom: str) -> str:
+        return self._spatial_not_supported("ST_IsEmpty")
 
 
 # Singleton instances

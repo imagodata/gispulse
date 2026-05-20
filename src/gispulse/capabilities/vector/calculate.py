@@ -200,3 +200,17 @@ class CalculateCapability(Capability):
             },
             "required": ["expressions"],
         }
+
+
+# ---------------------------------------------------------------------------
+# ELT Lot 2 (#245) — DuckDB / PostGIS SQL push-down strategy
+# ---------------------------------------------------------------------------
+
+from gispulse.capabilities import _attribute_sql as _asql  # noqa: E402
+from gispulse.capabilities.sql_pushdown import attach_sql_pushdown  # noqa: E402
+
+attach_sql_pushdown(
+    CalculateCapability,
+    _asql.build_calculate,
+    gate=lambda p: bool(p.get("expressions")),
+)
