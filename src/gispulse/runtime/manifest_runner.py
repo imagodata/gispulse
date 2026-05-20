@@ -33,9 +33,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import geopandas as gpd
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from gispulse.core.assertions import AssertionFailure
 
 from gispulse.core.dag import topological_sort
 from gispulse.core.manifest_v3 import (
@@ -169,6 +172,11 @@ class ManifestRunResult:
     materialized: dict[str, MaterializedModel] = field(default_factory=dict)
     #: Topological order in which the models were executed.
     execution_order: list[str] = field(default_factory=list)
+    #: Non-blocking assertion failures (``severity=warning``) collected
+    #: from each model's ``assert:`` block. Blocking (``severity=error``)
+    #: failures raise :class:`AssertionFailedError` before the run
+    #: completes — they never land here.
+    assertion_warnings: list["AssertionFailure"] = field(default_factory=list)
 
 
 def _inter_model_edges(manifest: ManifestV3) -> list[tuple[str, str]]:
@@ -294,6 +302,7 @@ def run_manifest(
         )
 
     executor = PipelineExecutor(execution_context=None)
+    assertion_warnings: list = []
 
     for model_name in order:
         model = manifest.models[model_name]
@@ -334,7 +343,27 @@ def run_manifest(
             rows=len(terminal),
         )
 
+        # ELT Lot 4F (#252) — data-quality gates. ``severity=error``
+        # failures raise immediately so the user sees the offending
+        # model before downstream models run on a tainted output;
+        # ``severity=warning`` failures collect on the run result.
+        if model.assertions:
+            from gispulse.core.assertions import run_assertions
+
+            failures = run_assertions(
+                model_name, terminal, model.assertions, raise_on_error=True
+            )
+            for f in failures:
+                log.warning(
+                    "assertion_warning",
+                    model=f.model,
+                    kind=f.kind,
+                    message=f.message,
+                )
+            assertion_warnings.extend(failures)
+
     return ManifestRunResult(
         materialized=dict(materializer.models),
         execution_order=order,
+        assertion_warnings=assertion_warnings,
     )

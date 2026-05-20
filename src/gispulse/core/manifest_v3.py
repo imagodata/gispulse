@@ -32,7 +32,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from gispulse.core.pipeline import (
     PipelineSpec,
@@ -41,6 +41,9 @@ from gispulse.core.pipeline import (
 )
 from gispulse.core.dag import CycleError, topological_sort
 from gispulse.core.pipeline_schema import validate_pipeline_json
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from gispulse.core.assertions import AssertionSpec
 
 __all__ = [
     "SourceSpec",
@@ -97,6 +100,10 @@ class ModelSpec:
                      Compiles to a chain of :class:`StepSpec`.
         materialize: ``view`` (default), ``table``, ``incremental``.
         refresh:     ``manual`` (default), ``on_change``, ``schedule``.
+        assertions:  Data-quality gates run after materialization —
+                     see :mod:`gispulse.core.assertions` and ELT Lot 4F
+                     (issue #252). ``severity=error`` failures raise;
+                     ``severity=warning`` collect on the run result.
     """
 
     name: str
@@ -104,6 +111,7 @@ class ModelSpec:
     transform: list[dict[str, Any]] = field(default_factory=list)
     materialize: str = "view"
     refresh: str = "manual"
+    assertions: list["AssertionSpec"] = field(default_factory=list)
 
 
 @dataclass
@@ -164,6 +172,8 @@ def _parse_staging(raw: dict[str, Any] | None) -> StagingSpec:
 
 
 def _parse_models(raw: dict[str, Any]) -> dict[str, ModelSpec]:
+    from gispulse.core.assertions import parse_assertions
+
     out: dict[str, ModelSpec] = {}
     for name, spec in (raw or {}).items():
         out[name] = ModelSpec(
@@ -172,6 +182,9 @@ def _parse_models(raw: dict[str, Any]) -> dict[str, ModelSpec]:
             transform=list(spec.get("transform") or []),
             materialize=spec.get("materialize", "view"),
             refresh=spec.get("refresh", "manual"),
+            # ADR 0005 reserves the ``assert:`` block per model for
+            # data-quality gates run after materialization (Lot 4F).
+            assertions=parse_assertions(spec.get("assert") or []),
         )
     return out
 
