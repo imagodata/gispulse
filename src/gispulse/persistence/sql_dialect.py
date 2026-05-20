@@ -360,6 +360,10 @@ class SQLDialect(ABC):
         """
         return f"(array_agg({col}))[1]"
 
+    def st_geometry_type(self, geom: str) -> str:
+        """String name of a geometry's type — ``ST_GeometryType``."""
+        return f"ST_GeometryType({geom})"
+
 
 class PostGISDialect(SQLDialect):
     """PostgreSQL/PostGIS spatial SQL dialect."""
@@ -719,6 +723,9 @@ class GeoPackageDialect(SQLDialect):
 
     def first_agg(self, col: str) -> str:
         return self._spatial_not_supported("first_agg")
+
+    def st_geometry_type(self, geom: str) -> str:
+        return self._spatial_not_supported("ST_GeometryType")
 
 
 # Singleton instances

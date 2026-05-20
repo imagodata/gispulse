@@ -244,3 +244,26 @@ def _overlay_schema() -> dict:
             },
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# ELT Lot 3 (#246) — DuckDB / PostGIS SQL push-down strategies
+# ---------------------------------------------------------------------------
+# overlay_intersection and erase push down cleanly; overlay_union stays on
+# Python — its three-region NaN-attribute semantics is not SQL-portable.
+
+from gispulse.capabilities import _geometry_sql as _gsql  # noqa: E402
+from gispulse.capabilities.sql_pushdown import attach_sql_pushdown  # noqa: E402
+
+attach_sql_pushdown(
+    OverlayIntersectionCapability,
+    _gsql.build_overlay_intersection,
+    gate=lambda p: p.get("ref_gdf") is not None,
+    extra_inputs={"ref": "ref_gdf"},
+)
+attach_sql_pushdown(
+    EraseCapability,
+    _gsql.build_erase,
+    gate=lambda p: p.get("ref_gdf") is not None,
+    extra_inputs={"ref": "ref_gdf"},
+)

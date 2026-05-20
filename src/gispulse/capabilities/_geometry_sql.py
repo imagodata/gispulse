@@ -327,3 +327,164 @@ def build_spatial_join(dialect, gdf, params, tables) -> str:
         f"FROM {tables['input']} l "
         f"{_SJOIN_HOWS[how]} {ref_source} ON {on_clause}"
     )
+
+
+# ===========================================================================
+# ELT Lot 3d (#246) — nearest_neighbor + overlay (intersection / erase)
+# ===========================================================================
+
+
+def _two_layer_collision_projection(
+    dialect: SQLDialect,
+    left_gdf: gpd.GeoDataFrame,
+    right_gdf: gpd.GeoDataFrame,
+    *,
+    columns: list[str] | None = None,
+    suffix_left: str = "_left",
+    suffix_right: str = "_right",
+    include_left_geom: bool = True,
+) -> tuple[list[str], set[str]]:
+    """Return collision-aware ``l.col AS …`` / ``r.col AS …`` projections.
+
+    Used by ``spatial_join`` / ``nearest_neighbor`` / ``overlay_*``.
+    Returns ``(parts, collisions)`` — *parts* in order: left attrs,
+    optionally left geometry, then right attrs. Geometry of the right
+    side is never included.
+    """
+    left_geom_name = left_gdf.geometry.name
+    right_geom_name = right_gdf.geometry.name
+    left_attrs = [c for c in left_gdf.columns if c != left_geom_name]
+    right_attrs = [c for c in right_gdf.columns if c != right_geom_name]
+    if columns is not None:
+        right_attrs = [c for c in right_attrs if c in columns]
+    collisions = set(left_attrs) & set(right_attrs)
+    geom_reg = _geom_reg(dialect, left_gdf)
+    parts: list[str] = []
+    for col in left_attrs:
+        alias = f"{col}{suffix_left}" if col in collisions else col
+        parts.append(f"l.{qi(col)} AS {qi(alias)}")
+    if include_left_geom:
+        parts.append(f"l.{qi(geom_reg)} AS {qi(geom_reg)}")
+    for col in right_attrs:
+        alias = f"{col}{suffix_right}" if col in collisions else col
+        parts.append(f"r.{qi(col)} AS {qi(alias)}")
+    return parts, collisions
+
+
+def build_nearest_neighbor(dialect, gdf, params, tables) -> str:
+    """``nearest_neighbor`` — 1-NN via PostGIS's ``<->`` operator.
+
+    Push-down restricted to PostGIS (DuckDB has no KNN operator) and the
+    simple case: ``k=1``, no ``max_distance``, both layers in the *same
+    projected CRS*. Everything else defers to Python.
+    """
+    if dialect.name != "postgis":
+        raise Untranslatable("nearest_neighbor push-down needs PostGIS (<-> operator)")
+    ref = params.get("ref_gdf")
+    if ref is None:
+        raise Untranslatable("nearest_neighbor missing ref_gdf")
+    if int(params.get("k", 1)) != 1:
+        raise Untranslatable("nearest_neighbor push-down handles k=1 only")
+    if params.get("max_distance") is not None:
+        raise Untranslatable("nearest_neighbor max_distance not pushable")
+    if gdf.crs is None or ref.crs is None or str(gdf.crs) != str(ref.crs):
+        raise Untranslatable("nearest_neighbor: layers must share a CRS")
+    if getattr(gdf.crs, "is_geographic", False):
+        raise Untranslatable("nearest_neighbor needs a projected CRS for distance")
+
+    distance_col = params.get("distance_col", "nn_distance")
+    parts, _ = _two_layer_collision_projection(
+        dialect, gdf, ref, columns=params.get("columns")
+    )
+    geom_reg = _geom_reg(dialect, gdf)
+    parts.append(
+        f"ST_Distance(l.{qi(geom_reg)}::geometry, r.{qi(geom_reg)}::geometry) "
+        f"AS {qi(distance_col)}"
+    )
+    return (
+        f"SELECT {', '.join(parts)} "
+        f"FROM {tables['input']} l "
+        f"CROSS JOIN LATERAL ("
+        f"SELECT * FROM {tables['ref']} _r "
+        f"ORDER BY l.{qi(geom_reg)}::geometry <-> _r.{qi(geom_reg)}::geometry "
+        f"LIMIT 1"
+        f") r"
+    )
+
+
+def _overlay_collision_parts(
+    dialect: SQLDialect,
+    gdf: gpd.GeoDataFrame,
+    ref: gpd.GeoDataFrame,
+    *,
+    suffix_left: str = "_1",
+    suffix_right: str = "_2",
+) -> list[str]:
+    """Per-pair attribute projection for ``overlay_intersection``.
+
+    Geometry is emitted separately by the caller (overlay rewrites it via
+    ``ST_Intersection``). Only attribute columns are produced here, with
+    GeoPandas's ``_1`` / ``_2`` suffixes on collision.
+    """
+    parts, _ = _two_layer_collision_projection(
+        dialect, gdf, ref,
+        suffix_left=suffix_left,
+        suffix_right=suffix_right,
+        include_left_geom=False,
+    )
+    return parts
+
+
+def build_overlay_intersection(dialect, gdf, params, tables) -> str:
+    """``overlay_intersection`` — pair-wise ``ST_Intersection`` + attr inheritance."""
+    ref = params.get("ref_gdf")
+    if ref is None or len(ref) == 0:
+        raise Untranslatable("overlay_intersection requires a non-empty ref")
+    if params.get("suffix_left", "_1") != "_1" or params.get("suffix_right", "_2") != "_2":
+        raise Untranslatable("overlay_intersection push-down keeps the GeoPandas default suffixes")
+    if gdf.crs is not None and ref.crs is not None and str(gdf.crs) != str(ref.crs):
+        raise Untranslatable("overlay_intersection: CRS mismatch")
+    keep_geom_type = params.get("keep_geom_type", True)
+
+    geom_reg = _geom_reg(dialect, gdf)
+    left_geom = dialect.geom_ref(table="l")
+    right_geom = dialect.geom_ref(table="r")
+    intersection = dialect.st_intersection(left_geom, right_geom)
+    parts = _overlay_collision_parts(dialect, gdf, ref)
+    parts.append(f"{intersection} AS {qi(geom_reg)}")
+
+    where = [dialect.st_intersects(left_geom, right_geom)]
+    where.append(f"NOT {dialect.st_is_empty(intersection)}")
+    if keep_geom_type:
+        # GeoPandas drops fragments whose geometry type differs from the
+        # primary layer's — e.g. a line dropping out of two edge-touching
+        # polygons. Replicate at the row level.
+        where.append(
+            f"{dialect.st_geometry_type(intersection)} = "
+            f"{dialect.st_geometry_type(left_geom)}"
+        )
+    return (
+        f"SELECT {', '.join(parts)} "
+        f"FROM {tables['input']} l, {tables['ref']} r "
+        f"WHERE {' AND '.join(where)}"
+    )
+
+
+def build_erase(dialect, gdf, params, tables) -> str:
+    """``erase`` — left geometry minus the unioned reference geometry."""
+    ref = params.get("ref_gdf")
+    if ref is None or len(ref) == 0:
+        raise Untranslatable("erase requires a non-empty ref")
+    if gdf.crs is not None and ref.crs is not None and str(gdf.crs) != str(ref.crs):
+        raise Untranslatable("erase: CRS mismatch")
+
+    ref_union = (
+        f"(SELECT {dialect.st_union_agg(dialect.geom_ref())} FROM {tables['ref']})"
+    )
+    erased = dialect.st_difference(dialect.geom_ref(), ref_union)
+    projection = _replace_geom_projection(dialect, gdf, erased)
+    return (
+        f"SELECT {projection} FROM {tables['input']} "
+        f"WHERE {erased} IS NOT NULL "
+        f"AND NOT {dialect.st_is_empty(erased)}"
+    )
