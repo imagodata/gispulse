@@ -128,7 +128,9 @@ class TestValidateV2:
         assert any("version" in e.lower() for e in errors)
 
     def test_v2_wrong_version_value(self):
-        data = {"version": 3, "steps": [{"id": "s1"}]}
+        # version=3 is now a valid ADR 0005 manifest, routed to SCHEMA_V3.
+        # Use a clearly-unsupported value to keep the original intent.
+        data = {"version": 99, "steps": [{"id": "s1"}]}
         errors = validate_pipeline_json(data)
         assert any("version" in e.lower() or "2" in e for e in errors)
 
