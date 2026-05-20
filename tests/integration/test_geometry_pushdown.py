@@ -375,3 +375,114 @@ def test_spatial_join_ref_filter_translates():
         )
     assert len(sql) == len(py)
     assert set(sql["region"].dropna().unique()) == {"XX"}
+
+
+# ===========================================================================
+# Lot 3d — nearest_neighbor + overlay (intersection, erase)
+# ===========================================================================
+
+
+from gispulse.capabilities.overlay import (  # noqa: E402
+    EraseCapability,
+    OverlayIntersectionCapability,
+)
+from gispulse.capabilities.vector.nearest import (  # noqa: E402
+    NearestNeighborCapability,
+)
+
+
+def _overlay_a() -> gpd.GeoDataFrame:
+    from shapely.geometry import Polygon as _P
+
+    return gpd.GeoDataFrame(
+        {"id": [1, 2], "name": ["A", "B"]},
+        geometry=[
+            _P([(0, 0), (10, 0), (10, 10), (0, 10)]),
+            _P([(15, 0), (25, 0), (25, 10), (15, 10)]),
+        ],
+        crs="EPSG:2154",
+    )
+
+
+def _overlay_b() -> gpd.GeoDataFrame:
+    from shapely.geometry import Polygon as _P
+
+    return gpd.GeoDataFrame(
+        {"id": [1, 2], "region": ["X", "Y"]},
+        geometry=[
+            _P([(5, -5), (20, -5), (20, 15), (5, 15)]),
+            _P([(8, 2), (12, 2), (12, 8), (8, 8)]),
+        ],
+        crs="EPSG:2154",
+    )
+
+
+def test_overlay_intersection_duckdb_matches_python():
+    a, b = _overlay_a(), _overlay_b()
+    params = {"ref_gdf": b}
+    py = OverlayIntersectionCapability().execute(a.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = OverlayIntersectionCapability().execute_with_context(
+            a, _ctx(eng, a, params)
+        )
+    assert set(sql.columns) == set(py.columns)
+    assert len(sql) == len(py)
+    assert sorted(round(g.area, 6) for g in sql.geometry) == sorted(
+        round(g.area, 6) for g in py.geometry
+    )
+
+
+def test_overlay_intersection_non_default_suffix_falls_back():
+    a, b = _overlay_a(), _overlay_b()
+    params = {"ref_gdf": b, "suffix_left": "_a", "suffix_right": "_b"}
+    py = OverlayIntersectionCapability().execute(a.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = OverlayIntersectionCapability().execute_with_context(
+            a, _ctx(eng, a, params)
+        )
+    assert set(sql.columns) == set(py.columns)
+
+
+def test_erase_duckdb_matches_python():
+    a, b = _overlay_a(), _overlay_b()
+    params = {"ref_gdf": b}
+    py = EraseCapability().execute(a.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = EraseCapability().execute_with_context(a, _ctx(eng, a, params))
+    assert set(sql.columns) == set(py.columns)
+    assert len(sql) == len(py)
+    assert sorted(round(g.area, 6) for g in sql.geometry) == sorted(
+        round(g.area, 6) for g in py.geometry
+    )
+
+
+def test_nearest_neighbor_duckdb_falls_back_to_python():
+    """DuckDB has no <-> operator — the strategy declines, Python runs."""
+    a, b = _overlay_a(), _overlay_b()
+    params = {"ref_gdf": b, "k": 1}
+    py = NearestNeighborCapability().execute(a.copy(), **params)
+    with DuckDBSession() as eng:
+        sql = NearestNeighborCapability().execute_with_context(
+            a, _ctx(eng, a, params)
+        )
+    assert set(sql.columns) == set(py.columns)
+    assert len(sql) == len(py)
+
+
+@_requires_postgis
+def test_nearest_neighbor_postgis_matches_python():
+    from gispulse.persistence.postgis import PostGISConnection
+
+    a, b = _overlay_a(), _overlay_b()
+    params = {"ref_gdf": b, "k": 1}
+    py = NearestNeighborCapability().execute(a.copy(), **params)
+    pg = PostGISConnection(dsn=TEST_DSN)
+    pg.open()
+    try:
+        sql = NearestNeighborCapability().execute_with_context(
+            a, _ctx(pg, a, params)
+        )
+    finally:
+        pg.close()
+    assert set(sql.columns) == set(py.columns)
+    assert len(sql) == len(py)
