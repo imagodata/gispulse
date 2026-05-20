@@ -309,3 +309,132 @@ def test_manifest_to_dict_round_trips_canonical():
     assert d["models"]["parcelles_constructibles"]["select"] == "cadastre"
     # The output validates against the schema.
     assert validate_pipeline_json(d) == []
+
+
+# ===========================================================================
+# Load-time graph validation (ELT Lot 4B / #248)
+# ===========================================================================
+
+
+from gispulse.core.manifest_v3 import (  # noqa: E402
+    ManifestValidationError,
+    validate_manifest,
+)
+
+
+def test_validate_manifest_canonical_returns_no_warnings_for_used_outputs():
+    """Models that are referenced by another have no warnings; only
+    terminal/unreferenced outputs are flagged."""
+    m = _canonical_manifest()
+    warnings = validate_manifest(m)
+    # zones_u is selected by parcelles_constructibles (via `with`) so
+    # only parcelles_constructibles is a terminal/orphan output.
+    assert len(warnings) == 1
+    assert "parcelles_constructibles" in warnings[0]
+
+
+def test_validate_manifest_rejects_unresolved_select():
+    m = ManifestV3(
+        sources={"src": SourceSpec(name="src", uri="./x.gpkg")},
+        models={
+            "m": ModelSpec(name="m", select="nope", transform=[]),
+        },
+    )
+    with pytest.raises(ManifestValidationError) as exc:
+        validate_manifest(m)
+    assert any("nope" in e for e in exc.value.errors)
+
+
+def test_validate_manifest_rejects_unresolved_with_ref():
+    m = ManifestV3(
+        sources={"src": SourceSpec(name="src", uri="./x.gpkg")},
+        models={
+            "m": ModelSpec(
+                name="m",
+                select="src",
+                transform=[
+                    {"spatial_join": {"with": "ghost_model", "predicate": "intersects"}},
+                ],
+            ),
+        },
+    )
+    with pytest.raises(ManifestValidationError) as exc:
+        validate_manifest(m)
+    assert any("ghost_model" in e and "with=" in e for e in exc.value.errors)
+
+
+def test_validate_manifest_detects_inter_model_cycle():
+    """A → B → A through `select:` references must fail load."""
+    m = ManifestV3(
+        sources={"src": SourceSpec(name="src", uri="./x.gpkg")},
+        models={
+            "a": ModelSpec(
+                name="a", select="b", transform=[{"filter": {"expression": "1==1"}}]
+            ),
+            "b": ModelSpec(
+                name="b", select="a", transform=[{"filter": {"expression": "1==1"}}]
+            ),
+        },
+    )
+    with pytest.raises(ManifestValidationError, match="cycle"):
+        validate_manifest(m)
+
+
+def test_validate_manifest_detects_with_cycle():
+    """A cycle that goes through a transform-level `with:` also fails."""
+    m = ManifestV3(
+        sources={"src": SourceSpec(name="src", uri="./x.gpkg")},
+        models={
+            "a": ModelSpec(
+                name="a",
+                select="src",
+                transform=[{"spatial_join": {"with": "b", "predicate": "intersects"}}],
+            ),
+            "b": ModelSpec(
+                name="b",
+                select="src",
+                transform=[{"spatial_join": {"with": "a", "predicate": "intersects"}}],
+            ),
+        },
+    )
+    with pytest.raises(ManifestValidationError, match="cycle"):
+        validate_manifest(m)
+
+
+def test_validate_manifest_passes_on_acyclic_graph():
+    m = _canonical_manifest()
+    # No exception, and validation runs to completion (returns warnings list).
+    assert isinstance(validate_manifest(m), list)
+
+
+def test_load_manifest_v3_raises_on_cycle(tmp_path):
+    """The load entry point picks up cycle detection automatically."""
+    path = tmp_path / "cyclic.yaml"
+    path.write_text(
+        "version: 3\n"
+        "sources:\n"
+        "  src: { uri: ./x.gpkg }\n"
+        "models:\n"
+        "  a: { select: b, transform: [{ filter: { expression: \"1==1\" } }] }\n"
+        "  b: { select: a, transform: [{ filter: { expression: \"1==1\" } }] }\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ManifestValidationError, match="cycle"):
+        load_manifest_v3(path)
+
+
+def test_load_manifest_v3_passes_validate_false_through(tmp_path):
+    """``validate=False`` bypasses both schema and graph checks (escape hatch)."""
+    path = tmp_path / "broken.yaml"
+    path.write_text(
+        "version: 3\n"
+        "sources:\n"
+        "  src: { uri: ./x.gpkg }\n"
+        "models:\n"
+        "  m: { select: nope }\n",
+        encoding="utf-8",
+    )
+    # With validate=True the unresolved select would be flagged; with
+    # validate=False we get the raw ManifestV3 back.
+    m = load_manifest_v3(path, validate=False)
+    assert "m" in m.models
