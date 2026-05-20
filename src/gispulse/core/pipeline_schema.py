@@ -316,8 +316,60 @@ SCHEMA_V3: dict[str, Any] = {
                     "enum": ["on_change", "manual", "schedule"],
                     "default": "manual",
                 },
+                "assert": {
+                    "type": "array",
+                    "description": (
+                        "Data-quality gates run after materialization (ELT "
+                        "Lot 4F): not_null / unique / geometry_valid / "
+                        "expect_rows. Each entry is one assertion kind plus "
+                        "an optional severity ('error' default, or 'warning')."
+                    ),
+                    "items": {"$ref": "#/$defs/assertion"},
+                    "default": [],
+                },
             },
             "additionalProperties": False,
+        },
+        "assertion": {
+            "type": "object",
+            "description": (
+                "One data-quality assertion — exactly one kind key (not_null"
+                " / unique / geometry_valid / expect_rows), with an optional"
+                " 'severity' alongside it."
+            ),
+            "minProperties": 1,
+            "additionalProperties": True,
+            "properties": {
+                "severity": {
+                    "type": "string",
+                    "enum": ["error", "warning"],
+                    "default": "error",
+                },
+                "not_null": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                },
+                "unique": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                },
+                "geometry_valid": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {"type": "boolean"},
+                    ],
+                },
+                "expect_rows": {
+                    "type": "object",
+                    "properties": {
+                        "min": {"type": "integer", "minimum": 0},
+                        "max": {"type": "integer", "minimum": 0},
+                    },
+                    "additionalProperties": False,
+                },
+            },
         },
         "transform_step": {
             "type": "object",
