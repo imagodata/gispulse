@@ -21,7 +21,11 @@ from __future__ import annotations
 
 import geopandas as gpd
 
-from gispulse.capabilities.sql_pushdown import Untranslatable, qi
+from gispulse.capabilities.sql_pushdown import (
+    Untranslatable,
+    qi,
+    translate_expression,
+)
 from gispulse.persistence.sql_dialect import SQLDialect
 
 
@@ -215,3 +219,111 @@ def build_simplify(dialect, gdf, params, tables) -> str:
     if src is not None:
         geom = dialect.st_transform(geom, src_srid=meters, dst_srid=src)
     return f"SELECT {_replace_geom_projection(dialect, gdf, geom)} FROM {tables['input']}"
+
+
+# ===========================================================================
+# ELT Lot 3c (#246) — dissolve + spatial_join (group-by / two-layer predicate)
+# ===========================================================================
+
+
+def build_dissolve(dialect, gdf, params, tables) -> str:
+    """``dissolve`` — group-by union with ``first`` on the other columns.
+
+    With ``by=col`` the result has one row per distinct ``col`` value; the
+    geometry of each group is ``ST_Union``-aggregated, every other column
+    keeps an arbitrary value via the dialect's ``first_agg``. With
+    ``by=None`` the whole layer collapses into a single row.
+    """
+    by = params.get("by")
+    geom_name = gdf.geometry.name
+    geom_reg = _geom_reg(dialect, gdf)
+    attrs = [c for c in gdf.columns if c != geom_name]
+    union_expr = dialect.st_union_agg(dialect.geom_ref())
+
+    if by:
+        if by not in attrs:
+            raise Untranslatable(f"dissolve by={by!r} absent from layer")
+        others = [c for c in attrs if c != by]
+        selects = [qi(by), f"{union_expr} AS {qi(geom_reg)}"]
+        for col in others:
+            selects.append(f"{dialect.first_agg(qi(col))} AS {qi(col)}")
+        return (
+            f"SELECT {', '.join(selects)} FROM {tables['input']} "
+            f"GROUP BY {qi(by)}"
+        )
+    # Whole-layer dissolve — one row, no GROUP BY.
+    selects = [f"{union_expr} AS {qi(geom_reg)}"]
+    for col in attrs:
+        selects.append(f"{dialect.first_agg(qi(col))} AS {qi(col)}")
+    return f"SELECT {', '.join(selects)} FROM {tables['input']}"
+
+
+_SJOIN_HOWS = {"inner": "INNER JOIN", "left": "LEFT JOIN", "right": "RIGHT JOIN"}
+_SJOIN_PREDICATES = {
+    "intersects": "st_intersects",
+    "within": "st_within",
+    "contains": "st_contains",
+}
+
+
+def build_spatial_join(dialect, gdf, params, tables) -> str:
+    """``spatial_join`` — keep left attrs+geom, attach right attrs on predicate.
+
+    Reproduces GeoPandas ``sjoin`` column naming: collisions on attribute
+    names get the ``_left`` / ``_right`` suffix; the geometry stays from
+    the left side. ``columns`` restricts which right-side attributes are
+    imported, ``ref_filter`` is translated to a ``WHERE`` clause via the
+    Lot 2 expression translator (declines to Python if non-translatable).
+    """
+    ref = params.get("ref_gdf")
+    if ref is None:
+        raise Untranslatable("spatial_join missing ref_gdf")
+    if gdf.crs is not None and ref.crs is not None and gdf.crs != ref.crs:
+        raise Untranslatable(
+            "spatial_join: CRS mismatch — Python reprojects, SQL does not"
+        )
+    how = params.get("how", "inner")
+    if how not in _SJOIN_HOWS:
+        raise Untranslatable(f"spatial_join how={how!r} unsupported")
+    predicate = params.get("predicate", "intersects")
+    if predicate not in _SJOIN_PREDICATES:
+        raise Untranslatable(f"spatial_join predicate={predicate!r} unsupported")
+
+    left_geom = gdf.geometry.name
+    left_attrs = [c for c in gdf.columns if c != left_geom]
+    right_geom = ref.geometry.name
+    right_attrs = [c for c in ref.columns if c != right_geom]
+    columns = params.get("columns")
+    if columns is not None:
+        right_attrs = [c for c in right_attrs if c in columns]
+    collisions = set(left_attrs) & set(right_attrs)
+
+    geom_reg = _geom_reg(dialect, gdf)
+    parts: list[str] = []
+    for col in left_attrs:
+        alias = f"{col}_left" if col in collisions else col
+        parts.append(f"l.{qi(col)} AS {qi(alias)}")
+    parts.append(f"l.{qi(geom_reg)} AS {qi(geom_reg)}")
+    for col in right_attrs:
+        alias = f"{col}_right" if col in collisions else col
+        parts.append(f"r.{qi(col)} AS {qi(alias)}")
+
+    pred_method = getattr(dialect, _SJOIN_PREDICATES[predicate])
+    on_clause = pred_method(
+        dialect.geom_ref(table="l"), dialect.geom_ref(table="r")
+    )
+
+    ref_filter = params.get("ref_filter")
+    if ref_filter:
+        # translate_expression raises Untranslatable for anything outside
+        # the SQL-pure subset → caller falls back to Python.
+        filter_sql = translate_expression(ref_filter)
+        ref_source = f"(SELECT * FROM {tables['ref']} WHERE {filter_sql}) r"
+    else:
+        ref_source = f"{tables['ref']} r"
+
+    return (
+        f"SELECT {', '.join(parts)} "
+        f"FROM {tables['input']} l "
+        f"{_SJOIN_HOWS[how]} {ref_source} ON {on_clause}"
+    )

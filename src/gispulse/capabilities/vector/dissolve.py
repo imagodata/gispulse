@@ -44,3 +44,20 @@ class DissolveCapability(Capability):
             },
         }
 
+
+# ---------------------------------------------------------------------------
+# ELT Lot 3 (#246) — DuckDB / PostGIS SQL push-down strategy
+# ---------------------------------------------------------------------------
+
+from gispulse.capabilities import _geometry_sql as _gsql  # noqa: E402
+from gispulse.capabilities.sql_pushdown import attach_sql_pushdown  # noqa: E402
+
+attach_sql_pushdown(
+    DissolveCapability,
+    _gsql.build_dissolve,
+    # by=None falls back to Python because gpd.dissolve().reset_index()
+    # then appends a spurious 'index' column from the default RangeIndex —
+    # not a meaningful difference, but reproducing it in SQL has no value.
+    gate=lambda p: bool(p.get("by")),
+)
+
