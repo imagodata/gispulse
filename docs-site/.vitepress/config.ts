@@ -120,6 +120,13 @@ const frSidebar = {
       ],
     },
     {
+      text: 'Manifeste ELT (v3)',
+      items: [
+        { text: 'Référence du manifeste', link: '/guide/elt-manifest' },
+        { text: 'Migration v1 / v2 → v3', link: '/guide/elt-migration' },
+      ],
+    },
+    {
       text: 'Walkthroughs',
       items: [
         { text: 'Parcelles', link: '/guide/walkthroughs/parcels' },

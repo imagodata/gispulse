@@ -4,6 +4,8 @@ Comment les utilisateurs cibles consomment GISPulse au quotidien : qui, pour quo
 
 Complète [INTEGRATION_MATRIX.md](INTEGRATION_MATRIX.md) (échange de données) et [`templates/INDEX.md`](../templates/INDEX.md) (catalogue des 21 presets).
 
+> **2026-05-20 — manifeste ELT `version: 3` (ADR 0005)** : pour les personas « pipeline-as-code » (Géomaticien collectivité, Chef de projet ZAN, Bureau d'études environnement, Géomaticien SDIS, Analyste foncier), le manifeste v3 unifie sources / triggers / modèles dans **un seul fichier déclaratif**. Voir [`docs-site/guide/elt-manifest.md`](../docs-site/guide/elt-manifest.md) et le guide de migration [`elt-migration.md`](../docs-site/guide/elt-migration.md). Les formats v1 / v2 restent supportés (dépréciés v1.10.1 → supprimés v2.0.0).
+
 Légende :
 - **Tier** : C = Community (AGPL, gratuit), P = Pro (paid features : isochrone réseau, raster lourd, ESB triggers)
 - **Canal** : CLI, Portal (SPA web), QGIS (plugin), ArcGIS (OGC API), MVT (web map), Webhook (sortie événementielle), SDK (Python/JS)

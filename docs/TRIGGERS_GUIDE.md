@@ -2,6 +2,8 @@
 
 GISPulse triggers react to DML events on tracked datasets and dispatch one or more actions (notify, set_field, webhook, run_sql, …). This page is the operator-oriented summary; the canonical reference for trigger / rule JSON shape lives in **[`docs-site/guide/rules.md`](../docs-site/guide/rules.md)** (rendered at <https://imagodata.github.io/gispulse/guide/rules>).
 
+> **2026-05-20 — unified `version: 3` manifest (ADR 0005)** : triggers can now be declared inside the new unified manifest alongside `sources:` / `models:` / `staging:`. The semantics of each trigger are unchanged; only the surrounding file shape is new. See [`docs-site/guide/elt-manifest.md`](../docs-site/guide/elt-manifest.md) for the v3 reference and [`elt-migration.md`](../docs-site/guide/elt-migration.md) for `gispulse migrate`. v1 / v2 trigger files keep loading (deprecated at v1.10.1, removed at v2.0.0).
+
 ## Architecture in one diagram
 
 ```

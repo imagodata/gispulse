@@ -4,6 +4,7 @@
 **Date:** 2026-05-07
 **Deciders:** GISPulse maintainers
 **Issue:** [#142](https://github.com/imagodata/gispulse/issues/142) (Q3 of EPIC [#139](https://github.com/imagodata/gispulse/issues/139))
+**Cross-reference:** [ADR 0005 — unified `version: 3` manifest](./0005-unified-manifest.md). The DELETE cascade across the v3 manifest's descendant models (`materialize: incremental` + ``staging.cdc: incremental``) reuses the bounded fixed-point + origin-tagging defined here — no new cascade engine.
 
 ## Context
 
