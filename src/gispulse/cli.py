@@ -1548,6 +1548,83 @@ from gispulse.cli_mcp import cmd_mcp  # noqa: E402
 app.command(name="mcp")(cmd_mcp)
 
 
+# ---------------------------------------------------------------------------
+# migrate — rewrite a v1/v2 pipeline file as a v3 manifest (ADR 0005)
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def migrate(
+    input_file: Path = typer.Argument(
+        ..., help="Source pipeline file (v1 array or v2 PipelineSpec JSON/YAML)."
+    ),
+    output_file: Path | None = typer.Option(
+        None, "--output", "-o",
+        help="Destination .yaml/.json. When omitted, prints to stdout.",
+    ),
+    fmt: str = typer.Option(
+        "yaml", "--format", "-f",
+        help="Output format when writing to stdout: 'yaml' (default) or 'json'.",
+    ),
+) -> None:
+    """Rewrite a v1/v2 pipeline as a v3 manifest (ADR 0005).
+
+    The compiled v3 file is validated against ``SCHEMA_V3`` before
+    emission; a primary input source (``<primary_input>`` placeholder)
+    is added so the manifest is structurally self-contained.
+    """
+    import json as _json
+
+    from gispulse.core.manifest_v3 import migrate_to_v3
+    from gispulse.core.pipeline_schema import validate_pipeline_json
+
+    if not input_file.exists():
+        typer.echo(f"Error: input file not found: {input_file}", err=True)
+        raise typer.Exit(1)
+
+    text = input_file.read_text(encoding="utf-8")
+    if input_file.suffix.lower() in (".yaml", ".yml"):
+        import yaml as _yaml
+
+        raw = _yaml.safe_load(text)
+    else:
+        raw = _json.loads(text)
+
+    try:
+        v3 = migrate_to_v3(raw)
+    except Exception as exc:
+        typer.echo(f"Error: migration failed — {exc}", err=True)
+        raise typer.Exit(1)
+
+    errors = validate_pipeline_json(v3)
+    if errors:
+        typer.echo("Warning: migrated manifest fails v3 validation:", err=True)
+        for err in errors[:10]:
+            typer.echo(f"  - {err}", err=True)
+
+    if output_file is not None:
+        if output_file.suffix.lower() in (".yaml", ".yml"):
+            import yaml as _yaml
+
+            output_file.write_text(
+                _yaml.safe_dump(v3, sort_keys=False, allow_unicode=True),
+                encoding="utf-8",
+            )
+        else:
+            output_file.write_text(
+                _json.dumps(v3, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        typer.echo(f"Wrote v3 manifest to {output_file}")
+    else:
+        if fmt == "json":
+            typer.echo(_json.dumps(v3, indent=2, ensure_ascii=False))
+        else:
+            import yaml as _yaml
+
+            typer.echo(_yaml.safe_dump(v3, sort_keys=False, allow_unicode=True))
+
+
 def main() -> None:
     from gispulse._pyogrio_warnings import silence_gispulse_extension_warnings
 
