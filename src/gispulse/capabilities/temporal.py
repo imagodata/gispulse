@@ -266,3 +266,34 @@ class TemporalJoinCapability(Capability):
             },
             "required": ["left_on"],
         }
+
+
+# ---------------------------------------------------------------------------
+# ELT Lot 3 (#246) — DuckDB / PostGIS SQL push-down strategies
+# ---------------------------------------------------------------------------
+# temporal_filter pushes its time window down as a WHERE clause.
+# temporal_join push-down handles `strategy='exact'` only — the asof
+# strategies (backward / forward / nearest), `tolerance` and `by` groups
+# stay on Python (LATERAL + INTERVAL arithmetic, with dialect quirks).
+
+from gispulse.capabilities import _geometry_sql as _gsql  # noqa: E402
+from gispulse.capabilities.sql_pushdown import attach_sql_pushdown  # noqa: E402
+
+attach_sql_pushdown(
+    TemporalFilterCapability,
+    _gsql.build_temporal_filter,
+    gate=lambda p: (
+        bool(p.get("time_col"))
+        and (p.get("start") is not None or p.get("end") is not None)
+    ),
+)
+attach_sql_pushdown(
+    TemporalJoinCapability,
+    _gsql.build_temporal_join_exact,
+    gate=lambda p: (
+        p.get("strategy", "backward") == "exact"
+        and p.get("ref_gdf") is not None
+        and bool(p.get("left_on"))
+    ),
+    extra_inputs={"ref": "ref_gdf"},
+)
