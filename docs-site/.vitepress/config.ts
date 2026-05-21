@@ -16,6 +16,14 @@ const shared = {
     /tests\//,
     /TRIGGERS_GUIDE/,
     /INTEGRATION_MATRIX/,
+    // ELT manifest/migration pages (added with Lot 4G #305) reference repo
+    // ADR paths that don't have a docs-site mirror yet. qgis-install also
+    // links to a /guide/triggers page that doesn't exist. dsl-geom-functions
+    // points at a `dsl-design` companion that was never written. Cleanup
+    // tracked under imagodata/gispulse#319 (rewrite to absolute GitHub URLs).
+    /adr\//,
+    /guide\/triggers$/,
+    /dsl-design/,
   ],
 
   head: [
@@ -80,6 +88,7 @@ const frNav = [
   {
     text: 'Ressources',
     items: [
+      { text: 'Migration 2.0', link: '/migration-2.0' },
       { text: 'Presets metier', link: '/templates' },
       { text: 'FAQ', link: '/faq' },
       { text: 'Communauté', link: '/community' },
@@ -225,6 +234,7 @@ const enNav = [
   {
     text: 'Resources',
     items: [
+      { text: 'Migration 2.0', link: '/en/migration-2.0' },
       { text: 'Presets library', link: '/en/templates' },
       { text: 'FAQ', link: '/en/faq' },
       { text: 'Community', link: '/en/community' },
