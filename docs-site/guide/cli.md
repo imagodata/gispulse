@@ -315,7 +315,7 @@ gispulse doctor
 ```
 
 ```
-✓ GISPulse    v1.1.1
+✓ GISPulse    v2.0.0
 ✓ Python      v3.12.3
 ✓ GDAL        v3.8.4
 ✓ DuckDB      v1.1.3 + spatial OK

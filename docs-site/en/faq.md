@@ -78,14 +78,14 @@ The same JSON rules run on either engine. You choose the engine at execution tim
 
 ### Is GISPulse production-ready?
 
-Yes. **GISPulse v1.1.1** is the current stable release: 117 capabilities, 3,600+ tests, multi-backend DuckDB / PostGIS engine, Prometheus metrics, RBAC, SSO (OIDC / SAML), audit logging and S3 storage. The CLI, REST API, Python SDK, QGIS plugin, ArcGIS add-in and Tauri desktop client are all shipped.
+Yes. **GISPulse v2.0.0** is the current stable release: 118 capabilities, 3,600+ tests, multi-backend DuckDB / PostGIS engine, Prometheus metrics, RBAC, SSO (OIDC / SAML), audit logging and S3 storage. The CLI, REST API, Python SDK, QGIS plugin, ArcGIS add-in and Tauri desktop client are all shipped. v2.0.0 adds the two-regime ExtensionHub (code plugins + data packs), the worldwide geo aggregator (4 fetchers), and the MCP server.
 
 | Component | Status |
 |-----------|--------|
-| Engine (DuckDB / PostGIS / GPKG portable) | **Stable — v1.1.1** |
+| Engine (DuckDB / PostGIS / GPKG portable) | **Stable — v2.0.0** |
 | CLI | **Stable** |
 | REST API + Python SDK | **Stable** |
-| 117 capabilities (vector, attributes, classification, stats, topology, 3D pointcloud, raster, network, PostGIS SQL) | **Stable** |
+| 118 capabilities (vector, attributes, classification, stats, topology, 3D pointcloud, raster, network, PostGIS SQL) | **Stable** |
 | QGIS plugin / ArcGIS add-in / Tauri desktop | **Stable** |
 | Web Portal (single-user Community, multi-user Pro / Team / Enterprise) | **Stable** |
 | Visual node editor | **Beta** |
