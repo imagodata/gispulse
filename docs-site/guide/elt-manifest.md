@@ -2,7 +2,7 @@
 
 Le manifeste `version: 3` est la **surface déclarative unifiée** de GISPulse pour les pipelines ELT. Il fusionne les trois formats hérités (`triggers.yaml` v1, pipeline JSON v2, listes de règles) en un seul schéma — sources, staging, modèles, triggers, sécurité, runtime — et **compile vers le moteur PipelineSpec existant**. Aucun nouveau DAG executor, aucune nouvelle couche de dispatch : c'est une couche déclarative au-dessus du moteur qui tourne déjà depuis la v1.
 
-> **Référence d'architecture** : [ADR 0005 — Unified GISPulse manifest](../../docs/adr/0005-unified-manifest.md) cadre la décision. Le dialecte SQL contractuel est figé par [ADR 0001 — DuckDB-spatial is the contract dialect](../../docs/adr/0001-dsl-sql-dialect.md). La cascade DELETE descendante réutilise le fixed-point d'[ADR 0002 — Trigger cascade semantics](../../docs/adr/0002-trigger-cascade-semantics.md).
+> **Référence d'architecture** : [ADR 0005 — Unified GISPulse manifest](https://github.com/imagodata/gispulse/blob/main/docs/adr/0005-unified-manifest.md) cadre la décision. Le dialecte SQL contractuel est figé par [ADR 0001 — DuckDB-spatial is the contract dialect](https://github.com/imagodata/gispulse/blob/main/docs/adr/0001-dsl-sql-dialect.md). La cascade DELETE descendante réutilise le fixed-point d'[ADR 0002 — Trigger cascade semantics](https://github.com/imagodata/gispulse/blob/main/docs/adr/0002-trigger-cascade-semantics.md).
 
 ## TL;DR
 
@@ -56,7 +56,7 @@ runtime:  { poll_interval_ms: 1000, max_batch: 200 }
 
 ### `sources:` — entrées déclarées
 
-Chaque source porte au minimum une `uri:`. Les champs additionnels — `layer`, `geometry`, `crs`, `format` — sont logiques (jamais l'encodage physique : voir [Q3 — geometry-agnostic DSL](../../docs/adr/0005-unified-manifest.md#decision)).
+Chaque source porte au minimum une `uri:`. Les champs additionnels — `layer`, `geometry`, `crs`, `format` — sont logiques (jamais l'encodage physique : voir [Q3 — geometry-agnostic DSL](https://github.com/imagodata/gispulse/blob/main/docs/adr/0005-unified-manifest.md#decision)).
 
 ```yaml
 sources:
@@ -148,7 +148,7 @@ Les assertions tournent **en Python sur le résultat matérialisé** — engine-
 
 ### `triggers:` — déclencheurs réactifs
 
-Les triggers v3 conservent la sémantique de [`docs-site/guide/rules`](./rules.md) — déclenchés sur événement DML / schedule / manual, ils dispatchent une action (`notify`, `webhook`, `run_sql`, …). Ils ne sont **pas** des étapes de DAG : `models:` et `triggers:` sont [deux sections distinctes du même schéma](../../docs/adr/0005-unified-manifest.md#settled-design-questions) (décision D — un schéma, deux sémantiques).
+Les triggers v3 conservent la sémantique de [`docs-site/guide/rules`](./rules.md) — déclenchés sur événement DML / schedule / manual, ils dispatchent une action (`notify`, `webhook`, `run_sql`, …). Ils ne sont **pas** des étapes de DAG : `models:` et `triggers:` sont [deux sections distinctes du même schéma](https://github.com/imagodata/gispulse/blob/main/docs/adr/0005-unified-manifest.md#settled-design-questions) (décision D — un schéma, deux sémantiques).
 
 ### `security:` et `runtime:`
 

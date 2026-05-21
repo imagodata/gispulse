@@ -12,8 +12,9 @@ returns a typed value usable in `set_field` or `validate:` rules.
 
 The compiler never executes user-supplied Python — expressions are
 parsed via Python's `ast` module and rejected unless every node fits
-the strict allowlist. See [DSL design notes](./dsl-design.md) for the
-gory details.
+the strict allowlist. See the [SQL dialect contract](./dsl-sql-dialect)
+for the dispatch rules and [`docs/adr/0001-dsl-sql-dialect.md`](https://github.com/imagodata/gispulse/blob/main/docs/adr/0001-dsl-sql-dialect.md)
+for the AST allow-list rationale.
 
 > **Dialecte SQL** : ces fonctions compilent vers DuckDB-spatial par
 > construction (4-arg `ST_Transform`). Voir [Contrat de dialecte

@@ -4,27 +4,11 @@ const shared = {
   title: 'GISPulse',
   base: '/gispulse/',
   cleanUrls: true,
-  // Coverage matrix + integrations docs link to repo paths (../../tests/,
-  // ../../docs/TRIGGERS_GUIDE, ../INTEGRATION_MATRIX) that resolve in the
-  // source tree but not under the built docs root. VitePress 1.x exits 1
-  // on the first dead link, blocking the gh-pages deploy entirely. Match
-  // the offending shapes loosely (the links use leading "./../" forms) so
-  // the build can ship; the links themselves should be rewritten as
-  // github.com/... URLs as a follow-up.
-  ignoreDeadLinks: [
-    /capabilities\//,
-    /tests\//,
-    /TRIGGERS_GUIDE/,
-    /INTEGRATION_MATRIX/,
-    // ELT manifest/migration pages (added with Lot 4G #305) reference repo
-    // ADR paths that don't have a docs-site mirror yet. qgis-install also
-    // links to a /guide/triggers page that doesn't exist. dsl-geom-functions
-    // points at a `dsl-design` companion that was never written. Cleanup
-    // tracked under imagodata/gispulse#319 (rewrite to absolute GitHub URLs).
-    /adr\//,
-    /guide\/triggers$/,
-    /dsl-design/,
-  ],
+  // ignoreDeadLinks intentionally empty — issue #319 (Phase 3) rewrote
+  // every link previously caught by the regex list to an absolute
+  // github.com URL or a real in-docs page. Keep this empty so VitePress
+  // fails the build on any new dead link rather than silently shipping.
+  ignoreDeadLinks: [],
 
   head: [
     ['link', { rel: 'icon', href: '/gispulse/favicon.svg', type: 'image/svg+xml' }],

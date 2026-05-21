@@ -5,7 +5,7 @@ description: 4 scénarios pour brancher GISPulse à un viewer web (MapLibre GL J
 
 # Intégrer MapLibre GL JS / deck.gl
 
-GISPulse expose toutes les surfaces nécessaires à un client web standard (MVT, GeoJSON OGC, WebSocket) — pas besoin de SDK. Le SDK npm `@gispulse/sdk-core` arrive v1.3+ ([INTEGRATION_MATRIX](../INTEGRATION_MATRIX.md)).
+GISPulse expose toutes les surfaces nécessaires à un client web standard (MVT, GeoJSON OGC, WebSocket) — pas besoin de SDK. Le SDK npm `@gispulse/sdk-core` arrive v1.3+ ([INTEGRATION_MATRIX](https://github.com/imagodata/gispulse/blob/main/docs/INTEGRATION_MATRIX.md)).
 
 ## Setup
 
@@ -125,7 +125,7 @@ ws.onclose = () => setTimeout(() => location.reload(), 2000)
 ```
 
 ::: tip Filtrage WS
-Les paramètres `?topics=`, `?trigger_ids=`, `?tables=` filtrent **côté client** (post-broadcast) sur OSS — voir [TRIGGERS_GUIDE → Limites OSS §6](../../docs/TRIGGERS_GUIDE.md#limites-oss-community-tier). Pour du routage server-side (Pro), une issue v1.3+ est ouverte.
+Les paramètres `?topics=`, `?trigger_ids=`, `?tables=` filtrent **côté client** (post-broadcast) sur OSS — voir [TRIGGERS_GUIDE → Limites OSS §6](https://github.com/imagodata/gispulse/blob/main/docs/TRIGGERS_GUIDE.md#limites-oss-community-tier). Pour du routage server-side (Pro), une issue v1.3+ est ouverte.
 :::
 
 ## Scénario D — Auth API key
@@ -261,6 +261,6 @@ Lancer : `python -m http.server 5173`, ouvrir `http://localhost:5173/viewer.html
 
 ## Voir aussi
 
-- [Integration matrix](../INTEGRATION_MATRIX.md)
-- [Triggers Guide → WebSocket post-broadcast filter](../../docs/TRIGGERS_GUIDE.md#limites-oss-community-tier)
+- [Integration matrix](https://github.com/imagodata/gispulse/blob/main/docs/INTEGRATION_MATRIX.md)
+- [Triggers Guide → WebSocket post-broadcast filter](https://github.com/imagodata/gispulse/blob/main/docs/TRIGGERS_GUIDE.md#limites-oss-community-tier)
 - [REST API reference](../api/rest.md)
