@@ -27,7 +27,7 @@ head:
 hero:
   name: GISPulse
   text: The Declarative Geospatial Engine
-  tagline: "Rules-as-config for your spatial data. What dbt is to data, GISPulse is to GIS. v1.1.1 available — 117 capabilities."
+  tagline: "Rules-as-config for your spatial data. What dbt is to data, GISPulse is to GIS. v2.0.0 available — 118 capabilities."
   image:
     light: /logo.svg
     dark: /logo-dark.svg
@@ -86,8 +86,8 @@ features:
 
 <section class="gp-section gp-coming-soon-banner">
 <div class="gp-coming-soon">
-  <span class="gp-coming-soon-badge">v1.1.1</span>
-  <p>GISPulse v1.1.1 is available. 117 capabilities (vector, attributes, classification, spatial statistics, clustering, 3D pointcloud, raster, network, PostGIS SQL), 3,600+ tests, multi-backend DuckDB/PostGIS engine, Prometheus metrics.</p>
+  <span class="gp-coming-soon-badge">v2.0.0</span>
+  <p>GISPulse v2.0.0 is available. 118 capabilities (vector, attributes, classification, spatial statistics, clustering, 3D pointcloud, raster, network, PostGIS SQL), 3,600+ tests, multi-backend DuckDB/PostGIS engine, Prometheus metrics, ExtensionHub with the data-packs regime, worldwide geo aggregator, and MCP server.</p>
   <a href="/gispulse/en/getting-started/installation" class="gp-coming-soon-cta">Install now</a>
 </div>
 </section>
@@ -104,7 +104,7 @@ features:
 </div>
 <div class="gp-stats-row">
   <div class="gp-stat">
-    <span class="gp-stat-value">117</span>
+    <span class="gp-stat-value">118</span>
     <span class="gp-stat-label">spatial capabilities</span>
   </div>
   <div class="gp-stat">
@@ -255,7 +255,7 @@ Same rules file, three execution modes: local CLI, REST API, Python SDK.
 
 <section class="gp-section gp-capabilities-showcase">
 
-## 117 capabilities, ready to use
+## 118 capabilities, ready to use
 
 <div class="gp-cap-grid">
 <div class="gp-cap-group">
@@ -325,7 +325,7 @@ Same rules file, three execution modes: local CLI, REST API, Python SDK.
 </div>
 
 <div class="gp-cap-footer">
-<a href="/gispulse/en/guide/capabilities">See the full catalogue of 117 capabilities &rarr;</a>
+<a href="/gispulse/en/guide/capabilities">See the full catalogue of 118 capabilities &rarr;</a>
 </div>
 
 </section>
@@ -409,7 +409,7 @@ FME remains an excellent tool for complex graphical workflows. GISPulse targets 
 
 <section class="gp-footer-cta-big">
 
-<h2>GISPulse v1.1.1 is available</h2>
+<h2>GISPulse v2.0.0 is available</h2>
 <p>Install GISPulse and run your first spatial pipeline in 5 minutes.</p>
 
 <div class="gp-footer-cta-actions">

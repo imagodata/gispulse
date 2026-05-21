@@ -55,7 +55,7 @@ gispulse doctor
 Expected output:
 
 ```
-✓ GISPulse    v1.1.1
+✓ GISPulse    v2.0.0
 ✓ Python      v3.12.x
 ✓ GDAL        v3.x.x
 ✓ DuckDB      v1.x.x + spatial OK

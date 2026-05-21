@@ -125,14 +125,14 @@ gispulse run data.gpkg --rules rules.json -o output.gpkg --engine duckdb
 
 ## GISPulse est-il pret pour la production ?
 
-Oui. **GISPulse v1.1.1** est la version stable courante : 117 capabilities, 3 600+ tests, moteur multi-backend DuckDB / PostGIS, metriques Prometheus, RBAC, SSO (OIDC / SAML), audit log et stockage S3. La CLI, l'API REST, le SDK Python, le plugin QGIS, l'add-in ArcGIS et le client desktop Tauri sont tous livres.
+Oui. **GISPulse v2.0.0** est la version stable courante : 118 capabilities, 3 600+ tests, moteur multi-backend DuckDB / PostGIS, metriques Prometheus, RBAC, SSO (OIDC / SAML), audit log et stockage S3. La CLI, l'API REST, le SDK Python, le plugin QGIS, l'add-in ArcGIS et le client desktop Tauri sont tous livres. La v2.0.0 ajoute l'ExtensionHub a 2 regimes (code plugins + data packs), l'agregateur geo mondial (4 fetchers) et le serveur MCP.
 
 | Composant | Statut |
 |-----------|--------|
-| Moteur (DuckDB / PostGIS / GPKG portable) | **Stable — v1.1.1** |
+| Moteur (DuckDB / PostGIS / GPKG portable) | **Stable — v2.0.0** |
 | CLI | **Stable** |
 | API REST + SDK Python | **Stable** |
-| 117 capabilities (vecteur, attributs, classification, stats, topologie, 3D pointcloud, raster, reseau, PostGIS SQL) | **Stable** |
+| 118 capabilities (vecteur, attributs, classification, stats, topologie, 3D pointcloud, raster, reseau, PostGIS SQL) | **Stable** |
 | Plugin QGIS / Add-in ArcGIS / Desktop Tauri | **Stable** |
 | Portal web (single-user Community, multi-user Pro / Team / Enterprise) | **Stable** |
 | Visual node editor | **Beta** |
