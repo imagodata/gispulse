@@ -129,6 +129,15 @@ const frSidebar = {
       ],
     },
     {
+      text: 'Plateforme d\'extensions',
+      items: [
+        { text: 'ExtensionHub', link: '/guide/extension-hub' },
+        { text: 'Data packs', link: '/guide/data-packs' },
+        { text: 'Agrégateur mondial', link: '/guide/worldwide-aggregator' },
+        { text: 'Serveur MCP', link: '/guide/mcp' },
+      ],
+    },
+    {
       text: 'Manifeste ELT (v3)',
       items: [
         { text: 'Référence du manifeste', link: '/guide/elt-manifest' },
@@ -162,6 +171,15 @@ const frSidebar = {
         { text: 'Vue d\'ensemble', link: '/plugins/qgis' },
         { text: 'Installer le plugin', link: '/plugins/qgis-install' },
         { text: 'Dépannage', link: '/plugins/qgis-troubleshooting' },
+      ],
+    },
+    {
+      text: 'Sources de données — France',
+      items: [
+        { text: 'src-dvf · Valeurs Foncières', link: '/plugins/src-dvf' },
+        { text: 'src-gpu · Documents d\'urbanisme', link: '/plugins/src-gpu' },
+        { text: 'src-cadastre · Cadastre', link: '/plugins/src-cadastre' },
+        { text: 'src-ign · BD TOPO / Admin Express', link: '/plugins/src-ign' },
       ],
     },
     {
@@ -275,6 +293,15 @@ const enSidebar = {
       ],
     },
     {
+      text: 'Extension platform',
+      items: [
+        { text: 'ExtensionHub', link: '/en/guide/extension-hub' },
+        { text: 'Data packs', link: '/en/guide/data-packs' },
+        { text: 'Worldwide aggregator', link: '/en/guide/worldwide-aggregator' },
+        { text: 'MCP server', link: '/en/guide/mcp' },
+      ],
+    },
+    {
       text: 'Walkthroughs',
       items: [
         { text: 'Parcels', link: '/en/guide/walkthroughs/parcels' },
@@ -301,6 +328,15 @@ const enSidebar = {
         { text: 'Overview', link: '/en/plugins/qgis' },
         { text: 'Install the plugin', link: '/en/plugins/qgis-install' },
         { text: 'Troubleshooting', link: '/en/plugins/qgis-troubleshooting' },
+      ],
+    },
+    {
+      text: 'French data sources',
+      items: [
+        { text: 'src-dvf · Real-estate transactions', link: '/en/plugins/src-dvf' },
+        { text: 'src-gpu · Urban-planning documents', link: '/en/plugins/src-gpu' },
+        { text: 'src-cadastre · Cadastre', link: '/en/plugins/src-cadastre' },
+        { text: 'src-ign · BD TOPO / Admin Express', link: '/en/plugins/src-ign' },
       ],
     },
     {
