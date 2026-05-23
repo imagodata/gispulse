@@ -1,0 +1,79 @@
+name: Compat Matrix (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      satellite-name:
+        description: "Name of the satellite repo (for issue title only)"
+        required: true
+        type: string
+      python-versions:
+        description: "JSON array of Python versions to test"
+        required: false
+        type: string
+        default: '["3.11", "3.12"]'
+      gispulse-versions:
+        description: "JSON array of gispulse versions (use 'latest' for the floating tip)"
+        required: false
+        type: string
+        default: '["latest", "2.0.0"]'
+      install-command:
+        description: "Shell command to install the satellite in editable mode"
+        required: false
+        type: string
+        default: "pip install -e . --no-deps"
+      sanity-import:
+        description: "Python import statement(s) to validate the satellite imports cleanly"
+        required: true
+        type: string
+      pytest-target:
+        description: "Path to pytest collect-only (e.g. 'tests/' or 'tests_enterprise/')"
+        required: false
+        type: string
+        default: "tests/"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  compat:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(inputs.python-versions) }}
+        gispulse-version: ${{ fromJSON(inputs.gispulse-versions) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install gispulse ${{ matrix.gispulse-version }}
+        run: |
+          if [ "${{ matrix.gispulse-version }}" = "latest" ]; then
+            pip install --upgrade gispulse
+          else
+            pip install gispulse==${{ matrix.gispulse-version }}
+          fi
+      - name: Install satellite
+        run: ${{ inputs.install-command }}
+      - name: Sanity import
+        run: |
+          python -c "${{ inputs.sanity-import }}"
+      - name: Pytest collect-only
+        run: |
+          pip install pytest
+          pytest --collect-only ${{ inputs.pytest-target }} 2>&1 | tail -20
+      - name: Open issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[compat-matrix] ${{ inputs.satellite-name }} broken on gispulse ${{ matrix.gispulse-version }} (py ${{ matrix.python-version }})`,
+              body: `Nightly compat-matrix detected breakage.\n\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nLikely a new gispulse OSS release introduced a breaking change. First responder action:\n- bump local pin in pyproject.toml, OR\n- push a compat shim in gispulse_enterprise.compat / equivalent.`,
+              labels: ['compat-matrix', 'regression', 'realign-2.0']
+            })
