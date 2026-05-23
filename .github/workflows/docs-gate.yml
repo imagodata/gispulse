@@ -1,0 +1,32 @@
+name: docs gate
+
+# Phase 4 of EPIC #309 (closes #320). Block PRs that bump
+# pyproject.toml::version without a matching entry in
+# docs-site/changelog.md (FR) — and warn when the EN mirror is missing.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "docs-site/changelog.md"
+      - "docs-site/en/changelog.md"
+      - "scripts/check_changelog_coverage.py"
+      - ".github/workflows/docs-gate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  changelog-coverage:
+    name: changelog covers version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Check changelog coverage for current pyproject.toml version
+        run: python scripts/check_changelog_coverage.py

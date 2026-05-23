@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -91,6 +93,63 @@ def check_pages() -> None:
     _ok("core pages rendered (templates, playground)")
 
 
+def _latest_tag() -> str | None:
+    """Return the latest git tag (without leading ``v``), or ``None`` if none."""
+    # In CI, ``DOCS_SMOKE_LATEST_TAG`` lets the workflow inject the tag
+    # explicitly when the checkout is shallow and ``git describe`` would
+    # fail. Locally we fall back to ``git describe --tags --abbrev=0``.
+    env_tag = os.environ.get("DOCS_SMOKE_LATEST_TAG", "").strip()
+    if env_tag:
+        return env_tag.lstrip("v")
+    try:
+        out = subprocess.check_output(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            cwd=ROOT,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    if not out:
+        return None
+    return out.lstrip("v")
+
+
+def check_latest_tag_visible() -> None:
+    """Verify the latest released tag is present in the built changelog HTML.
+
+    This catches the class of bugs where `pyproject.toml` bumps but the
+    docs-site changelog never reflects it (the original drift that drove
+    EPIC #309). In CI we set ``DOCS_SMOKE_LATEST_TAG`` from ``github.ref``
+    on tag pushes so the check stays meaningful even on shallow clones.
+    """
+    tag = _latest_tag()
+    if not tag:
+        # No tag yet, or git history unavailable — emit a warning, not a
+        # failure. The CI tag-push job always provides
+        # ``DOCS_SMOKE_LATEST_TAG`` so this branch is only hit locally.
+        print(
+            "[smoke] WARN: no latest tag resolved (skipping changelog tag check)"
+        )
+        return
+    candidates = [
+        DIST / "changelog.html",
+        DIST / "en" / "changelog.html",
+    ]
+    found_in: list[str] = []
+    for path in candidates:
+        if not path.exists():
+            continue
+        if tag in path.read_text(encoding="utf-8"):
+            found_in.append(path.relative_to(ROOT).as_posix())
+    if not found_in:
+        _fail(
+            f"latest tag '{tag}' not found in built changelog HTML "
+            f"({', '.join(p.relative_to(ROOT).as_posix() for p in candidates if p.exists()) or 'no changelog HTML'})"
+        )
+    _ok(f"latest tag '{tag}' visible in {len(found_in)} changelog page(s)")
+
+
 # Chunks expected to stay code-split so they never ship on first paint.
 # If one of these gets inlined into the theme/framework bundle, pages that
 # don't render a map would suddenly pay the full download cost.
@@ -151,6 +210,7 @@ def main() -> int:
     check_playground()
     check_templates()
     check_bundles()
+    check_latest_tag_visible()
     _ok("all checks passed")
     return 0
 
