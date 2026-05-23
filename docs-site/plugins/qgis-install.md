@@ -102,7 +102,8 @@ pas sur le `PATH`. Direction le guide
 
 ## Et après ?
 
-- [Guide des triggers YAML](/guide/triggers) — apprendre à écrire des règles
+- [Guide des règles](/guide/rules) — apprendre à écrire des règles déclaratives
+- [Guide des triggers YAML](https://github.com/imagodata/gispulse/blob/main/docs/TRIGGERS_GUIDE.md) — DSL prédicats, webhook, sécurité
 - [Dépannage du plugin](/plugins/qgis-troubleshooting) — solutions
   aux erreurs les plus fréquentes
 - [Soumettre un bug](https://github.com/imagodata/gispulse/issues) —

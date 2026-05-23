@@ -74,7 +74,7 @@ Pour des datasets volumineux (>100 k features), les MVT donnent une expérience 
    - Niveau zoom min/max : copier depuis le TileJSON
 
 ::: warning Backend
-Les tuiles MVT requièrent **PostGIS** côté GISPulse aujourd'hui. Le support DuckDB est planifié v1.3+ — voir [INTEGRATION_MATRIX](../INTEGRATION_MATRIX.md).
+Les tuiles MVT requièrent **PostGIS** côté GISPulse aujourd'hui. Le support DuckDB est planifié v1.3+ — voir [INTEGRATION_MATRIX](https://github.com/imagodata/gispulse/blob/main/docs/INTEGRATION_MATRIX.md).
 :::
 
 ## Scénario D — Évaluer un trigger depuis PyQGIS
@@ -121,12 +121,12 @@ Le résultat liste les `FiredTrigger` avec `matched: true/false` — utile pour 
 
 ## Limitations
 
-- **Single writer GPKG** — un seul écrivain à la fois sur un GPKG GISPulse. Pour usage multi-utilisateur concurrent, utiliser PostGIS. Voir [TRIGGERS_GUIDE → Limites OSS](../../docs/TRIGGERS_GUIDE.md#limites-oss-community-tier).
+- **Single writer GPKG** — un seul écrivain à la fois sur un GPKG GISPulse. Pour usage multi-utilisateur concurrent, utiliser PostGIS. Voir [TRIGGERS_GUIDE → Limites OSS](https://github.com/imagodata/gispulse/blob/main/docs/TRIGGERS_GUIDE.md#limites-oss-community-tier).
 - **Plugin natif** — un plugin dataset-browser + job-runner est planifié v1.3+ ; en attendant, voir l'[add-in actuel](../plugins/qgis).
 - **CRS** — GISPulse retourne par défaut en CRS du dataset source ; reprojeter via les paramètres OGC `crs=` ou directement dans QGIS.
 
 ## Voir aussi
 
 - [Plugin natif QGIS](../plugins/qgis) — installation et features additionnelles
-- [Integration matrix](../INTEGRATION_MATRIX.md) — toutes les combinaisons client × mode × version
-- [Triggers Guide](../../docs/TRIGGERS_GUIDE.md) — sécurité, retries, limites OSS
+- [Integration matrix](https://github.com/imagodata/gispulse/blob/main/docs/INTEGRATION_MATRIX.md) — toutes les combinaisons client × mode × version
+- [Triggers Guide](https://github.com/imagodata/gispulse/blob/main/docs/TRIGGERS_GUIDE.md) — sécurité, retries, limites OSS

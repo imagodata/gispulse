@@ -168,9 +168,11 @@ def _badge(flag: bool) -> str:
 def _link(target: Path | None, label: str) -> str:
     if target is None:
         return label
-    # Both docs files live under docs-site/{,en}/guide/, so two `..`
-    # bring us back to the repo root.
-    return f"[{label}](../../../{target.as_posix()})"
+    # Absolute GitHub URLs so VitePress doesn't have to resolve the
+    # docs-site/.. escape to a path that exists outside the build root
+    # (issue #319 — kill the `/capabilities\/` and `/tests\/` regex
+    # exemptions from ignoreDeadLinks).
+    return f"[{label}](https://github.com/imagodata/gispulse/blob/main/{target.as_posix()})"
 
 
 def _render(items, test_index, doc_set, portal_set, template_set, *, lang: str) -> str:

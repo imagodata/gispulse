@@ -5,7 +5,7 @@ description: 5 scénarios pour consommer GISPulse depuis l'écosystème ArcGIS v
 
 # Intégrer ArcGIS Pro / Online / GeoEvent
 
-Cette page couvre **5 scénarios standards** pour brancher GISPulse à l'écosystème ArcGIS sans plugin natif. Le client REST ArcGIS dédié arrive en v1.3+ — voir [INTEGRATION_MATRIX](../INTEGRATION_MATRIX.md).
+Cette page couvre **5 scénarios standards** pour brancher GISPulse à l'écosystème ArcGIS sans plugin natif. Le client REST ArcGIS dédié arrive en v1.3+ — voir [INTEGRATION_MATRIX](https://github.com/imagodata/gispulse/blob/main/docs/INTEGRATION_MATRIX.md).
 
 ## Pré-requis
 
@@ -112,7 +112,7 @@ Le sens inverse : un trigger GISPulse fire et POST le payload vers un endpoint G
 }
 ```
 
-**Format payload reçu par GeoEvent** (figé v1.2+, voir [INTEGRATION_MATRIX](../INTEGRATION_MATRIX.md#webhook-payload)) :
+**Format payload reçu par GeoEvent** (figé v1.2+, voir [INTEGRATION_MATRIX](https://github.com/imagodata/gispulse/blob/main/docs/INTEGRATION_MATRIX.md#webhook-payload)) :
 
 ```json
 {
@@ -143,5 +143,5 @@ Le sens inverse : un trigger GISPulse fire et POST le payload vers un endpoint G
 ## Voir aussi
 
 - [Add-in ArcGIS Pro natif](../plugins/arcgis) — UX intégrée + dataset browser
-- [Integration matrix](../INTEGRATION_MATRIX.md)
-- [Triggers Guide](../../docs/TRIGGERS_GUIDE.md) — webhook payload, retries, HMAC
+- [Integration matrix](https://github.com/imagodata/gispulse/blob/main/docs/INTEGRATION_MATRIX.md)
+- [Triggers Guide](https://github.com/imagodata/gispulse/blob/main/docs/TRIGGERS_GUIDE.md) — webhook payload, retries, HMAC

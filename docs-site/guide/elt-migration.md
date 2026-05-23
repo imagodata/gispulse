@@ -160,5 +160,5 @@ with open("manifest.yaml", "w") as fp:
 ## Voir aussi
 
 - [Manifeste v3 — référence complète](./elt-manifest.md).
-- [ADR 0005 — Unified GISPulse manifest](../../docs/adr/0005-unified-manifest.md) — la spec.
+- [ADR 0005 — Unified GISPulse manifest](https://github.com/imagodata/gispulse/blob/main/docs/adr/0005-unified-manifest.md) — la spec.
 - [`gispulse explain`](./elt-manifest.md#gispulse-explain--inspecter-le-dag-avant-de-courir) — inspecter le manifeste avant exécution.

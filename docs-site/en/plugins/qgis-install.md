@@ -100,7 +100,8 @@ the [**Troubleshooting** guide](/en/plugins/qgis-troubleshooting).
 
 ## Next
 
-- [YAML triggers guide](/en/guide/triggers) — write your own rules
+- [Rules guide](/en/guide/rules) — learn to write declarative rules
+- [YAML triggers guide](https://github.com/imagodata/gispulse/blob/main/docs/TRIGGERS_GUIDE.md) — predicate DSL, webhook, security
 - [Plugin troubleshooting](/en/plugins/qgis-troubleshooting) — fixes
   for the most common errors
 - [Open a bug](https://github.com/imagodata/gispulse/issues) — attach
