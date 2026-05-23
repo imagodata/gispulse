@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 license = "AGPL-3.0-or-later"
 authors = [{ name = "GISPulse", email = "dev@gispulse.io" }]
 dependencies = [
-    "gispulse",
+    "gispulse>=2.0.0,<3.0.0",
 ]
 
 # Registered as a data source — discovered by core.plugin_hub.PluginHub.

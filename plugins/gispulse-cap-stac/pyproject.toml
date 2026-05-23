@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "community-geo" }]
 dependencies = [
-    "gispulse",
+    "gispulse>=2.0.0,<3.0.0",
     "geopandas>=0.14",
     "shapely>=2.0",
     "pystac-client>=0.6",
