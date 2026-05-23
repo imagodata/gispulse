@@ -36,17 +36,39 @@ _warned: set[str] = set()
 
 
 class _AliasLoader(Loader):
-    """Loader that resolves a legacy name to its ``gispulse.*`` module."""
+    """Loader that aliases a legacy name to its ``gispulse.*`` module.
+
+    CRITICAL — class identity (see imagodata/gispulse#333): legacy and
+    canonical names MUST point to the *same* module object so that
+    ``from persistence.storage import StorageError`` yields the same class
+    as ``from gispulse.persistence.storage import StorageError``. Without
+    this, ``isinstance(err, StorageError)`` and ``pytest.raises(...)``
+    silently fail across the namespace boundary.
+
+    Implementation: ``exec_module`` overwrites ``sys.modules[spec.name]``
+    with the canonical module *after* Python's import machinery has placed
+    its freshly-created (empty) module there. This is the only point at
+    which the override sticks — doing it in ``create_module`` is reverted
+    by the import system because the returned module's ``__name__`` is the
+    canonical one, not ``spec.name``.
+    """
 
     def __init__(self, target: str) -> None:
         self._target = target
 
-    def create_module(self, spec: importlib.machinery.ModuleSpec) -> ModuleType:
-        return importlib.import_module(self._target)
+    def create_module(self, spec: importlib.machinery.ModuleSpec) -> ModuleType | None:
+        # Returning None lets Python allocate a default empty module under
+        # ``spec.name``; we replace it in ``exec_module``.
+        return None
 
     def exec_module(self, module: ModuleType) -> None:
-        # ``import_module`` in ``create_module`` already executed the module.
-        return None
+        # Resolve the canonical module (may already be cached) and
+        # overwrite the sys.modules entry the import machinery just
+        # installed. From this point on, ``import <legacy>`` and
+        # ``import gispulse.<legacy>`` resolve to the same object, so
+        # class identity holds across both namespaces.
+        target = importlib.import_module(self._target)
+        sys.modules[module.__name__] = target
 
 
 class _LegacyTopLevelFinder(MetaPathFinder):
@@ -76,9 +98,21 @@ class _LegacyTopLevelFinder(MetaPathFinder):
 
 
 def install() -> None:
-    """Append the legacy finder to ``sys.meta_path`` (idempotent)."""
+    """Insert the legacy finder at the front of ``sys.meta_path`` (idempotent).
+
+    The finder MUST run before ``PathFinder``: once we alias
+    ``sys.modules['persistence'] = gispulse.persistence``, the legacy
+    package inherits ``__path__`` from the canonical one. If a standard
+    ``PathFinder`` reached a sub-import (``persistence.storage``) before
+    our shim, it would discover ``gispulse/persistence/storage.py`` via
+    the parent's ``__path__`` and execute it a *second* time under the
+    legacy name — duplicating every class (StorageError, …) and breaking
+    ``isinstance()`` checks (imagodata/gispulse#333).
+
+    Prepending guarantees the alias hook intercepts every legacy import
+    before any path-based finder runs, so ``sys.modules`` ends up with
+    one shared module object per (root, sub) tuple.
+    """
     if any(isinstance(finder, _LegacyTopLevelFinder) for finder in sys.meta_path):
         return
-    # Appended last: real packages always win; the shim only catches names
-    # that no genuine finder could resolve.
-    sys.meta_path.append(_LegacyTopLevelFinder())
+    sys.meta_path.insert(0, _LegacyTopLevelFinder())
