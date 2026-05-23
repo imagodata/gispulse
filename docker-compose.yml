@@ -63,6 +63,29 @@ services:
   # imagodata/gispulse-portal. To run it locally alongside this stack,
   # clone that repo and `pnpm dev` against VITE_API_URL=http://localhost:8001.
 
+  # Martin tile server (Rust, MapLibre project). Serves MVT for
+  # foncier-radar from the sibling repo gispulse-foncier/martin/config.yaml.
+  # Reads the same PostgreSQL/PostGIS as gispulse-api, via the
+  # radar_*_mvt PL/pgSQL functions installed by martin/migrations/.
+  # See gispulse-foncier/martin/PHASE1_5_REPORT.md for the cutover details.
+  martin:
+    image: ghcr.io/maplibre/martin:1.10.1
+    ports:
+      - "3000:3000"
+    environment:
+      MARTIN_POSTGRES_DSN: postgresql://gispulse:gispulse@postgis:5432/gispulse
+    volumes:
+      - ../gispulse-foncier/martin/config.yaml:/config.yaml:ro
+    command: ["--config", "/config.yaml"]
+    depends_on:
+      postgis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 volumes:
   pgdata:
   gispulse_data:
