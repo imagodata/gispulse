@@ -595,7 +595,7 @@ def test_non_empty_status_still_raises(
         RestTableFetcher().fetch(access)
 
 
-def test_object_row_shape_wraps_whole_body(
+def test_body_row_source_wraps_whole_body(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from gispulse.adapters.rest import rest_table_fetcher
@@ -613,7 +613,7 @@ def test_object_row_shape_wraps_whole_body(
         endpoint="https://geo.example.org/api/v1/rga",
         params={
             "local_path": str(out),
-            "pagination": {"row_shape": "object"},
+            "pagination": {"row_source": "body"},
         },
     )
     result = RestTableFetcher().fetch(access)

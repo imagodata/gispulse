@@ -64,7 +64,7 @@ _ENTRIES: dict[str, dict[str, Any]] = {
         "scope": "point",
         "static_query": {},
         # 2024+ API answers a top-level object, not {"data": [...]}.
-        "pagination": {"row_shape": "object", "empty_body_is_empty": True},
+        "pagination": {"row_source": "body", "empty_body_is_empty": True},
     },
     "tri-zonage": {
         "label": "Territoire à risque important d'inondation (point)",
@@ -82,7 +82,7 @@ _ENTRIES: dict[str, dict[str, Any]] = {
         "scope": "point",
         "static_query": {"rayon": 500, "page_size": 5},
         # 2024+ API nests the count under {"casias": {...}} — keep the raw body.
-        "pagination": {"row_shape": "object"},
+        "pagination": {"row_source": "body"},
     },
 }
 

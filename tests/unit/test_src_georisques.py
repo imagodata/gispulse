@@ -61,10 +61,10 @@ def test_query_key_metadata(source: GeorisquesSource) -> None:
         assert by_id[entry_id].metadata["query_key"] == "latlon"
 
 
-def test_rga_and_ssp_use_object_row_shape(source: GeorisquesSource) -> None:
+def test_rga_and_ssp_use_body_row_source(source: GeorisquesSource) -> None:
     by_id = {e.id: e for e in source.entries()}
     for entry_id in ("rga", "ssp"):
-        assert by_id[entry_id].access.params["pagination"]["row_shape"] == "object"
+        assert by_id[entry_id].access.params["pagination"]["row_source"] == "body"
 
 
 def test_rga_treats_empty_body_as_empty(source: GeorisquesSource) -> None:
@@ -91,7 +91,7 @@ def test_access_for_merges_latlon_and_preserves_static_query(
     assert access.params["query"]["latlon"] == "3.08,45.77"
     assert access.params["query"]["rayon"] == 500
     assert access.params["query"]["page_size"] == 5
-    assert access.params["pagination"]["row_shape"] == "object"
+    assert access.params["pagination"]["row_source"] == "body"
 
 
 def test_access_for_unknown_entry_raises(source: GeorisquesSource) -> None:
@@ -107,15 +107,15 @@ def test_access_for_rejects_wrong_query_arg(source: GeorisquesSource) -> None:
 
 def test_access_for_copies_nested_pagination(source: GeorisquesSource) -> None:
     first = source.access_for("ssp", latlon="3.08,45.77")
-    first.params["pagination"]["row_shape"] = "mutated"
+    first.params["pagination"]["row_source"] = "mutated"
 
     second = source.access_for("ssp", latlon="3.09,45.78")
     entry = source._entry("ssp")
 
     assert first.params["query"]["latlon"] == "3.08,45.77"
     assert second.params["query"]["latlon"] == "3.09,45.78"
-    assert second.params["pagination"]["row_shape"] == "object"
-    assert entry.access.params["pagination"]["row_shape"] == "object"
+    assert second.params["pagination"]["row_source"] == "body"
+    assert entry.access.params["pagination"]["row_source"] == "body"
 
 
 def test_schema_radon_exposes_raw_classe_potentiel(source: GeorisquesSource) -> None:
