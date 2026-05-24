@@ -397,6 +397,51 @@ def test_non_list_data_key_yields_no_rows(
     assert result.metadata["row_count"] == 0
 
 
+def test_empty_body_decode_error_can_be_treated_as_empty(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.adapters.rest.rest_table_fetcher import RestTableFetcher
+
+    def fake_get(url: str, timeout: float) -> dict:
+        raise json.JSONDecodeError("Expecting value", "", 0)
+
+    monkeypatch.setattr(rest_table_fetcher, "_get_json", fake_get)
+
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_TABLE,
+        endpoint="https://geo.example.org/api/v1/rga",
+        params={
+            "local_path": str(tmp_path / "out.jsonl"),
+            "pagination": {"empty_body_is_empty": True},
+        },
+    )
+    result = RestTableFetcher().fetch(access)
+
+    assert result.metadata["row_count"] == 0
+    assert Path(result.data).read_text() == ""
+
+
+def test_empty_body_decode_error_still_raises_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.adapters.rest.rest_table_fetcher import RestTableFetcher
+
+    def fake_get(url: str, timeout: float) -> dict:
+        raise json.JSONDecodeError("Expecting value", "", 0)
+
+    monkeypatch.setattr(rest_table_fetcher, "_get_json", fake_get)
+
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_TABLE,
+        endpoint="https://geo.example.org/api/v1/rga",
+        params={"local_path": str(tmp_path / "out.jsonl")},
+    )
+    with pytest.raises(json.JSONDecodeError):
+        RestTableFetcher().fetch(access)
+
+
 def test_get_json_disables_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
     import httpx
 
@@ -492,3 +537,87 @@ def test_rejects_malicious_next_urls(
 
     assert calls == [origin]  # the malicious next is never followed
     assert result.metadata["page_count"] == 1
+
+
+def test_empty_status_returns_empty_table(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import httpx
+
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.adapters.rest.rest_table_fetcher import RestTableFetcher
+
+    def fake_get(url: str, timeout: float) -> dict:
+        request = httpx.Request("GET", url)
+        response = httpx.Response(404, request=request)
+        raise httpx.HTTPStatusError("404", request=request, response=response)
+
+    monkeypatch.setattr(rest_table_fetcher, "_get_json", fake_get)
+
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_TABLE,
+        endpoint="https://geo.example.org/api/v1/tri_zonage",
+        params={
+            "local_path": str(tmp_path / "out.jsonl"),
+            "pagination": {"empty_statuses": [404]},
+        },
+    )
+    result = RestTableFetcher().fetch(access)
+
+    assert result.metadata["row_count"] == 0
+    assert result.metadata["page_count"] == 0
+
+
+def test_non_empty_status_still_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import httpx
+
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.adapters.rest.rest_table_fetcher import RestTableFetcher
+
+    def fake_get(url: str, timeout: float) -> dict:
+        request = httpx.Request("GET", url)
+        response = httpx.Response(500, request=request)
+        raise httpx.HTTPStatusError("500", request=request, response=response)
+
+    monkeypatch.setattr(rest_table_fetcher, "_get_json", fake_get)
+
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_TABLE,
+        endpoint="https://geo.example.org/api/v1/tri_zonage",
+        params={
+            "local_path": str(tmp_path / "out.jsonl"),
+            "pagination": {"empty_statuses": [404]},  # 500 not listed → must raise
+        },
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        RestTableFetcher().fetch(access)
+
+
+def test_object_row_shape_wraps_whole_body(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.adapters.rest.rest_table_fetcher import RestTableFetcher
+
+    def fake_get(url: str, timeout: float) -> dict:
+        # Géorisques RGA 2024+ shape: a top-level object, no "data" list.
+        return {"codeExposition": "2", "exposition": "moyen"}
+
+    monkeypatch.setattr(rest_table_fetcher, "_get_json", fake_get)
+
+    out = tmp_path / "out.jsonl"
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_TABLE,
+        endpoint="https://geo.example.org/api/v1/rga",
+        params={
+            "local_path": str(out),
+            "pagination": {"row_shape": "object"},
+        },
+    )
+    result = RestTableFetcher().fetch(access)
+
+    assert result.metadata["row_count"] == 1
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    assert rows == [{"codeExposition": "2", "exposition": "moyen"}]

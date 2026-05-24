@@ -92,6 +92,14 @@ class RestTableFetcher:
         pagination = dict(params.get("pagination") or {})
         data_key = pagination.get("data_key", "data")
         next_key = pagination.get("next_key")
+        # "list" (default): rows live in body[data_key]; "object": the whole
+        # JSON body is a single row (non-paginated single-object endpoints,
+        # e.g. Géorisques RGA/SSP 2024+).
+        row_shape = pagination.get("row_shape", "list")
+        # HTTP statuses that mean "no data here" rather than an error — the
+        # walk treats them as an empty result (e.g. Géorisques tri_zonage 404).
+        empty_statuses = set(pagination.get("empty_statuses") or [])
+        empty_body_is_empty = bool(pagination.get("empty_body_is_empty", False))
         max_pages = int(pagination.get("max_pages", _DEFAULT_MAX_PAGES))
         max_rows = pagination.get("max_rows")
         max_rows = int(max_rows) if max_rows is not None else None
@@ -104,6 +112,8 @@ class RestTableFetcher:
             if max_total_seconds is not None
             else None
         )
+
+        import httpx
 
         from gispulse.core.ssrf import guard_outbound_url
 
@@ -119,11 +129,23 @@ class RestTableFetcher:
         while url:
             guard_outbound_url(url)
             seen.add(url)
-            body = _get_json(url, timeout)
+            try:
+                body = _get_json(url, timeout)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in empty_statuses:
+                    break  # "no data here" — leave the result empty
+                raise
+            except json.JSONDecodeError:
+                if empty_body_is_empty:
+                    break  # empty/malformed body configured as "no data here"
+                raise
             page_count += 1
-            page_rows = body.get(data_key)
-            if isinstance(page_rows, list):  # ignore a malformed/non-list data_key
-                rows.extend(page_rows)
+            if row_shape == "object":
+                rows.append(body)  # the whole body is a single row
+            else:
+                page_rows = body.get(data_key)
+                if isinstance(page_rows, list):  # ignore a non-list data_key
+                    rows.extend(page_rows)
             if max_rows is not None and len(rows) >= max_rows:
                 del rows[max_rows:]
                 break
