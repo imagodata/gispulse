@@ -51,7 +51,7 @@ def test_protocol_version_is_shared_with_contracts() -> None:
         (Tier, 4),
         (SourceDomain, 9),
         (Payload, 5),
-        (AccessProtocol, 15),
+        (AccessProtocol, 16),
         (FetchMode, 2),
         (WriteMode, 3),
     ],
