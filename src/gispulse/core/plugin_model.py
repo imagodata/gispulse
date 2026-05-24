@@ -132,7 +132,8 @@ class AccessProtocol(str, Enum):
     OGC_TILES = "ogc-tiles"
     # catalogues / APIs
     STAC = "stac"
-    REST_API = "rest-api"
+    REST_API = "rest-api"          # GeoJSON FeatureCollection (#192)
+    REST_TABLE = "rest-table"      # paginated tabular JSON {"data": [...]} (#196)
     OVERPASS = "overpass"
     # files
     DOWNLOAD = "download"          # remote zip/shp/gpkg/geojson/csv
