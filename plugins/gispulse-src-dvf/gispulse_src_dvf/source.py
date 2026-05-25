@@ -112,12 +112,11 @@ def _sql_identifier(value: object) -> str:
     return '"' + str(value).replace('"', '""') + '"'
 
 
-def _duckdb_types_sql() -> str:
-    parts = ", ".join(
-        f"{_sql_literal(column)}: {_sql_literal('VARCHAR')}"
-        for column in _DVF_STRING_COLUMNS
+def _csv_numeric_expr(column: object) -> str:
+    return (
+        f"try_cast(replace(cast({_sql_identifier(column)} as varchar), ',', '.') "
+        "as double)"
     )
-    return "{" + parts + "}"
 
 
 def _normalise_years(raw: object) -> tuple[str, ...]:
@@ -164,8 +163,8 @@ def _bbox_predicate(extent: Any | None, lon: object, lat: object) -> str | None:
     if not extent:
         return None
     minx, miny, maxx, maxy = (float(coord) for coord in extent)
-    lon_col = _sql_identifier(lon)
-    lat_col = _sql_identifier(lat)
+    lon_col = _csv_numeric_expr(lon)
+    lat_col = _csv_numeric_expr(lat)
     return (
         f"{lon_col} BETWEEN {minx} AND {maxx} "
         f"AND {lat_col} BETWEEN {miny} AND {maxy}"
@@ -214,7 +213,7 @@ class _DvfGeoCsvFetcher(LazyFetcher):
         source = _csv_source_sql(urls)
         return (
             f"read_csv_auto({source}, union_by_name=true, "
-            f"types={_duckdb_types_sql()})"
+            "all_varchar=true)"
         )
 
     @staticmethod
