@@ -31,7 +31,7 @@ _WFS_CAPABILITIES = (
 )
 _REVISION_TIMEOUT_S = 8.0
 
-_IRIS_TYPENAME = "STATISTICALUNITS.IRIS:contour_iris"
+_IRIS_TYPENAME = "STATISTICALUNITS.IRIS:contours_iris"
 
 _ENTRIES: dict[str, tuple[str, str]] = {
     "iris": (
