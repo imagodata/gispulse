@@ -130,6 +130,75 @@ def test_fetch_materialize_runs_copy_to_parquet(
     assert "bbox.xmin" in executed[0]
 
 
+def test_fetch_materialize_can_copy_directly_to_s3_uri(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executed: list[str] = []
+
+    class _FakeConn:
+        def execute(self, sql: str) -> None:
+            executed.append(sql)
+
+    class _FakeSession:
+        conn = _FakeConn()
+
+        def __enter__(self) -> "_FakeSession":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    import gispulse.persistence.duckdb_engine as duckdb_engine
+
+    monkeypatch.setattr(duckdb_engine, "DuckDBSession", _FakeSession)
+
+    uri = "s3://gispulse/raw/overture/out.parquet"
+    result = GeoParquetS3Fetcher().fetch(
+        _access("s3://overture/release", s3_uri=uri),
+        mode=FetchMode.MATERIALIZE,
+    )
+
+    assert result.mode is FetchMode.MATERIALIZE
+    assert result.data == uri
+    assert result.reference == uri
+    assert result.metadata["s3_uri"] == uri
+    assert f"TO '{uri}' (FORMAT PARQUET)" in executed[0]
+
+
+def test_fetch_materialize_builds_s3_uri_from_configured_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executed: list[str] = []
+
+    class _FakeConn:
+        def execute(self, sql: str) -> None:
+            executed.append(sql)
+
+    class _FakeSession:
+        conn = _FakeConn()
+
+        def __enter__(self) -> "_FakeSession":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    import gispulse.persistence.duckdb_engine as duckdb_engine
+
+    monkeypatch.setenv("GISPULSE_S3_BUCKET", "gispulse-beta")
+    monkeypatch.setattr(duckdb_engine, "DuckDBSession", _FakeSession)
+
+    result = GeoParquetS3Fetcher().fetch(
+        _access("s3://overture/release", s3_key="raw/overture/out.parquet"),
+        mode=FetchMode.MATERIALIZE,
+    )
+
+    uri = "s3://gispulse-beta/raw/overture/out.parquet"
+    assert result.data == uri
+    assert result.metadata["s3_uri"] == uri
+    assert f"TO '{uri}' (FORMAT PARQUET)" in executed[0]
+
+
 # -- SSRF guard -------------------------------------------------------------
 
 
