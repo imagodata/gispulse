@@ -22,7 +22,13 @@ from gispulse.core.plugin_model import (
     SourceDomain,
     SourceResult,
 )
-from gispulse.core.sources import PROTOCOLS, Fetcher, ProtocolRegistry, SourceEntryRef
+from gispulse.core.sources import (
+    PROTOCOLS,
+    DeclarativeSource,
+    Fetcher,
+    ProtocolRegistry,
+    SourceEntryRef,
+)
 from gispulse.core.ssrf import SSRFError
 
 
@@ -47,6 +53,38 @@ class _FakeFetcher(LazyFetcher):
             mode=FetchMode.MATERIALIZE,
             data=f"rows@{access.endpoint}",
         )
+
+
+class _FakeGDF:
+    """Stand-in GeoDataFrame — the WFS fetcher only needs len()."""
+
+    def __init__(self, n: int) -> None:
+        self._n = n
+
+    def __len__(self) -> int:
+        return self._n
+
+
+class _WfsDeclarativeSource(DeclarativeSource):
+    name = "wfs-test"
+    domain = SourceDomain.REGLEMENTAIRE
+    payload = Payload.VECTOR
+
+    def entries(self) -> list[SourceEntryRef]:
+        return [
+            SourceEntryRef(
+                id="zones",
+                name="Zones",
+                access=AccessSpec(
+                    protocol=AccessProtocol.WFS,
+                    endpoint="https://data.geopf.fr/wfs/ows",
+                    params={"typename": "wfs_du:zone_urba"},
+                ),
+                domain=self.domain,
+                payload=self.payload,
+                jurisdiction="FR",
+            )
+        ]
 
 
 def _access(endpoint: str, **params: object) -> AccessSpec:
@@ -123,10 +161,10 @@ def test_guard_leaves_local_file_paths_alone() -> None:
 
 
 def test_register_core_fetchers_registers_the_full_roster() -> None:
-    # A3-A6 (#229-#232) plus table-file populate the roster: five generic
-    # transport adapters, one per AccessProtocol family.
+    # A3-A6 (#229-#232), table-file, plus the classic WFS adapter (#192)
+    # populate the roster: every first-party protocol used by the catalogue.
     reg = ProtocolRegistry()
-    assert register_core_fetchers(reg) == 5
+    assert register_core_fetchers(reg) == 6
     for protocol in (
         AccessProtocol.REMOTE_TABLE,
         AccessProtocol.OGC_FEATURES,
@@ -136,10 +174,43 @@ def test_register_core_fetchers_registers_the_full_roster() -> None:
     ):
         assert isinstance(reg.get_fetcher(protocol), LazyFetcher)
 
+    from gispulse.adapters.ogc.wfs_fetcher import WfsFetcher
+
+    assert isinstance(reg.get_fetcher(AccessProtocol.WFS), WfsFetcher)
+
+
+def test_register_core_fetchers_resolves_wfs_for_declarative_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict] = []
+
+    def _fake_fetch_wfs(cfg, *, bbox=None, cql_filter=None, **_kw):
+        calls.append({"cfg": cfg, "bbox": bbox, "cql_filter": cql_filter})
+        return _FakeGDF(3)
+
+    monkeypatch.setattr(
+        "gispulse.adapters.ogc.wfs_client.fetch_wfs",
+        _fake_fetch_wfs,
+    )
+
+    reg = ProtocolRegistry()
+    register_core_fetchers(reg)
+
+    result = _WfsDeclarativeSource(reg).fetch(
+        "zones",
+        extent=(1.0, 2.0, 3.0, 4.0),
+    )
+
+    assert result.payload is Payload.VECTOR
+    assert len(result.data) == 3
+    assert calls[0]["cfg"].source_type == "wfs"
+    assert calls[0]["cfg"].layer_name == "wfs_du:zone_urba"
+    assert calls[0]["bbox"] == (1.0, 2.0, 3.0, 4.0)
+
 
 def test_register_core_fetchers_defaults_to_global_registry() -> None:
-    # register_core_fetchers() with no argument files the four core
-    # adapters into the process-wide PROTOCOLS registry. It is destructive
+    # register_core_fetchers() with no argument files the core adapters
+    # into the process-wide PROTOCOLS registry. It is destructive
     # (override=True) — snapshot and restore so this test does not bleed
     # into the #192 adapters that self-register into PROTOCOLS at import.
     saved_fetchers = dict(PROTOCOLS._fetchers)
