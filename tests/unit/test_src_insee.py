@@ -158,7 +158,7 @@ def test_iris_targets_geoplateforme_wfs_typename(source) -> None:
 
     assert access.protocol is AccessProtocol.WFS
     assert access.endpoint == "https://data.geopf.fr/wfs/ows"
-    assert access.params == {"typename": "STATISTICALUNITS.IRIS:contour_iris"}
+    assert access.params == {"typename": "STATISTICALUNITS.IRIS:contours_iris"}
     assert access.format == "application/json"
 
 
@@ -173,7 +173,7 @@ def test_iris_entry_carries_classification_axes_and_metadata(source) -> None:
         "platform": "WFS Géoplateforme",
         "license": "Licence Ouverte 2.0",
         "update_cadence": "annuel",
-        "typename": "STATISTICALUNITS.IRIS:contour_iris",
+        "typename": "STATISTICALUNITS.IRIS:contours_iris",
     }
 
 
@@ -232,7 +232,7 @@ def test_fetch_delegates_to_wfs_adapter() -> None:
     result = src.fetch("iris")
 
     assert result.payload is Payload.VECTOR
-    assert result.data == "STATISTICALUNITS.IRIS:contour_iris"
+    assert result.data == "STATISTICALUNITS.IRIS:contours_iris"
     assert len(wfs.calls) == 1
     assert wfs.calls[0].protocol is AccessProtocol.WFS
 

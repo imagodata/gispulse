@@ -216,7 +216,7 @@ def test_register_core_fetchers_defaults_to_global_registry() -> None:
     saved_fetchers = dict(PROTOCOLS._fetchers)
     saved_writers = dict(PROTOCOLS._writers)
     try:
-        assert register_core_fetchers() == 5  # touches PROTOCOLS
+        assert register_core_fetchers() == 6  # touches PROTOCOLS
         assert isinstance(PROTOCOLS, ProtocolRegistry)
         assert isinstance(PROTOCOLS.get_fetcher(AccessProtocol.REMOTE_TABLE), LazyFetcher)
     finally:
