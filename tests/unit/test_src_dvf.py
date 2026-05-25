@@ -71,16 +71,66 @@ def test_catalog_search(source: DvfSource) -> None:
 # --------------------------------------------------------------------------
 
 
-def test_access_spec_targets_etalab_geo_dvf(source: DvfSource) -> None:
-    """The declared endpoint must point at the geo-dvf parquet mirror so
-    the shipped GeoParquetS3Fetcher (#256) can scan it with bbox
-    pushdown via DuckDB httpfs."""
+def test_access_spec_targets_live_etalab_geo_dvf_csv(source: DvfSource) -> None:
+    """The declared endpoint must point at the living geo-dvf CSV mirror."""
     entry = next(iter(source.catalog()))
     access = entry.access
     assert access.protocol is AccessProtocol.REMOTE_TABLE
-    assert "files.data.gouv.fr/geo-dvf" in access.endpoint
-    assert access.endpoint.endswith(".parquet")
-    assert access.format == "application/parquet"
+    assert access.endpoint == "https://files.data.gouv.fr/geo-dvf/latest/csv"
+    assert access.params["years"] == ("2021", "2022", "2023", "2024", "2025")
+    assert (
+        access.params["department_endpoint_template"]
+        == "{base}/{year}/departements/{departement}.csv.gz"
+    )
+    assert access.params["full_endpoint_template"] == "{base}/{year}/full.csv.gz"
+    assert access.format == "text/csv"
+
+
+def test_reference_scan_uses_department_csv_shards_when_requested() -> None:
+    """A department hint selects the lighter geo-dvf shard before bbox filter."""
+    src = DvfSource()
+
+    result = src.fetch(
+        "mutations",
+        extent={"bbox": (3.0, 45.0, 4.0, 46.0), "departement": "63"},
+        mode=FetchMode.REFERENCE,
+    )
+
+    scan = result.metadata["duckdb_scan"]
+    assert result.payload is Payload.TABLE
+    assert "read_csv_auto(" in scan
+    assert "/2021/departements/63.csv.gz" in scan
+    assert "/2025/departements/63.csv.gz" in scan
+    assert "/full.csv.gz" not in scan
+    assert '"longitude" BETWEEN 3.0 AND 4.0' in scan
+    assert '"latitude" BETWEEN 45.0 AND 46.0' in scan
+
+
+def test_reference_scan_falls_back_to_full_csv_without_department() -> None:
+    """Without a department hint, the scan uses full yearly CSVs plus bbox."""
+    src = DvfSource()
+
+    result = src.fetch(
+        "mutations",
+        extent=(3.0, 45.0, 4.0, 46.0),
+        mode=FetchMode.REFERENCE,
+    )
+
+    scan = result.metadata["duckdb_scan"]
+    assert "/2021/full.csv.gz" in scan
+    assert "/2025/full.csv.gz" in scan
+    assert "/departements/" not in scan
+    assert '"longitude" BETWEEN 3.0 AND 4.0' in scan
+
+
+def test_reference_scan_restores_legacy_cadastral_columns() -> None:
+    """The CSV lacks raw pivot fields, so the scan recreates them."""
+    result = DvfSource().fetch("mutations", mode=FetchMode.REFERENCE)
+    scan = result.metadata["duckdb_scan"]
+
+    assert 'substr("id_parcelle", 6, 3) AS "prefixe_section"' in scan
+    assert 'substr("id_parcelle", 9, 2) AS "section"' in scan
+    assert 'substr("id_parcelle", 11, 4) AS "numero_plan"' in scan
 
 
 # --------------------------------------------------------------------------
