@@ -1,11 +1,14 @@
 """Tests for the DuckDB session engine."""
 
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import geopandas as gpd
 import pytest
 from shapely.geometry import Point
 
-from gispulse.persistence.duckdb_engine import DuckDBSession
+from gispulse.persistence.duckdb_engine import DuckDBSession, _configure_s3_secret
 
 
 @pytest.fixture
@@ -50,6 +53,77 @@ class TestDuckDBSession:
                 pytest.skip("httpfs unavailable in this environment (no network)")
             # httpfs present — remote scan functions are wired.
             assert session._conn is not None
+
+    def test_configure_s3_secret_uses_garage_endpoint(self):
+        conn = MagicMock()
+        s3 = SimpleNamespace(
+            endpoint="https://garage.casys.ai",
+            bucket="gispulse",
+            access_key="dev-key",
+            secret_key="dev-secret",
+            region="garage",
+        )
+
+        _configure_s3_secret(conn, s3)
+
+        sql = conn.execute.call_args.args[0]
+        assert "CREATE OR REPLACE SECRET gispulse_s3" in sql
+        assert "TYPE s3" in sql
+        assert "PROVIDER config" in sql
+        assert "KEY_ID 'dev-key'" in sql
+        assert "SECRET 'dev-secret'" in sql
+        assert "REGION 'garage'" in sql
+        assert "ENDPOINT 'garage.casys.ai'" in sql
+        assert "URL_STYLE 'path'" in sql
+        assert "USE_SSL true" in sql
+        assert "SCOPE 's3://gispulse'" in sql
+
+    def test_configure_s3_secret_uses_http_for_compose_endpoint(self):
+        conn = MagicMock()
+        s3 = SimpleNamespace(
+            endpoint="http://garage:3900",
+            bucket="gispulse",
+            access_key="dev-key",
+            secret_key="dev-secret",
+            region="garage",
+        )
+
+        _configure_s3_secret(conn, s3)
+
+        sql = conn.execute.call_args.args[0]
+        assert "ENDPOINT 'garage:3900'" in sql
+        assert "USE_SSL false" in sql
+
+    def test_configure_s3_secret_escapes_sql_literals(self):
+        conn = MagicMock()
+        s3 = SimpleNamespace(
+            endpoint="https://garage.casys.ai",
+            bucket="bucket'one",
+            access_key="key'one",
+            secret_key="secret'one",
+            region="garage",
+        )
+
+        _configure_s3_secret(conn, s3)
+
+        sql = conn.execute.call_args.args[0]
+        assert "KEY_ID 'key''one'" in sql
+        assert "SECRET 'secret''one'" in sql
+        assert "SCOPE 's3://bucket''one'" in sql
+
+    def test_configure_s3_secret_skips_empty_endpoint(self):
+        conn = MagicMock()
+        s3 = SimpleNamespace(
+            endpoint="",
+            bucket="gispulse",
+            access_key="dev-key",
+            secret_key="dev-secret",
+            region="garage",
+        )
+
+        _configure_s3_secret(conn, s3)
+
+        conn.execute.assert_not_called()
 
     def test_open_survives_missing_extension(self):
         # A missing/failed extension must not break the offline GPKG path.
