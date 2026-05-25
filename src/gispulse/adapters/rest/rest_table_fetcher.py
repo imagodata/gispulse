@@ -7,9 +7,8 @@ served by Géorisques (``/api/v1/...``), BAN and RNB.
 
 The fetcher is **materialize-only**: a paginated REST API has no
 zero-copy DuckDB scan, so :attr:`~core.plugin_model.FetchMode.REFERENCE`
-raises. Rows are streamed to a local newline-delimited JSON (JSONL) file
-and the path is returned in :attr:`SourceResult.data` with
-``payload = Payload.TABLE`` for a downstream key-based spatial join.
+raises. Rows are streamed to newline-delimited JSON (JSONL): local file
+by default, or S3/Garage when ``s3_uri`` / ``s3_key`` is supplied.
 
 Like :class:`RestGeoJsonFetcher`, importing this module self-registers
 the fetcher in the process-wide :data:`core.sources.PROTOCOLS` registry
@@ -25,9 +24,10 @@ from dataclasses import dataclass, field
 from os import PathLike
 import tempfile
 import time
-from typing import Any
+from typing import Any, BinaryIO
 from urllib.parse import urlencode, urljoin, urlsplit
 
+from gispulse.core.config import settings
 from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
     AccessProtocol,
@@ -160,6 +160,74 @@ def _write_jsonl(
     return local_path, digest.hexdigest(), row_count
 
 
+def _resolve_s3_materialize_uri(params: dict[str, Any]) -> str | None:
+    s3_uri = str(params.get("s3_uri", "") or "").strip()
+    if s3_uri:
+        return s3_uri
+
+    s3_key = str(params.get("s3_key", "") or "").strip().lstrip("/")
+    if not s3_key:
+        return None
+
+    bucket = str(params.get("s3_bucket", "") or "").strip() or settings.s3.bucket
+    return f"s3://{bucket}/{s3_key}"
+
+
+def _write_jsonl_row(row: Any, fh: BinaryIO, digest: Any) -> int:
+    line = (json.dumps(row, separators=(",", ":")) + "\n").encode("utf-8")
+    digest.update(line)
+    fh.write(line)
+    return 1
+
+
+def _run_async(coro: Any) -> Any:
+    import asyncio
+    import threading
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    result: dict[str, Any] = {}
+
+    def runner() -> None:
+        try:
+            result["value"] = asyncio.run(coro)
+        except BaseException as exc:  # noqa: BLE001 - propagate from worker
+            result["error"] = exc
+
+    thread = threading.Thread(target=runner)
+    thread.start()
+    thread.join()
+    if "error" in result:
+        raise result["error"]
+    return result.get("value")
+
+
+def _upload_jsonl_to_s3(s3_uri: str, body: BinaryIO) -> None:
+    parsed = urlsplit(s3_uri)
+    bucket = parsed.netloc
+    key = parsed.path.lstrip("/")
+    if parsed.scheme != "s3" or not bucket or not key:
+        raise ValueError(f"Invalid REST_TABLE S3 destination: {s3_uri!r}")
+    if not settings.s3.endpoint:
+        raise ValueError("REST_TABLE S3 materialization requires GISPULSE_S3_ENDPOINT")
+
+    from gispulse.persistence.storage import S3Storage
+    from gispulse.persistence.tier import check_tier
+
+    check_tier("pro")
+    storage = S3Storage(
+        endpoint_url=settings.s3.endpoint,
+        bucket=bucket,
+        access_key=settings.s3.access_key,
+        secret_key=settings.s3.secret_key,
+        region=settings.s3.region,
+    )
+    _run_async(storage.upload(key, body, content_type="application/x-ndjson"))
+
+
 class RestTableFetcher:
     """:class:`~core.sources.Fetcher` for ``AccessProtocol.REST_TABLE``."""
 
@@ -194,35 +262,63 @@ class RestTableFetcher:
         if query:
             sep = "&" if "?" in origin else "?"
             origin = f"{origin}{sep}{urlencode(query)}"
-        rows: list[Any] = []
+        s3_uri = _resolve_s3_materialize_uri(params)
+        local_path = params.get("local_path")
+        if s3_uri:
+            fh: BinaryIO = tempfile.SpooledTemporaryFile(
+                max_size=64 * 1024 * 1024,
+                mode="w+b",
+            )
+        else:
+            if not local_path:
+                handle = tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False)
+                handle.close()
+                local_path = handle.name
+            fh = open(local_path, "wb")
+
+        digest = hashlib.sha256()
+        row_count = 0
         page_count = 0
         seen: set[str] = set()
         url: str | None = origin
-        while url:
-            guard_outbound_url(url)
-            seen.add(url)
-            try:
-                body = _get_json(url, timeout)
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code in pagination.empty_statuses:
-                    break  # "no data here" — leave the result empty
-                raise
-            except json.JSONDecodeError:
-                if pagination.empty_body_is_empty:
-                    break  # empty/malformed body configured as "no data here"
-                raise
-            page_count += 1
-            rows.extend(_rows_from_body(body, pagination))
-            if pagination.max_rows is not None and len(rows) >= pagination.max_rows:
-                del rows[pagination.max_rows :]
-                break
-            if page_count >= pagination.max_pages:
-                break
-            if deadline is not None and time.monotonic() >= deadline:
-                break
-            url = _next_page_url(body, url, origin, seen, pagination)
+        try:
+            while url:
+                guard_outbound_url(url)
+                seen.add(url)
+                try:
+                    body = _get_json(url, timeout)
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code in pagination.empty_statuses:
+                        break  # "no data here" — leave the result empty
+                    raise
+                except json.JSONDecodeError:
+                    if pagination.empty_body_is_empty:
+                        break  # empty/malformed body configured as "no data here"
+                    raise
+                page_count += 1
+                for row in _rows_from_body(body, pagination):
+                    if (
+                        pagination.max_rows is not None
+                        and row_count >= pagination.max_rows
+                    ):
+                        break
+                    row_count += _write_jsonl_row(row, fh, digest)
+                if (
+                    pagination.max_rows is not None
+                    and row_count >= pagination.max_rows
+                ):
+                    break
+                if page_count >= pagination.max_pages:
+                    break
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+                url = _next_page_url(body, url, origin, seen, pagination)
 
-        local_path, sha256, row_count = _write_jsonl(rows, params.get("local_path"))
+            if s3_uri:
+                fh.seek(0)
+                _upload_jsonl_to_s3(s3_uri, fh)
+        finally:
+            fh.close()
 
         log.info(
             "rest_table_materialized",
@@ -230,16 +326,21 @@ class RestTableFetcher:
             row_count=row_count,
             page_count=page_count,
         )
+        data = s3_uri if s3_uri else local_path
+        metadata = {
+            "row_count": row_count,
+            "page_count": page_count,
+            "source_url": access.endpoint,
+            "sha256": digest.hexdigest(),
+        }
+        if s3_uri:
+            metadata["s3_uri"] = s3_uri
         return SourceResult(
             payload=Payload.TABLE,
             mode=FetchMode.MATERIALIZE,
-            data=local_path,
-            metadata={
-                "row_count": row_count,
-                "page_count": page_count,
-                "source_url": access.endpoint,
-                "sha256": sha256,
-            },
+            data=data,
+            reference=s3_uri,
+            metadata=metadata,
         )
 
 
