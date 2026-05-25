@@ -18,8 +18,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from gispulse.core.config import settings
-from gispulse.core.fetchers.base import LazyFetcher
+from gispulse.core.fetchers.base import LazyFetcher, resolve_s3_materialize_uri
 from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
     AccessProtocol,
@@ -48,22 +47,6 @@ def _bbox_predicate(extent: Any | None, column: str) -> str | None:
         f"{column}.xmin <= {maxx} AND {column}.xmax >= {minx} "
         f"AND {column}.ymin <= {maxy} AND {column}.ymax >= {miny}"
     )
-
-
-def _s3_destination(access: AccessSpec) -> str | None:
-    """Resolve an opt-in S3 materialization destination, if configured."""
-    s3_uri = str(access.params.get("s3_uri", "") or "").strip()
-    if s3_uri:
-        return s3_uri
-
-    s3_key = str(access.params.get("s3_key", "") or "").strip().lstrip("/")
-    if not s3_key:
-        return None
-
-    bucket = str(access.params.get("s3_bucket", "") or "").strip()
-    if not bucket:
-        bucket = settings.s3.bucket
-    return f"s3://{bucket}/{s3_key}"
 
 
 class GeoParquetS3Fetcher(LazyFetcher):
@@ -128,7 +111,7 @@ class GeoParquetS3Fetcher(LazyFetcher):
 
         from gispulse.persistence.duckdb_engine import DuckDBSession
 
-        destination = _s3_destination(access)
+        destination = resolve_s3_materialize_uri(access)
         is_s3_destination = destination is not None
         if destination is None:
             local_path = access.params.get("local_path")
