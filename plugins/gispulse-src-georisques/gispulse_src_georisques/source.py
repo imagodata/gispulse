@@ -173,14 +173,16 @@ class GeorisquesSource(DeclarativeSource):
         code_insee: str | None = None,
         latlon: str | None = None,
         local_path: str | None = None,
+        s3_uri: str | None = None,
+        s3_key: str | None = None,
     ) -> AccessSpec:
         """Build a per-query :class:`AccessSpec` for one spatial unit.
 
         The declarative entry carries the endpoint and its static query; this
         helper folds in the runtime spatial key (``code_insee`` *or*
-        ``latlon``, whichever the entry declares) and an optional
-        materialisation ``local_path``. No network — it only shapes the spec
-        the orchestrator hands to ``RestTableFetcher``.
+        ``latlon``, whichever the entry declares) and optional materialisation
+        destinations (local JSONL path or S3/Garage object). No network — it
+        only shapes the spec the orchestrator hands to ``RestTableFetcher``.
         """
         entry = self._entry(entry_id)
         query_key = entry.metadata["query_key"]
@@ -199,6 +201,10 @@ class GeorisquesSource(DeclarativeSource):
         params["query"] = {**params.get("query", {}), query_key: value}
         if local_path is not None:
             params["local_path"] = local_path
+        if s3_uri is not None:
+            params["s3_uri"] = s3_uri
+        if s3_key is not None:
+            params["s3_key"] = s3_key
         return replace(entry.access, params=params)
 
     def schema(self, entry_id: str) -> dict[str, str]:

@@ -84,6 +84,16 @@ def test_access_for_merges_code_insee(source: GeorisquesSource) -> None:
     assert access.params["local_path"] == "/tmp/r.jsonl"
 
 
+def test_access_for_can_target_s3_key(source: GeorisquesSource) -> None:
+    access = source.access_for(
+        "radon",
+        code_insee="63113",
+        s3_key="raw/georisques/radon/63113.jsonl",
+    )
+    assert access.params["query"]["code_insee"] == "63113"
+    assert access.params["s3_key"] == "raw/georisques/radon/63113.jsonl"
+
+
 def test_access_for_merges_latlon_and_preserves_static_query(
     source: GeorisquesSource,
 ) -> None:

@@ -56,6 +56,47 @@ def test_single_page_materializes_rows_to_jsonl(
     assert rows == [{"code_insee": "63113"}, {"code_insee": "63001"}]
 
 
+def test_s3_uri_materializes_rows_to_storage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hashlib
+
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.adapters.rest.rest_table_fetcher import RestTableFetcher
+
+    def fake_get(url: str, timeout: float) -> dict:
+        return {"data": [{"code_insee": "63113"}, {"code_insee": "63001"}]}
+
+    captured: dict[str, object] = {}
+
+    def fake_upload(s3_uri: str, body) -> None:
+        captured["s3_uri"] = s3_uri
+        captured["body"] = body.read()
+
+    monkeypatch.setattr(rest_table_fetcher, "_get_json", fake_get)
+    monkeypatch.setattr(
+        rest_table_fetcher, "_upload_jsonl_to_s3", fake_upload, raising=False
+    )
+
+    uri = "s3://gispulse/raw/georisques/radon-63113.jsonl"
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_TABLE,
+        endpoint="https://www.georisques.gouv.fr/api/v1/radon",
+        params={"s3_uri": uri},
+    )
+    result = RestTableFetcher().fetch(access)
+
+    body = b'{"code_insee":"63113"}\n{"code_insee":"63001"}\n'
+    assert result.payload is Payload.TABLE
+    assert result.mode is FetchMode.MATERIALIZE
+    assert result.data == uri
+    assert result.reference == uri
+    assert result.metadata["s3_uri"] == uri
+    assert result.metadata["row_count"] == 2
+    assert result.metadata["sha256"] == hashlib.sha256(body).hexdigest()
+    assert captured == {"s3_uri": uri, "body": body}
+
+
 def test_follows_next_url_and_accumulates_pages(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
