@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import duckdb
 import pytest
 
 _PKG = Path(__file__).resolve().parents[2] / "plugins" / "gispulse-src-dvf"
@@ -13,6 +14,7 @@ if str(_PKG) not in sys.path:
 
 from gispulse_src_dvf.source import (  # noqa: E402
     DvfSource,
+    _DvfGeoCsvFetcher,
     dvf_registry,
     resolve_dvf_scan,
 )
@@ -103,11 +105,14 @@ def test_reference_scan_uses_department_csv_shards_when_requested() -> None:
     scan = result.metadata["duckdb_scan"]
     assert result.payload is Payload.TABLE
     assert "read_csv_auto(" in scan
+    assert "all_varchar=true" in scan
     assert "/2021/departements/63.csv.gz" in scan
     assert "/2025/departements/63.csv.gz" in scan
     assert "/full.csv.gz" not in scan
-    assert '"longitude" BETWEEN 3.0 AND 4.0' in scan
-    assert '"latitude" BETWEEN 45.0 AND 46.0' in scan
+    assert 'try_cast(replace(cast("longitude" as varchar)' in scan
+    assert "as double) BETWEEN 3.0 AND 4.0" in scan
+    assert 'try_cast(replace(cast("latitude" as varchar)' in scan
+    assert "as double) BETWEEN 45.0 AND 46.0" in scan
 
 
 def test_reference_scan_falls_back_to_full_csv_without_department() -> None:
@@ -124,7 +129,7 @@ def test_reference_scan_falls_back_to_full_csv_without_department() -> None:
     assert "/2021/full.csv.gz" in scan
     assert "/2025/full.csv.gz" in scan
     assert "/departements/" not in scan
-    assert '"longitude" BETWEEN 3.0 AND 4.0' in scan
+    assert 'try_cast(replace(cast("longitude" as varchar)' in scan
 
 
 def test_reference_scan_restores_legacy_cadastral_columns() -> None:
@@ -149,6 +154,7 @@ def test_public_dvf_registry_dispatches_to_csv_fetcher() -> None:
     scan = result.metadata["duckdb_scan"]
 
     assert "read_csv_auto(" in scan
+    assert "all_varchar=true" in scan
     assert "read_parquet" not in scan
     assert "/departements/63.csv.gz" in scan
 
@@ -162,8 +168,39 @@ def test_resolve_dvf_scan_returns_csv_scan() -> None:
     )
 
     assert "read_csv_auto(" in scan
+    assert "all_varchar=true" in scan
     assert "read_parquet" not in scan
-    assert '"longitude" BETWEEN 3.0 AND 4.0' in scan
+    assert 'try_cast(replace(cast("longitude" as varchar)' in scan
+
+
+def test_dvf_csv_scan_reads_dirty_numeric_columns_as_varchar(tmp_path: Path) -> None:
+    """Live DVF millesimes can contain non-numeric labels in numeric-looking columns."""
+    csv_path = tmp_path / "dvf-dirty.csv"
+    csv_path.write_text(
+        "\n".join(
+            (
+                "id_parcelle,surface_reelle_bati,longitude,latitude",
+                "631130000A0001,85,3.08,45.77",
+                "631130000A0002,Dépendance,3.09,45.78",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    scan = _DvfGeoCsvFetcher._read_csv_auto([str(csv_path)])
+
+    assert "all_varchar=true" in scan
+    con = duckdb.connect()
+    try:
+        rows = con.execute(f'SELECT "surface_reelle_bati" FROM {scan}').fetchall()
+        dtype = con.execute(
+            f'SELECT typeof("surface_reelle_bati") FROM {scan} LIMIT 1'
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+    assert dtype == "VARCHAR"
+    assert rows == [("85",), ("Dépendance",)]
 
 
 # --------------------------------------------------------------------------
