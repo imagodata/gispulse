@@ -1,13 +1,14 @@
 """Worldwide-aggregator protocol fetchers (EPIC #226, v1.9.0).
 
 A2 (issue #228) ships this package skeleton, the :class:`LazyFetcher`
-base (``base.py``) and :func:`register_core_fetchers`. The four concrete
-adapters land in the follow-up issues:
+base (``base.py``) and :func:`register_core_fetchers`. The concrete
+adapters are:
 
 * ``geoparquet_s3``  (A3 #229) — ``AccessProtocol.REMOTE_TABLE``
 * ``ogc_features``   (A4 #230) — ``AccessProtocol.OGC_FEATURES`` / ``WFS``
 * ``stac``           (A5 #231) — ``AccessProtocol.STAC``
 * ``http_file``      (A6 #232) — ``AccessProtocol.DOWNLOAD``
+* ``table_file``     — ``AccessProtocol.TABLE_FILE``
 
 Until those land, :func:`register_core_fetchers` walks an empty roster
 and registers nothing — calling it is always safe.
@@ -35,15 +36,17 @@ def _core_fetchers() -> list[LazyFetcher]:
     the fetch methods, so this roster is cheap to build.
     """
     from .geoparquet_s3 import GeoParquetS3Fetcher  # A3 #229 — REMOTE_TABLE
-    from .http_file import HttpFileFetcher          # A6 #232 — DOWNLOAD
-    from .ogc_features import OGCFeaturesFetcher    # A4 #230 — OGC_FEATURES
-    from .stac import STACFetcher                   # A5 #231 — STAC
+    from .http_file import HttpFileFetcher  # A6 #232 — DOWNLOAD
+    from .ogc_features import OGCFeaturesFetcher  # A4 #230 — OGC_FEATURES
+    from .stac import STACFetcher  # A5 #231 — STAC
+    from .table_file import TableFileFetcher
 
     return [
         GeoParquetS3Fetcher(),
         OGCFeaturesFetcher(),
         STACFetcher(),
         HttpFileFetcher(),
+        TableFileFetcher(),
     ]
 
 

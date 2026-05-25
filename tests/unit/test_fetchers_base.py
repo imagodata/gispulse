@@ -82,9 +82,7 @@ def test_fetch_reference_builds_lazy_scan() -> None:
     )
     assert result.mode is FetchMode.REFERENCE
     assert result.reference == "https://example.com/data.parquet"
-    assert result.metadata[DUCKDB_SCAN_KEY] == (
-        "read_parquet('https://example.com/data.parquet')"
-    )
+    assert result.metadata[DUCKDB_SCAN_KEY] == ("read_parquet('https://example.com/data.parquet')")
     # REFERENCE moves no bytes.
     assert result.data is None
 
@@ -125,15 +123,16 @@ def test_guard_leaves_local_file_paths_alone() -> None:
 
 
 def test_register_core_fetchers_registers_the_full_roster() -> None:
-    # A3-A6 (#229-#232) populate the roster: four generic transport
-    # adapters, one per AccessProtocol family.
+    # A3-A6 (#229-#232) plus table-file populate the roster: five generic
+    # transport adapters, one per AccessProtocol family.
     reg = ProtocolRegistry()
-    assert register_core_fetchers(reg) == 4
+    assert register_core_fetchers(reg) == 5
     for protocol in (
         AccessProtocol.REMOTE_TABLE,
         AccessProtocol.OGC_FEATURES,
         AccessProtocol.STAC,
         AccessProtocol.DOWNLOAD,
+        AccessProtocol.TABLE_FILE,
     ):
         assert isinstance(reg.get_fetcher(protocol), LazyFetcher)
 
@@ -146,11 +145,9 @@ def test_register_core_fetchers_defaults_to_global_registry() -> None:
     saved_fetchers = dict(PROTOCOLS._fetchers)
     saved_writers = dict(PROTOCOLS._writers)
     try:
-        assert register_core_fetchers() == 4  # touches PROTOCOLS
+        assert register_core_fetchers() == 5  # touches PROTOCOLS
         assert isinstance(PROTOCOLS, ProtocolRegistry)
-        assert isinstance(
-            PROTOCOLS.get_fetcher(AccessProtocol.REMOTE_TABLE), LazyFetcher
-        )
+        assert isinstance(PROTOCOLS.get_fetcher(AccessProtocol.REMOTE_TABLE), LazyFetcher)
     finally:
         PROTOCOLS._fetchers.clear()
         PROTOCOLS._fetchers.update(saved_fetchers)
@@ -205,9 +202,7 @@ def test_resolve_endpoint_noop_when_no_placeholder() -> None:
 
 
 def test_resolve_endpoint_interpolates_single_placeholder() -> None:
-    access = _access(
-        "https://example.com/{region}/data.parquet", region="eu"
-    )
+    access = _access("https://example.com/{region}/data.parquet", region="eu")
     resolved = LazyFetcher._resolve_endpoint(access)
     assert resolved.endpoint == "https://example.com/eu/data.parquet"
     # ``params`` is preserved — protocol adapters still read ``layer``,
@@ -226,9 +221,7 @@ def test_resolve_endpoint_interpolates_multiple_placeholders() -> None:
 
 
 def test_resolve_endpoint_missing_param_raises_with_clear_message() -> None:
-    access = _access(
-        "https://host/{departement}/file-{layer}.gz", departement="75"
-    )
+    access = _access("https://host/{departement}/file-{layer}.gz", departement="75")
     with pytest.raises(ValueError, match=r"requires params \['layer'\]"):
         LazyFetcher._resolve_endpoint(access)
 
