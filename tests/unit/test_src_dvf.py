@@ -11,7 +11,11 @@ _PKG = Path(__file__).resolve().parents[2] / "plugins" / "gispulse-src-dvf"
 if str(_PKG) not in sys.path:
     sys.path.insert(0, str(_PKG))
 
-from gispulse_src_dvf.source import DvfSource  # noqa: E402
+from gispulse_src_dvf.source import (  # noqa: E402
+    DvfSource,
+    dvf_registry,
+    resolve_dvf_scan,
+)
 
 from gispulse.core.plugin_model import (  # noqa: E402
     AccessProtocol,
@@ -131,6 +135,35 @@ def test_reference_scan_restores_legacy_cadastral_columns() -> None:
     assert 'substr("id_parcelle", 6, 3) AS "prefixe_section"' in scan
     assert 'substr("id_parcelle", 9, 2) AS "section"' in scan
     assert 'substr("id_parcelle", 11, 4) AS "numero_plan"' in scan
+
+
+def test_public_dvf_registry_dispatches_to_csv_fetcher() -> None:
+    """Consumers can explicitly bypass the global REMOTE_TABLE slot."""
+    entry = next(iter(DvfSource().catalog()))
+
+    result = dvf_registry().dispatch_fetch(
+        entry.access,
+        extent={"bbox": (3.0, 45.0, 4.0, 46.0), "departement": "63"},
+        mode=FetchMode.REFERENCE,
+    )
+    scan = result.metadata["duckdb_scan"]
+
+    assert "read_csv_auto(" in scan
+    assert "read_parquet" not in scan
+    assert "/departements/63.csv.gz" in scan
+
+
+def test_resolve_dvf_scan_returns_csv_scan() -> None:
+    entry = next(iter(DvfSource().catalog()))
+
+    scan = resolve_dvf_scan(
+        entry,
+        extent={"bbox": (3.0, 45.0, 4.0, 46.0), "departement": "63"},
+    )
+
+    assert "read_csv_auto(" in scan
+    assert "read_parquet" not in scan
+    assert '"longitude" BETWEEN 3.0 AND 4.0' in scan
 
 
 # --------------------------------------------------------------------------

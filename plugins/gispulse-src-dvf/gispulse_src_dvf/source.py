@@ -48,6 +48,8 @@ from gispulse.plugins.api import (
     SourceResult,
 )
 
+__all__ = ["DvfSource", "dvf_registry", "resolve_dvf_scan"]
+
 # Etalab geo-DVF mirror — live CSV export. ``latest/csv`` currently
 # exposes a rolling 2021..2025 window (verified live on 2026-05-25) with
 # both national yearly files and lighter department shards.
@@ -230,7 +232,9 @@ class _DvfGeoCsvFetcher(LazyFetcher):
         departement = extent_departement or _normalise_departement(
             access.params.get("departement") or access.params.get("department")
         )
-        scan = self._legacy_projection(self._read_csv_auto(self._urls(access, departement)))
+        scan = self._legacy_projection(
+            self._read_csv_auto(self._urls(access, departement))
+        )
         predicate = _bbox_predicate(
             bbox,
             access.params.get("lon", "longitude"),
@@ -263,10 +267,31 @@ class _DvfGeoCsvFetcher(LazyFetcher):
         )
 
 
-def _dvf_registry() -> ProtocolRegistry:
+def dvf_registry() -> ProtocolRegistry:
+    """Return a DVF-local registry whose REMOTE_TABLE slot is the CSV fetcher.
+
+    This intentionally does not mutate the process-wide ``PROTOCOLS``
+    registry: core owns the generic GeoParquet ``REMOTE_TABLE`` adapter,
+    while DVF is now a single-format CSV source.
+    """
     registry = ProtocolRegistry()
     registry.register(_DvfGeoCsvFetcher())
     return registry
+
+
+def resolve_dvf_scan(
+    entry: SourceEntryRef, *, extent: Any | None = None
+) -> str:
+    """Resolve a DVF entry to its DuckDB CSV scan through the local registry."""
+    result = dvf_registry().dispatch_fetch(
+        entry.access,
+        extent=extent,
+        mode=FetchMode.REFERENCE,
+    )
+    scan = result.metadata.get(DUCKDB_SCAN_KEY) if result.metadata else None
+    if not isinstance(scan, str) or not scan:
+        raise RuntimeError("DVF CSV fetcher did not return a DuckDB scan")
+    return scan
 
 
 def _probe_revision(api_url: str) -> str | None:
@@ -305,7 +330,7 @@ class DvfSource(DeclarativeSource):
     jurisdiction = "FR"
 
     def __init__(self, registry: ProtocolRegistry | None = None) -> None:
-        super().__init__(registry=registry or _dvf_registry())
+        super().__init__(registry=registry or dvf_registry())
 
     def entries(self) -> list[SourceEntryRef]:
         return [
