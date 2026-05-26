@@ -11,7 +11,11 @@ _PKG = Path(__file__).resolve().parents[2] / "plugins" / "gispulse-src-gpu"
 if str(_PKG) not in sys.path:
     sys.path.insert(0, str(_PKG))
 
-from gispulse_src_gpu.source import GpuSource  # noqa: E402
+from gispulse_src_gpu.source import (  # noqa: E402
+    GpuSource,
+    gpu_du_partition,
+    gpu_du_partitions_for_department,
+)
 
 from gispulse.core.plugin_model import (  # noqa: E402
     AccessProtocol,
@@ -38,10 +42,24 @@ class FakeWFS:
         )
 
 
+class FakeDownload:
+    """Records resolved AccessSpecs for GPU bulk archives."""
+
+    protocol = AccessProtocol.DOWNLOAD
+
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    def fetch(self, access, *, extent=None, mode=FetchMode.MATERIALIZE):
+        self.calls.append(access)
+        return SourceResult(payload=Payload.VECTOR, mode=mode, data=access.endpoint)
+
+
 @pytest.fixture
 def source() -> GpuSource:
     reg = ProtocolRegistry()
     reg.register(FakeWFS())
+    reg.register(FakeDownload())
     return GpuSource(registry=reg)
 
 
@@ -58,7 +76,7 @@ def test_gpu_is_a_datasource(source: GpuSource) -> None:
     assert source.jurisdiction == "FR"
 
 
-def test_catalog_lists_nine_entries(source: GpuSource) -> None:
+def test_catalog_lists_wfs_and_bulk_entries(source: GpuSource) -> None:
     ids = {e.id for e in source.catalog()}
     assert ids == {
         "zone-urba",
@@ -70,6 +88,7 @@ def test_catalog_lists_nine_entries(source: GpuSource) -> None:
         "info-surf",
         "info-lin",
         "info-pct",
+        "gpu_documents_bulk_index",
     }
 
 
@@ -107,6 +126,8 @@ def test_every_entry_targets_wfs_du_typename(source: GpuSource) -> None:
     """Every published entry must declare a ``wfs_du:*`` typename so the
     upstream WFS naming is preserved and a typo cannot slip in."""
     for entry in source.catalog():
+        if entry.id == "gpu_documents_bulk_index":
+            continue
         access = entry.access
         assert access.protocol is AccessProtocol.WFS
         assert access.params["typename"].startswith("wfs_du:"), (
@@ -135,6 +156,7 @@ def test_fetch_delegates_to_wfs_adapter() -> None:
     wfs = FakeWFS()
     reg = ProtocolRegistry()
     reg.register(wfs)
+    reg.register(FakeDownload())
     src = GpuSource(registry=reg)
 
     result = src.fetch("zone-urba")
@@ -143,6 +165,52 @@ def test_fetch_delegates_to_wfs_adapter() -> None:
     assert "wfs_du:zone_urba" in result.data
     assert len(wfs.calls) == 1
     assert wfs.calls[0].protocol is AccessProtocol.WFS
+
+
+def test_gpu_documents_bulk_entry_declares_cnig_partition_download(
+    source: GpuSource,
+) -> None:
+    entry = next(e for e in source.catalog() if e.id == "gpu_documents_bulk_index")
+    access = entry.access
+
+    assert access.protocol is AccessProtocol.DOWNLOAD
+    assert access.endpoint == (
+        "https://www.geoportail-urbanisme.gouv.fr/api/document/"
+        "download-by-partition/{partition}"
+    )
+    assert access.params == {"partition": "DU_200046977", "departement": "69"}
+    assert access.format == "application/zip"
+    assert entry.metadata["base_key"] == "gpu_documents"
+    assert entry.metadata["archive_family"] == ("pack_plu1", "pack_plu2", "pack_plui", "pack_cc")
+    assert entry.metadata["partition_prefix"] == "DU_"
+    assert entry.metadata["partition_code_fields"] == ("insee", "siren")
+    assert entry.metadata["join_keys"] == ("idurba", "insee")
+
+
+def test_gpu_du_partition_helpers_keep_department_attachment() -> None:
+    assert gpu_du_partition("69123") == "DU_69123"
+    assert gpu_du_partition("200046977") == "DU_200046977"
+    assert gpu_du_partitions_for_department(
+        "69",
+        codes_insee=["69123", "75056"],
+        sirens=[("69", "200046977"), ("75", "200054781")],
+    ) == ["DU_69123", "DU_200046977"]
+
+
+def test_fetch_gpu_documents_bulk_resolves_partition_template() -> None:
+    download = FakeDownload()
+    reg = ProtocolRegistry()
+    reg.register(FakeWFS())
+    reg.register(download)
+    src = GpuSource(registry=reg)
+
+    result = src.fetch("gpu_documents_bulk_index")
+
+    assert result.payload is Payload.VECTOR
+    assert result.data.endswith("/download-by-partition/DU_200046977")
+    assert "{partition}" not in result.data
+    assert len(download.calls) == 1
+    assert download.calls[0].protocol is AccessProtocol.DOWNLOAD
 
 
 def test_fetch_unknown_entry_raises(source: GpuSource) -> None:
@@ -177,10 +245,20 @@ def test_all_schemas_share_idurba_join_key(source: GpuSource) -> None:
     """Every layer must expose ``idurba`` so consumers can join a
     feature back to its parent urban-planning document."""
     for entry in source.catalog():
+        if entry.id == "gpu_documents_bulk_index":
+            continue
         schema = source.schema(entry.id)
         assert "idurba" in schema, (
             f"{entry.id}: missing idurba join key in schema"
         )
+
+
+def test_gpu_documents_bulk_schema_exposes_cnig_join_keys(source: GpuSource) -> None:
+    schema = source.schema("gpu_documents_bulk_index")
+
+    assert schema["idurba"] == "str"
+    assert schema["insee"] == "str"
+    assert schema["partition"] == "str"
 
 
 def test_prescription_schema_exposes_typepsc_and_txt(source: GpuSource) -> None:
@@ -247,3 +325,9 @@ def test_revision_returns_none_on_network_error(
 
     monkeypatch.setattr("httpx.head", fake_head)
     assert source.revision("info-surf") is None
+
+
+def test_revision_returns_static_token_for_gpu_documents_bulk(
+    source: GpuSource,
+) -> None:
+    assert source.revision("gpu_documents_bulk_index") == "gpu-cnig-documents-bulk"

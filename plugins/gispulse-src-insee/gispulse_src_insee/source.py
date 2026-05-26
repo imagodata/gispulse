@@ -1,13 +1,13 @@
 """French INSEE DataSource — statistical units and IRIS tables.
 
 A :class:`~gispulse.plugins.api.DeclarativeSource`: the plugin only
-declares its access specs; WFS and table downloads are delegated to the
-registered protocol fetchers. This package ships zero network code besides
-a HEAD probe for the WFS contour revision.
+declares its access specs; WFS, bulk vector downloads and table downloads are
+delegated to the registered protocol fetchers. This package ships zero network
+code besides a HEAD probe for the WFS contour revision.
 
-The first entry is IRIS (Ilots Regroupés pour l'Information Statistique),
-an INSEE infra-communal statistical mesh redistributed through the IGN
-Géoplateforme WFS. Additional entries expose official INSEE IRIS-level
+The first entries are IRIS (Ilots Regroupés pour l'Information Statistique)
+contours: a live WFS declaration plus an IGN/Géoplateforme per-département
+bulk archive. Additional entries expose official INSEE IRIS-level
 sociodemographic CSV ZIP downloads.
 """
 
@@ -32,6 +32,16 @@ _WFS_CAPABILITIES = (
 _REVISION_TIMEOUT_S = 8.0
 
 _IRIS_TYPENAME = "STATISTICALUNITS.IRIS:contours_iris"
+_IRIS_BULK_RESOURCE = "IRIS-GE"
+_IRIS_BULK_MILLESIME = "2026-01-01"
+_IRIS_BULK_SUBRESOURCE_TEMPLATE = (
+    f"{_IRIS_BULK_RESOURCE}_3-0__GPKG_LAMB93_{{zone}}_{_IRIS_BULK_MILLESIME}"
+)
+_IRIS_BULK_ENDPOINT = (
+    f"https://data.geopf.fr/telechargement/download/{_IRIS_BULK_RESOURCE}/"
+    f"{_IRIS_BULK_SUBRESOURCE_TEMPLATE}/{_IRIS_BULK_SUBRESOURCE_TEMPLATE}.7z"
+)
+_IRIS_BULK_REVISION = "ign-iris-ge-gpkg-lamb93-2026-01-01"
 
 _ENTRIES: dict[str, tuple[str, str]] = {
     "iris": (
@@ -233,6 +243,35 @@ class InseeSource(DeclarativeSource):
             )
             for entry_id, (label, typename) in _ENTRIES.items()
         ]
+        entries.append(
+            SourceEntryRef(
+                id="iris_bulk",
+                name="IRIS GE — contours bulk IGN GeoPackage (par département)",
+                access=AccessSpec(
+                    protocol=AccessProtocol.DOWNLOAD,
+                    endpoint=_IRIS_BULK_ENDPOINT,
+                    params={"zone": "D075", "layer": "iris_ge"},
+                    format="application/x-7z-compressed",
+                ),
+                revision_token=None,
+                domain=self.domain,
+                payload=self.payload,
+                jurisdiction=self.jurisdiction,
+                metadata={
+                    "provider": "IGN / INSEE",
+                    "platform": "Géoplateforme téléchargement",
+                    "license": "Licence Ouverte 2.0",
+                    "update_cadence": "annuel",
+                    "resource": _IRIS_BULK_RESOURCE,
+                    "format": "GPKG",
+                    "archive_format": "7z",
+                    "projection": "LAMB93",
+                    "millesime": _IRIS_BULK_MILLESIME,
+                    "zone_format": "D{code_departement:0>3}",
+                    "join_key": "code_iris",
+                },
+            )
+        )
         entries.extend(
             SourceEntryRef(
                 id=entry_id,
@@ -271,6 +310,8 @@ class InseeSource(DeclarativeSource):
         entry id is only validated here.
         """
         self._entry(entry_id)  # validate the id
+        if entry_id == "iris_bulk":
+            return _IRIS_BULK_REVISION
         if entry_id in _TABLE_ENTRIES:
             return _TABLE_ENTRIES[entry_id].revision
         return _probe_revision(_WFS_CAPABILITIES)

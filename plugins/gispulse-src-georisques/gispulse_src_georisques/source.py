@@ -1,10 +1,11 @@
 """Géorisques DataSource — natural/technological risk signals (#196).
 
-A :class:`DeclarativeSource` over :attr:`AccessProtocol.REST_TABLE`. Each of
-the six Géorisques endpoints is one declarative entry; the endpoint and its
-static query (page size, radius) are fixed here, but the **runtime spatial
-key** — ``code_insee`` for the communal endpoints, ``latlon`` for the point
-endpoints — is supplied per call by the ingestion orchestrator through
+A :class:`DeclarativeSource` over :attr:`AccessProtocol.REST_TABLE` for the
+runtime APIs plus :attr:`AccessProtocol.DOWNLOAD` for confirmed bulk datasets.
+Each API endpoint remains one declarative entry; the endpoint and its static
+query (page size, radius) are fixed here, but the **runtime spatial key** —
+``code_insee`` for the communal endpoints, ``latlon`` for the point endpoints
+— is supplied per call by the ingestion orchestrator through
 :meth:`GeorisquesSource.access_for`.
 
 The plugin is intentionally *raw*: ``schema`` describes the upstream fields,
@@ -28,6 +29,9 @@ from gispulse.plugins.api import (
 )
 
 GEORISQUES_BASE_URL = "https://www.georisques.gouv.fr"
+GEORISQUES_DOWNLOAD_SERVICE = (
+    "https://www.georisques.gouv.fr/webappReport/ws/telechargements"
+)
 
 # entry_id -> declarative spec. ``query_key`` names the runtime spatial
 # parameter; ``scope`` is the granularity it filters at. ``static_query``
@@ -86,6 +90,71 @@ _ENTRIES: dict[str, dict[str, Any]] = {
     },
 }
 
+_BULK_ENTRIES: dict[str, dict[str, Any]] = {
+    "rga-bulk": {
+        "label": "Retrait-gonflement des argiles 2026 (bulk, département)",
+        "endpoint": (
+            "https://files.georisques.fr/argiles/2025/"
+            "AleaRG_2025_{departement}_L93.zip"
+        ),
+        "payload": Payload.VECTOR,
+        "base_key": "alearg_25",
+        "format": "zip",
+        "archive_format": "zip",
+        "data_format": "shapefile",
+        "echelle": "departementale",
+        "department_param": "codeDepartement",
+        "params": {"departement": "69"},
+        "revision": "georisques-alearg_25-zip",
+    },
+    "tri-bulk": {
+        "label": "TRI rapportage 2020 (bulk, département)",
+        "endpoint": (
+            "https://files.georisques.fr/di_2020/"
+            "tri_2020_sig_di_{departement}.zip"
+        ),
+        "payload": Payload.VECTOR,
+        "base_key": "tri_2020",
+        "format": "zip",
+        "archive_format": "zip",
+        "data_format": "shapefile",
+        "echelle": "departementale",
+        "department_param": "codeDepartement",
+        "params": {"departement": "69"},
+        "revision": "georisques-tri_2020-zip",
+    },
+    "sis-bulk": {
+        "label": "Secteurs d'informations sur les sols (bulk CSV)",
+        "endpoint": (
+            "https://mapsref.brgm.fr/wxs/georisques/georisques_dl?"
+            "&service=wfs&version=2.0.0&request=getfeature"
+            "&typename=classification&outputformat=CSVTEXT"
+        ),
+        "payload": Payload.TABLE,
+        "base_key": "sis",
+        "format": "csv",
+        "archive_format": None,
+        "data_format": "csv",
+        "echelle": "nationale",
+        "department_param": None,
+        "params": {},
+        "revision": "georisques-sis-csv",
+    },
+    "gaspar-bulk": {
+        "label": "Procédures administratives GASPAR (bulk ZIP)",
+        "endpoint": "https://files.georisques.fr/GASPAR/gaspar.zip",
+        "payload": Payload.TABLE,
+        "base_key": "gaspar",
+        "format": "zip",
+        "archive_format": "zip",
+        "data_format": "csv",
+        "echelle": "nationale",
+        "department_param": None,
+        "params": {},
+        "revision": "georisques-gaspar-zip",
+    },
+}
+
 _METADATA_COMMON = {
     "provider": "Géorisques / BRGM-MTE",
     "platform": "georisques.gouv.fr API v1",
@@ -125,6 +194,26 @@ _SCHEMAS: dict[str, dict[str, str]] = {
         "conclusions_sis": "json",
         "conclusions_sup": "json",
     },
+    "rga-bulk": {
+        "codeExposition": "str",
+        "exposition": "str",
+        "alea": "str",
+        "geometry": "geometry",
+    },
+    "tri-bulk": {
+        "code_national_tri": "str",
+        "libelle_tri": "str",
+        "geometry": "geometry",
+    },
+    "sis-bulk": {
+        "classification": "str",
+        "identifiant": "str",
+        "code_insee": "str",
+    },
+    "gaspar-bulk": {
+        "code_insee": "str",
+        "risques_detail": "json",
+    },
 }
 
 
@@ -137,7 +226,10 @@ class GeorisquesSource(DeclarativeSource):
     jurisdiction = "FR"
 
     def entries(self) -> list[SourceEntryRef]:
-        return [self._entry_ref(entry_id) for entry_id in _ENTRIES]
+        return [
+            *(self._entry_ref(entry_id) for entry_id in _ENTRIES),
+            *(self._bulk_entry_ref(entry_id) for entry_id in _BULK_ENTRIES),
+        ]
 
     def _entry_ref(self, entry_id: str) -> SourceEntryRef:
         spec = _ENTRIES[entry_id]
@@ -163,6 +255,48 @@ class GeorisquesSource(DeclarativeSource):
                 **_METADATA_COMMON,
                 "query_key": spec["query_key"],
                 "query_scope": spec["scope"],
+            },
+        )
+
+    def _bulk_entry_ref(self, entry_id: str) -> SourceEntryRef:
+        spec = _BULK_ENTRIES[entry_id]
+        base_key = spec["base_key"]
+        fmt = spec["format"]
+        echelle = spec["echelle"]
+        department_param = spec["department_param"]
+        catalog_endpoint = (
+            f"{GEORISQUES_DOWNLOAD_SERVICE}/formats/{fmt}/{base_key}"
+            f"?echelle={echelle}"
+        )
+        if department_param:
+            default_dept = spec["params"]["departement"]
+            catalog_endpoint = (
+                f"{catalog_endpoint}&{department_param}={default_dept}"
+            )
+        return SourceEntryRef(
+            id=entry_id,
+            name=spec["label"],
+            access=AccessSpec(
+                protocol=AccessProtocol.DOWNLOAD,
+                endpoint=spec["endpoint"],
+                params=dict(spec["params"]),
+                format="application/zip" if fmt == "zip" else "text/csv",
+            ),
+            revision_token=None,
+            domain=self.domain,
+            payload=spec["payload"],
+            jurisdiction=self.jurisdiction,
+            metadata={
+                "provider": "Géorisques / BRGM-MTE",
+                "platform": "Géorisques téléchargement",
+                "download_service": GEORISQUES_DOWNLOAD_SERVICE,
+                "download_index_endpoint": catalog_endpoint,
+                "base_key": base_key,
+                "format": fmt,
+                "archive_format": spec["archive_format"],
+                "data_format": spec["data_format"],
+                "echelle": echelle,
+                "department_param": department_param,
             },
         )
 
@@ -221,4 +355,6 @@ class GeorisquesSource(DeclarativeSource):
         source watcher skips it.
         """
         self._entry(entry_id)  # validates the id
+        if entry_id in _BULK_ENTRIES:
+            return str(_BULK_ENTRIES[entry_id]["revision"])
         return None

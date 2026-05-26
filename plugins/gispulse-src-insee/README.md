@@ -10,7 +10,7 @@ product-specific joins, aliases and scoring stay in downstream consumers such as
 | Field             | Value                                                       |
 |-------------------|-------------------------------------------------------------|
 | Upstream producer | INSEE                                                       |
-| Redistributor     | IGN / Geoplateforme WFS for contours; insee.fr for tables   |
+| Redistributor     | IGN / Geoplateforme WFS and bulk download for contours; insee.fr for tables |
 | Licence           | Licence Ouverte 2.0                                         |
 | Cadence           | Annual                                                      |
 
@@ -19,6 +19,7 @@ product-specific joins, aliases and scoring stay in downstream consumers such as
 | id                                        | Label                                      | Protocol   | Payload | Millesime | Geography date |
 |-------------------------------------------|--------------------------------------------|------------|---------|-----------|----------------|
 | `iris`                                    | IRIS contours                              | WFS        | VECTOR  | service   | service        |
+| `iris_bulk`                               | IRIS GE contours by department             | DOWNLOAD   | VECTOR  | 2026      | 2026-01-01     |
 | `iris_population_2022`                    | IRIS population                            | TABLE_FILE | TABLE   | 2022      | 2024-01-01     |
 | `iris_logement_2022`                      | IRIS logement                              | TABLE_FILE | TABLE   | 2022      | 2024-01-01     |
 | `iris_menages_2022`                       | IRIS couples, familles, menages            | TABLE_FILE | TABLE   | 2022      | 2024-01-01     |
@@ -31,7 +32,19 @@ product-specific joins, aliases and scoring stay in downstream consumers such as
 
 The `iris` entry uses `AccessProtocol.WFS`, endpoint
 `https://data.geopf.fr/wfs/ows`, format `application/json`, typename
-`STATISTICALUNITS.IRIS:contour_iris`.
+`STATISTICALUNITS.IRIS:contours_iris`.
+
+The complementary `iris_bulk` entry uses the official IGN/Géoplateforme
+`IRIS-GE` department GeoPackage archives through `AccessProtocol.DOWNLOAD`. Its endpoint is
+templated on the official `Dxxx` zone code:
+
+```text
+https://data.geopf.fr/telechargement/download/IRIS-GE/IRIS-GE_3-0__GPKG_LAMB93_{zone}_2026-01-01/IRIS-GE_3-0__GPKG_LAMB93_{zone}_2026-01-01.7z
+```
+
+The catalogue default is `zone=D075`; national ingest should override it, for
+example `zone=D069` for Rhone. The archive is a 7z-compressed GeoPackage bundle in
+Lambert-93. The join key to INSEE tables is `code_iris`.
 
 Schema highlights:
 
@@ -79,7 +92,8 @@ The freshness token is derived from the `ETag` header (preferred) or the
 `Last-Modified` header. Returns `None` when the endpoint is unreachable or
 exposes neither header.
 
-Table entries return stable millesime/geography tokens such as
+Bulk and table entries return stable millesime/geography tokens such as
+`ign-iris-ge-gpkg-lamb93-2026-01-01` or
 `insee-rp-iris-population-2022-geo-2024-01-01`.
 
 ## Usage
@@ -91,6 +105,11 @@ entry = get_catalog_entry("insee", "iris_population_2022")
 # entry.access.protocol -> AccessProtocol.TABLE_FILE
 # entry.payload          -> Payload.TABLE
 # entry.access.params    -> {"archive_format": "zip", "table_format": "csv"}
+
+bulk = get_catalog_entry("insee", "iris_bulk")
+# bulk.access.protocol -> AccessProtocol.DOWNLOAD
+# bulk.access.endpoint -> ".../IRIS-GE_3-0__GPKG_LAMB93_{zone}_2026-01-01.7z"
+# bulk.access.params   -> {"zone": "D075", "layer": "iris_ge"}
 ```
 
 The plugin registers automatically via the `gispulse.data_sources` entry-point

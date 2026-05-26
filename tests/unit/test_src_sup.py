@@ -12,7 +12,7 @@ if str(_PKG) not in sys.path:
     sys.path.insert(0, str(_PKG))
 
 from gispulse_src_sup import register  # noqa: E402
-from gispulse_src_sup.source import SupSource  # noqa: E402
+from gispulse_src_sup.source import SupSource, sup_partition  # noqa: E402
 
 from gispulse.core.plugin_model import (  # noqa: E402
     AccessProtocol,
@@ -43,10 +43,24 @@ class FakeWFS:
         )
 
 
+class FakeDownload:
+    """Records resolved AccessSpecs for CNIG SUP bulk archives."""
+
+    protocol = AccessProtocol.DOWNLOAD
+
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    def fetch(self, access, *, extent=None, mode=FetchMode.MATERIALIZE):
+        self.calls.append(access)
+        return SourceResult(payload=Payload.VECTOR, mode=mode, data=access.endpoint)
+
+
 @pytest.fixture
 def source() -> SupSource:
     reg = ProtocolRegistry()
     reg.register(FakeWFS())
+    reg.register(FakeDownload())
     return SupSource(registry=reg)
 
 
@@ -75,6 +89,7 @@ def test_catalog_lists_raw_layers_and_filtered_views(source: SupSource) -> None:
         "generateur-pct",
         "heritage-abf",
         "risk-ppr-zoning",
+        "pack_sup",
     }
 
 
@@ -121,6 +136,8 @@ def test_every_entry_targets_wfs_sup_typename(source: SupSource) -> None:
     }
 
     for entry in source.catalog():
+        if entry.id == "pack_sup":
+            continue
         access = entry.access
         typename, cql_filter = expected[entry.id]
         assert access.protocol is AccessProtocol.WFS
@@ -144,6 +161,8 @@ def test_filtered_views_expose_suptype_filter_metadata(source: SupSource) -> Non
 
 def test_every_entry_carries_provider_metadata(source: SupSource) -> None:
     for entry in source.catalog():
+        if entry.id == "pack_sup":
+            continue
         assert entry.metadata["provider"] == "IGN / Géoportail de l'Urbanisme"
         assert entry.metadata["platform"] == "WFS SUP"
         assert entry.metadata["typename"] == entry.access.params["typename"]
@@ -158,6 +177,7 @@ def test_fetch_delegates_to_wfs_adapter() -> None:
     wfs = FakeWFS()
     reg = ProtocolRegistry()
     reg.register(wfs)
+    reg.register(FakeDownload())
     src = SupSource(registry=reg)
 
     result = src.fetch("heritage-abf")
@@ -167,6 +187,49 @@ def test_fetch_delegates_to_wfs_adapter() -> None:
     assert len(wfs.calls) == 1
     assert wfs.calls[0].protocol is AccessProtocol.WFS
     assert wfs.calls[0].params["cql_filter"] == "suptype IN ('AC1','AC2','AC4')"
+
+
+def test_pack_sup_declares_cnig_partition_download(source: SupSource) -> None:
+    entry = next(e for e in source.catalog() if e.id == "pack_sup")
+    access = entry.access
+
+    assert access.protocol is AccessProtocol.DOWNLOAD
+    assert access.endpoint == (
+        "https://www.geoportail-urbanisme.gouv.fr/api/document/"
+        "download-by-partition/{partition}"
+    )
+    assert access.params == {
+        "partition": "172014607_SUP_69_AC1",
+        "codeGeo": "69",
+        "categorie": "AC1",
+    }
+    assert access.format == "application/zip"
+    assert entry.metadata["base_key"] == "pack_sup"
+    assert entry.metadata["partition_pattern"] == "{idGest_}SUP_<codeGeo>_<categorie>"
+    assert entry.metadata["code_geo_default"] == "69"
+    assert entry.metadata["join_keys"] == ("idsup", "suptype")
+
+
+def test_sup_partition_helper_supports_optional_idgest() -> None:
+    assert sup_partition("69", "AC1") == "SUP_69_AC1"
+    assert sup_partition("69", "AC1", id_gest="172014607") == "172014607_SUP_69_AC1"
+    assert sup_partition("R84", "PM1", id_gest="130008915") == "130008915_SUP_R84_PM1"
+
+
+def test_fetch_pack_sup_resolves_partition_template() -> None:
+    download = FakeDownload()
+    reg = ProtocolRegistry()
+    reg.register(FakeWFS())
+    reg.register(download)
+    src = SupSource(registry=reg)
+
+    result = src.fetch("pack_sup")
+
+    assert result.payload is Payload.VECTOR
+    assert result.data.endswith("/download-by-partition/172014607_SUP_69_AC1")
+    assert "{partition}" not in result.data
+    assert len(download.calls) == 1
+    assert download.calls[0].protocol is AccessProtocol.DOWNLOAD
 
 
 def test_fetch_unknown_entry_raises(source: SupSource) -> None:
@@ -194,6 +257,14 @@ def test_schema_is_shared_by_raw_layers_and_filtered_views(source: SupSource) ->
     filtered_schema = source.schema("risk-ppr-zoning")
 
     assert filtered_schema == raw_schema
+
+
+def test_pack_sup_schema_exposes_cnig_join_keys(source: SupSource) -> None:
+    schema = source.schema("pack_sup")
+
+    assert schema["idsup"] == "str"
+    assert schema["suptype"] == "str"
+    assert schema["partition"] == "str"
 
 
 # --------------------------------------------------------------------------
@@ -242,6 +313,10 @@ def test_revision_returns_none_on_network_error(
 
     monkeypatch.setattr("httpx.head", fake_head)
     assert source.revision("risk-ppr-zoning") is None
+
+
+def test_revision_returns_static_token_for_pack_sup(source: SupSource) -> None:
+    assert source.revision("pack_sup") == "gpu-cnig-sup-bulk"
 
 
 # --------------------------------------------------------------------------

@@ -59,6 +59,19 @@ class FakeTableFile:
         return SourceResult(payload=Payload.TABLE, mode=mode, data=access.endpoint)
 
 
+class FakeDownload:
+    """Records resolved bulk download AccessSpecs and returns the endpoint."""
+
+    protocol = AccessProtocol.DOWNLOAD
+
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    def fetch(self, access, *, extent=None, mode=FetchMode.MATERIALIZE):
+        self.calls.append(access)
+        return SourceResult(payload=Payload.VECTOR, mode=mode, data=access.endpoint)
+
+
 def _source_class():
     return importlib.import_module("gispulse_src_insee.source").InseeSource
 
@@ -68,6 +81,7 @@ def source():
     reg = ProtocolRegistry()
     reg.register(FakeWFS())
     reg.register(FakeTableFile())
+    reg.register(FakeDownload())
     return _source_class()(registry=reg)
 
 
@@ -104,6 +118,7 @@ def test_register_adds_insee_source_to_global_registry() -> None:
         assert isinstance(registered, InseeSource)
         assert {entry.id for entry in registered.catalog()} == {
             "iris",
+            "iris_bulk",
             *_SOCIODEMO_ENTRY_IDS,
         }
     finally:
@@ -125,13 +140,14 @@ def test_insee_is_a_statistical_vector_datasource(source) -> None:
 
 def test_catalog_lists_iris_and_sociodemo_entries(source) -> None:
     ids = {entry.id for entry in source.catalog()}
-    assert ids == {"iris", *_SOCIODEMO_ENTRY_IDS}
+    assert ids == {"iris", "iris_bulk", *_SOCIODEMO_ENTRY_IDS}
 
 
 def test_catalog_search_iris(source) -> None:
     found = source.catalog(search="iris")
     assert [entry.id for entry in found] == [
         "iris",
+        "iris_bulk",
         "iris_population_2022",
         "iris_logement_2022",
         "iris_menages_2022",
@@ -218,6 +234,24 @@ def test_iris_sociodemo_entries_keep_official_download_urls(source) -> None:
     )
 
 
+def test_iris_bulk_declares_geoplateforme_department_download(source) -> None:
+    entry = source._entry("iris_bulk")
+    access = entry.access
+
+    assert access.protocol is AccessProtocol.DOWNLOAD
+    assert access.endpoint == (
+        "https://data.geopf.fr/telechargement/download/IRIS-GE/"
+        "IRIS-GE_3-0__GPKG_LAMB93_{zone}_2026-01-01/"
+        "IRIS-GE_3-0__GPKG_LAMB93_{zone}_2026-01-01.7z"
+    )
+    assert access.params == {"zone": "D075", "layer": "iris_ge"}
+    assert access.format == "application/x-7z-compressed"
+    assert entry.payload is Payload.VECTOR
+    assert entry.metadata["resource"] == "IRIS-GE"
+    assert entry.metadata["format"] == "GPKG"
+    assert entry.metadata["zone_format"] == "D{code_departement:0>3}"
+
+
 # --------------------------------------------------------------------------
 # Declarative fetch — delegates to the WFS adapter, zero network code
 # --------------------------------------------------------------------------
@@ -250,6 +284,23 @@ def test_fetch_delegates_sociodemo_entry_to_table_file_adapter() -> None:
     assert result.data.endswith("/8647014/base-ic-evol-struct-pop-2022_csv.zip")
     assert len(adapter.calls) == 1
     assert adapter.calls[0].protocol is AccessProtocol.TABLE_FILE
+
+
+def test_fetch_bulk_resolves_default_department_template() -> None:
+    download = FakeDownload()
+    reg = ProtocolRegistry()
+    reg.register(FakeWFS())
+    reg.register(FakeTableFile())
+    reg.register(download)
+    src = _source_class()(registry=reg)
+
+    result = src.fetch("iris_bulk")
+
+    assert result.payload is Payload.VECTOR
+    assert "{zone}" not in result.data
+    assert "IRIS-GE_3-0__GPKG_LAMB93_D075_2026-01-01.7z" in result.data
+    assert len(download.calls) == 1
+    assert download.calls[0].protocol is AccessProtocol.DOWNLOAD
 
 
 def test_fetch_unknown_entry_raises(source) -> None:
@@ -352,6 +403,10 @@ def test_revision_returns_static_millesime_for_sociodemo_entry(source) -> None:
         source.revision("iris_filosofi_revenus_disponibles_2021")
         == "insee-filosofi-iris-revenus-disponibles-2021-geo-2022-01-01"
     )
+
+
+def test_revision_returns_static_millesime_for_iris_bulk(source) -> None:
+    assert source.revision("iris_bulk") == "ign-iris-ge-gpkg-lamb93-2026-01-01"
 
 
 def test_revision_validates_entry_id(source, monkeypatch: pytest.MonkeyPatch) -> None:
