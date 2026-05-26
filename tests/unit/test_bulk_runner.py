@@ -567,19 +567,36 @@ def test_download_archive_derives_iris_zone_and_reads_gpkg_layer(
     )
 
 
-def test_download_spatial_json_gz_uploads_raw_and_copies_vsigzip_to_stage(
+def test_download_spatial_json_gz_uploads_raw_and_streams_geojson_to_stage(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     from gispulse.core.bulk_runner import BulkIngestRunner
 
     geojson = (
-        b'{"type":"FeatureCollection","features":[{"type":"Feature",'
-        b'"properties":{"id":"630000000A0001"},"geometry":null}]}'
+        b'{"type":"FeatureCollection","features":['
+        b'{"type":"Feature","properties":{"id":"630000000A0001",'
+        b'"commune":"63000","contenance":12,"arpente":false},'
+        b'"geometry":{"type":"Polygon","coordinates":[[[3.0,45.0],'
+        b"[3.1,45.0],[3.1,45.1],[3.0,45.1],[3.0,45.0]]]}},"
+        b'{"type":"Feature","properties":{"id":"630000000A0002",'
+        b'"commune":"63000","contenance":24,"arpente":true},'
+        b'"geometry":{"type":"Polygon","coordinates":[[[3.2,45.2],'
+        b"[3.3,45.2],[3.3,45.3],[3.2,45.3],[3.2,45.2]]]}}]}"
     )
     payload = gzip.compress(geojson)
     requested = _patch_http_stream(monkeypatch, payload)
-    executed = _patch_duckdb(monkeypatch)
+
+    class _NoDuckDBSession:
+        def __enter__(self) -> "_NoDuckDBSession":
+            raise AssertionError("json.gz cadastre path must not call DuckDB ST_Read")
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    import gispulse.persistence.duckdb_engine as duckdb_engine
+
+    monkeypatch.setattr(duckdb_engine, "DuckDBSession", _NoDuckDBSession)
     storage = _FakeStorage()
     source = _StaticSource(
         SourceEntryRef(
@@ -600,6 +617,18 @@ def test_download_spatial_json_gz_uploads_raw_and_copies_vsigzip_to_stage(
         ),
         name="cadastre",
     )
+    source.schema = lambda entry_id: {  # type: ignore[method-assign]
+        "id": "str",
+        "geometry": "geometry",
+        "commune": "str",
+        "prefixe": "str",
+        "section": "str",
+        "numero": "str",
+        "contenance": "int",
+        "arpente": "bool",
+        "created": "date",
+        "updated": "date",
+    }
 
     result = BulkIngestRunner(
         storage=storage,
@@ -618,23 +647,34 @@ def test_download_spatial_json_gz_uploads_raw_and_copies_vsigzip_to_stage(
             "geojson/departements/63/cadastre-63-parcelles.json.gz"
         )
     ]
-    assert storage.uploads == [
-        (
-            "smoke-n3/raw/cadastre/parcelles_bulk/millesime=cadastre-smoke/"
-            "departement=63/cadastre-63-parcelles.json.gz",
-            payload,
-            "application/geo+json+gzip",
+    assert storage.uploads[0] == (
+        "smoke-n3/raw/cadastre/parcelles_bulk/millesime=cadastre-smoke/"
+        "departement=63/cadastre-63-parcelles.json.gz",
+        payload,
+        "application/geo+json+gzip",
+    )
+    assert storage.uploads[1][0] == (
+        "smoke-n3/stage/cadastre/parcelles_bulk/millesime=cadastre-smoke/"
+        "departement=63/parcelles.parquet"
+    )
+    assert storage.uploads[1][2] == "application/vnd.apache.parquet"
+    stage_path = tmp_path / "stage.parquet"
+    stage_path.write_bytes(storage.uploads[1][1])
+    import duckdb
+
+    rows = (
+        duckdb.connect(":memory:")
+        .execute(
+            "SELECT id, commune, contenance, arpente, geometry FROM read_parquet(?) ORDER BY id",
+            [str(stage_path)],
         )
+        .fetchall()
+    )
+    assert rows == [
+        ("630000000A0001", "63000", 12, False, rows[0][4]),
+        ("630000000A0002", "63000", 24, True, rows[1][4]),
     ]
-    assert len(executed) == 1
-    assert "ST_Read('/vsigzip/" in executed[0]
-    assert "cadastre-63-parcelles.json.gz'" in executed[0]
-    assert "layer='parcelles')" in executed[0]
-    assert (
-        "TO 's3://gispulse/smoke-n3/stage/cadastre/parcelles_bulk/"
-        "millesime=cadastre-smoke/departement=63/parcelles.parquet' "
-        "(FORMAT PARQUET)"
-    ) in executed[0]
+    assert all(isinstance(row[4], bytes) for row in rows)
     assert result.manifest["raw_s3_uri"] == (
         "s3://gispulse/smoke-n3/raw/cadastre/parcelles_bulk/"
         "millesime=cadastre-smoke/departement=63/"
@@ -647,3 +687,4 @@ def test_download_spatial_json_gz_uploads_raw_and_copies_vsigzip_to_stage(
     assert result.fetch_result.metadata["stage_s3_uris"] == [
         result.manifest["stage_s3_uri"]
     ]
+    assert result.fetch_result.metadata["stage_rows"] == 2

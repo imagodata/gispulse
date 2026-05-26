@@ -9,12 +9,15 @@ step.
 from __future__ import annotations
 
 import asyncio
+import gzip
+import json
 import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, replace
+from datetime import date
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 from zipfile import ZipFile
 
 from gispulse.core.bulk_ingest import (
@@ -43,6 +46,9 @@ __all__ = ["BulkIngestResult", "BulkIngestRunner"]
 
 _VECTOR_SUFFIXES = (".gpkg", ".shp", ".geojson", ".json", ".fgb", ".gml")
 _SPATIAL_GZIP_ARCHIVE_FORMATS = {"geojson.gz", "json.gz"}
+_GEOJSON_READ_CHUNK_BYTES = 1024 * 1024
+_GEOJSON_BATCH_SIZE = 10_000
+_PARQUET_CONTENT_TYPE = "application/vnd.apache.parquet"
 
 
 @dataclass(frozen=True)
@@ -141,6 +147,7 @@ class BulkIngestRunner:
                 departement=scope_departement,
                 partition=partition,
                 revision=revision_token,
+                source_schema=_source_schema(source, entry.id),
             )
         raise NotImplementedError(
             "N3 bulk runner currently supports TABLE_FILE and DOWNLOAD entries; "
@@ -312,6 +319,7 @@ class BulkIngestRunner:
         departement: object | None,
         partition: object | None,
         revision: str,
+        source_schema: dict[str, Any] | None,
     ) -> BulkIngestResult:
         resolved_access = resolve_access_endpoint(access)
         guard_outbound_url(resolved_access.endpoint)
@@ -327,48 +335,62 @@ class BulkIngestRunner:
             revision=revision,
             filename=raw_filename,
         )
-        raw_bytes = _download_bytes(resolved_access.endpoint)
         storage = self._storage or _create_s3_storage(self._bucket)
-        _await_storage(
-            storage.upload(
-                raw_key,
-                raw_bytes,
-                content_type=_content_type(entry, resolved_access),
-            )
-        )
 
         copy_sqls: list[str] = []
         stage_uris: list[str] = []
+        stage_rows: int | None = None
         with tempfile.TemporaryDirectory(dir=self._temp_dir) as tmp:
             tmp_dir = Path(tmp)
             archive_path = tmp_dir / raw_filename
-            archive_path.write_bytes(raw_bytes)
-
-            from gispulse.persistence.duckdb_engine import DuckDBSession
-
-            with DuckDBSession() as session:
-                if _is_spatial_gzip_download(entry, resolved_access):
-                    stage_filename = _stage_filename(entry)
-                    stage_key = bulk_s3_key(
-                        key_prefix=self._key_prefix,
-                        kind=BULK_STAGE_PREFIX,
-                        source=source_name,
-                        entry=entry.id,
-                        departement=departement,
-                        partition=partition,
-                        revision=revision,
-                        filename=stage_filename,
+            _download_to_path(resolved_access.endpoint, archive_path)
+            with archive_path.open("rb") as raw_file:
+                _await_storage(
+                    storage.upload(
+                        raw_key,
+                        raw_file,
+                        content_type=_content_type(entry, resolved_access),
                     )
-                    stage_uri = bulk_s3_uri(key=stage_key, bucket=self._bucket)
-                    copy_sql = _copy_gzip_vector_to_s3_sql(
-                        archive_path,
-                        resolved_access,
-                        stage_uri,
+                )
+
+            if _is_spatial_gzip_download(entry, resolved_access):
+                stage_filename = _stage_filename(entry)
+                stage_key = bulk_s3_key(
+                    key_prefix=self._key_prefix,
+                    kind=BULK_STAGE_PREFIX,
+                    source=source_name,
+                    entry=entry.id,
+                    departement=departement,
+                    partition=partition,
+                    revision=revision,
+                    filename=stage_filename,
+                )
+                stage_uri = bulk_s3_uri(key=stage_key, bucket=self._bucket)
+                geojson_path = tmp_dir / _decompressed_geojson_filename(raw_filename)
+                stage_path = tmp_dir / stage_filename
+                _decompress_gzip_to_path(archive_path, geojson_path)
+                stage_rows = _geojson_to_parquet_batches(
+                    geojson_path,
+                    stage_path,
+                    schema_hint=source_schema,
+                    batch_size=_geojson_batch_size(resolved_access),
+                )
+                with stage_path.open("rb") as stage_file:
+                    _await_storage(
+                        storage.upload(
+                            stage_key,
+                            stage_file,
+                            content_type=_PARQUET_CONTENT_TYPE,
+                        )
                     )
-                    session.conn.execute(copy_sql)
-                    copy_sqls.append(copy_sql)
-                    stage_uris.append(stage_uri)
-                else:
+                copy_sqls.append(
+                    f"stream_geojson_gzip_to_parquet({_sql_literal(str(archive_path))})"
+                )
+                stage_uris.append(stage_uri)
+            else:
+                from gispulse.persistence.duckdb_engine import DuckDBSession
+
+                with DuckDBSession() as session:
                     extract_dir = tmp_dir / "extract"
                     extract_dir.mkdir()
                     extracted = _extract_archive(
@@ -414,6 +436,7 @@ class BulkIngestRunner:
             revision=revision,
             raw_filename=raw_filename,
             stage_filename=first_stage_filename,
+            row_count=stage_rows,
             status="success",
         )
         manifest["stage_s3_uris"] = stage_uris
@@ -426,6 +449,7 @@ class BulkIngestRunner:
                 "raw_s3_uri": manifest["raw_s3_uri"],
                 "stage_s3_uris": stage_uris,
                 "copy_sql": copy_sqls[0] if len(copy_sqls) == 1 else copy_sqls,
+                **({"stage_rows": stage_rows} if stage_rows is not None else {}),
             },
         )
         return BulkIngestResult(
@@ -449,6 +473,14 @@ def _source_name(source: DataSource) -> str:
     if not name:
         raise ValueError("bulk source must expose a non-empty name")
     return _clean_segment(name, label="source")
+
+
+def _source_schema(source: DataSource, entry_id: str) -> dict[str, Any] | None:
+    schema_fn = getattr(source, "schema", None)
+    if not callable(schema_fn):
+        return None
+    schema = schema_fn(entry_id)
+    return dict(schema) if isinstance(schema, dict) and schema else None
 
 
 def _scope_departement(
@@ -605,16 +637,284 @@ def _is_spatial_gzip_download(entry: SourceEntryRef, access: AccessSpec) -> bool
     return _archive_format(entry, access) in _SPATIAL_GZIP_ARCHIVE_FORMATS
 
 
-def _download_bytes(endpoint: str) -> bytes:
+def _download_to_path(endpoint: str, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
     if endpoint.startswith(("http://", "https://")):
         import httpx
 
-        chunks: list[bytes] = []
         with httpx.stream("GET", endpoint, follow_redirects=True) as resp:
             resp.raise_for_status()
-            chunks.extend(resp.iter_bytes())
-        return b"".join(chunks)
-    return Path(endpoint).read_bytes()
+            with dest.open("wb") as out:
+                for chunk in resp.iter_bytes():
+                    if chunk:
+                        out.write(chunk)
+        return
+    shutil.copyfile(Path(endpoint), dest)
+
+
+def _decompressed_geojson_filename(raw_filename: str) -> str:
+    lower = raw_filename.lower()
+    if lower.endswith(".geojson.gz"):
+        return raw_filename[:-3]
+    if lower.endswith(".json.gz"):
+        return raw_filename[:-3]
+    return f"{raw_filename}.json"
+
+
+def _decompress_gzip_to_path(src: Path, dest: Path) -> None:
+    with gzip.open(src, "rb") as compressed, dest.open("wb") as out:
+        shutil.copyfileobj(compressed, out, length=1024 * 1024)
+
+
+def _geojson_batch_size(access: AccessSpec) -> int:
+    raw = access.params.get("geojson_batch_size")
+    if raw is None:
+        return _GEOJSON_BATCH_SIZE
+    try:
+        size = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid geojson_batch_size: {raw!r}") from None
+    if size <= 0:
+        raise ValueError(f"Invalid geojson_batch_size: {raw!r}")
+    return size
+
+
+def _geojson_to_parquet_batches(
+    geojson_path: Path,
+    parquet_path: Path,
+    *,
+    schema_hint: dict[str, Any] | None,
+    batch_size: int,
+) -> int:
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise RuntimeError(
+            "GeoJSON gzip DOWNLOAD staging requires pyarrow. "
+            "Install the parquet extra for N3 cadastre bulk ingest."
+        ) from exc
+
+    writer: pq.ParquetWriter | None = None
+    field_types = _arrow_field_types(schema_hint, pa)
+    property_columns = [name for name in field_types if name != "geometry"]
+    rows = 0
+    batch: list[dict[str, Any]] = []
+    try:
+        for feature in _iter_geojson_features(geojson_path):
+            batch.append(feature)
+            if len(batch) >= batch_size:
+                if writer is None and not property_columns:
+                    property_columns = _infer_property_columns(batch)
+                    field_types = _arrow_field_types(
+                        {name: "str" for name in property_columns} | {"geometry": "geometry"},
+                        pa,
+                    )
+                table = _features_to_arrow_table(batch, property_columns, field_types, pa)
+                writer = _write_arrow_batch(writer, parquet_path, table, pq)
+                rows += table.num_rows
+                batch = []
+        if batch:
+            if writer is None and not property_columns:
+                property_columns = _infer_property_columns(batch)
+                field_types = _arrow_field_types(
+                    {name: "str" for name in property_columns} | {"geometry": "geometry"},
+                    pa,
+                )
+            table = _features_to_arrow_table(batch, property_columns, field_types, pa)
+            writer = _write_arrow_batch(writer, parquet_path, table, pq)
+            rows += table.num_rows
+        if writer is None:
+            table = _features_to_arrow_table([], property_columns, field_types, pa)
+            writer = _write_arrow_batch(writer, parquet_path, table, pq)
+    finally:
+        if writer is not None:
+            writer.close()
+    return rows
+
+
+def _write_arrow_batch(
+    writer: Any,
+    parquet_path: Path,
+    table: Any,
+    pq: Any,
+) -> Any:
+    if writer is None:
+        parquet_path.parent.mkdir(parents=True, exist_ok=True)
+        writer = pq.ParquetWriter(
+            parquet_path,
+            table.schema,
+            compression="zstd",
+            use_dictionary=True,
+        )
+    writer.write_table(table)
+    return writer
+
+
+def _arrow_field_types(schema_hint: dict[str, Any] | None, pa: Any) -> dict[str, Any]:
+    field_types: dict[str, Any] = {}
+    for name, kind in (schema_hint or {}).items():
+        if str(kind) == "geometry":
+            field_types[name] = pa.binary()
+        elif str(kind) in {"int", "integer"}:
+            field_types[name] = pa.int64()
+        elif str(kind) in {"float", "double", "number"}:
+            field_types[name] = pa.float64()
+        elif str(kind) in {"bool", "boolean"}:
+            field_types[name] = pa.bool_()
+        elif str(kind) == "date":
+            field_types[name] = pa.date32()
+        else:
+            field_types[name] = pa.string()
+    field_types.setdefault("geometry", pa.binary())
+    return field_types
+
+
+def _infer_property_columns(batch: list[dict[str, Any]]) -> list[str]:
+    columns: list[str] = []
+    seen: set[str] = set()
+    for feature in batch:
+        props = feature.get("properties")
+        if not isinstance(props, dict):
+            continue
+        for key in props:
+            if key not in seen and key != "geometry":
+                seen.add(key)
+                columns.append(str(key))
+    return columns
+
+
+def _features_to_arrow_table(
+    features: list[dict[str, Any]],
+    property_columns: list[str],
+    field_types: dict[str, Any],
+    pa: Any,
+) -> Any:
+    arrays: dict[str, list[Any]] = {name: [] for name in property_columns}
+    geometries: list[bytes | None] = []
+    for feature in features:
+        props = feature.get("properties")
+        if not isinstance(props, dict):
+            props = {}
+        for name in property_columns:
+            arrays[name].append(_coerce_arrow_value(props.get(name), field_types[name]))
+        geometries.append(_feature_geometry_wkb(feature.get("geometry")))
+
+    fields = [(name, arrays[name]) for name in property_columns]
+    fields.append(("geometry", geometries))
+    arrow_arrays = [
+        pa.array(values, type=field_types.get(name, pa.string())) for name, values in fields
+    ]
+    schema = pa.schema(
+        [pa.field(name, field_types.get(name, pa.string())) for name, _values in fields]
+    )
+    return pa.Table.from_arrays(arrow_arrays, schema=schema)
+
+
+def _coerce_arrow_value(value: Any, arrow_type: Any) -> Any:
+    if value is None:
+        return None
+    type_name = str(arrow_type)
+    if value == "":
+        return None
+    if type_name == "int64":
+        return int(value)
+    if type_name == "double":
+        return float(value)
+    if type_name == "bool":
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "t", "yes", "y"}
+        return bool(value)
+    if type_name.startswith("date32"):
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str) and value:
+            try:
+                return date.fromisoformat(value[:10])
+            except ValueError:
+                return None
+        return None
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return str(value)
+
+
+def _feature_geometry_wkb(geometry: Any) -> bytes | None:
+    if geometry is None:
+        return None
+    from shapely import from_geojson, to_wkb
+
+    geom = from_geojson(json.dumps(geometry, separators=(",", ":")))
+    return bytes(to_wkb(geom)) if geom is not None else None
+
+
+def _iter_geojson_features(path: Path) -> Iterator[dict[str, Any]]:
+    decoder = json.JSONDecoder()
+    with path.open("r", encoding="utf-8") as fh:
+        buffer = _read_until_features_array(fh)
+        eof = False
+        while True:
+            while True:
+                stripped = buffer.lstrip(" \t\r\n,")
+                if len(stripped) != len(buffer):
+                    buffer = stripped
+                if buffer:
+                    break
+                chunk = fh.read(_GEOJSON_READ_CHUNK_BYTES)
+                if not chunk:
+                    return
+                buffer += chunk
+
+            if buffer[0] == "]":
+                return
+
+            try:
+                feature, end = decoder.raw_decode(buffer)
+            except json.JSONDecodeError:
+                if eof:
+                    raise
+                chunk = fh.read(_GEOJSON_READ_CHUNK_BYTES)
+                if chunk:
+                    buffer += chunk
+                    continue
+                eof = True
+                continue
+
+            if not isinstance(feature, dict):
+                raise ValueError("GeoJSON features array contains a non-object item")
+            yield feature
+            buffer = buffer[end:]
+
+
+def _read_until_features_array(fh: Any) -> str:
+    pattern = '"features"'
+    buffer = ""
+    while True:
+        chunk = fh.read(_GEOJSON_READ_CHUNK_BYTES)
+        if not chunk:
+            raise ValueError("GeoJSON FeatureCollection has no features array")
+        buffer += chunk
+        idx = buffer.find(pattern)
+        if idx < 0:
+            if len(buffer) > len(pattern):
+                buffer = buffer[-len(pattern) :]
+            continue
+        colon = buffer.find(":", idx + len(pattern))
+        if colon < 0:
+            continue
+        pos = colon + 1
+        while True:
+            while pos < len(buffer) and buffer[pos].isspace():
+                pos += 1
+            if pos < len(buffer):
+                break
+            chunk = fh.read(_GEOJSON_READ_CHUNK_BYTES)
+            if not chunk:
+                raise ValueError("GeoJSON features key has no array value")
+            buffer += chunk
+        if buffer[pos] != "[":
+            raise ValueError("GeoJSON features value is not an array")
+        return buffer[pos + 1 :]
 
 
 def _await_storage(coro: Any) -> Any:
