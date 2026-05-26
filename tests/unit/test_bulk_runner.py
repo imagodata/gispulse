@@ -35,12 +35,13 @@ class _FakeTableFetcher:
         mode: FetchMode = FetchMode.MATERIALIZE,
     ) -> SourceResult:
         self.calls.append((access, mode))
+        local_path = Path(access.params["local_path"])
+        local_path.write_bytes(b"code\n63000\n")
         return SourceResult(
             payload=Payload.TABLE,
             mode=mode,
-            data=f"s3://gispulse/{access.params['s3_key']}",
-            reference=f"s3://gispulse/{access.params['s3_key']}",
-            metadata={"s3_uri": f"s3://gispulse/{access.params['s3_key']}"},
+            data=str(local_path),
+            metadata={"local_path": str(local_path)},
         )
 
 
@@ -145,9 +146,12 @@ def _patch_duckdb(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return executed
 
 
-def test_runner_materializes_table_file_entry_to_stage_s3_key() -> None:
+def test_runner_materializes_table_file_entry_to_stage_s3_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from gispulse.core.bulk_runner import BulkIngestRunner
 
+    executed = _patch_duckdb(monkeypatch)
     fetcher = _FakeTableFetcher()
     registry = ProtocolRegistry()
     registry.register(fetcher)
@@ -175,9 +179,15 @@ def test_runner_materializes_table_file_entry_to_stage_s3_key() -> None:
     access, mode = fetcher.calls[0]
     assert mode is FetchMode.MATERIALIZE
     assert access.endpoint == "https://host.example.org/sis.csv"
-    assert access.params["s3_key"] == (
+    assert "s3_key" not in access.params
+    assert "s3_bucket" not in access.params
+    assert access.params["local_path"].endswith("/sis.csv")
+    assert result.access.params["s3_key"] == (
         "stage/georisques/sis-bulk/millesime=sis-2026/national/sis.parquet"
     )
+    assert len(executed) == 1
+    assert "read_csv_auto('" in executed[0]
+    assert "/vsicurl/" not in executed[0]
     assert result.manifest["raw_s3_uri"] == (
         "s3://gispulse/raw/georisques/sis-bulk/millesime=sis-2026/national/sis.csv"
     )
@@ -191,14 +201,13 @@ def test_runner_materializes_table_file_entry_to_stage_s3_key() -> None:
 def test_runner_can_prefix_and_upload_raw_table_file_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from gispulse.core import bulk_runner
     from gispulse.core.bulk_runner import BulkIngestRunner
 
+    executed = _patch_duckdb(monkeypatch)
     fetcher = _FakeTableFetcher()
     registry = ProtocolRegistry()
     registry.register(fetcher)
     storage = _FakeStorage()
-    monkeypatch.setattr(bulk_runner, "_download_bytes", lambda endpoint: b"code\n63000\n")
     source = _StaticSource(
         SourceEntryRef(
             id="sis-bulk",
@@ -230,10 +239,15 @@ def test_runner_can_prefix_and_upload_raw_table_file_entry(
 
     access, _mode = fetcher.calls[0]
     assert access.endpoint == "https://host.example.org/sis.csv"
-    assert access.params["s3_key"] == (
+    assert "s3_key" not in access.params
+    assert "s3_bucket" not in access.params
+    assert result.access.params["s3_key"] == (
         "smoke-n3/stage/georisques/sis-bulk/millesime=smoke/"
         "departement=63/sis.parquet"
     )
+    assert len(executed) == 1
+    assert "read_csv_auto('" in executed[0]
+    assert "/vsicurl/" not in executed[0]
     assert storage.uploads == [
         (
             "smoke-n3/raw/georisques/sis-bulk/millesime=smoke/"
@@ -252,9 +266,93 @@ def test_runner_can_prefix_and_upload_raw_table_file_entry(
     )
 
 
-def test_runner_injects_department_partition_and_resolves_endpoint_before_fetch() -> None:
+def test_runner_copies_table_file_from_fetched_local_file_not_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     from gispulse.core.bulk_runner import BulkIngestRunner
 
+    executed = _patch_duckdb(monkeypatch)
+    fetched_paths: list[Path] = []
+
+    class _DownloadedCsvFetcher:
+        protocol = AccessProtocol.TABLE_FILE
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[AccessSpec, FetchMode]] = []
+
+        def fetch(
+            self,
+            access: AccessSpec,
+            *,
+            extent: object | None = None,
+            mode: FetchMode = FetchMode.MATERIALIZE,
+        ) -> SourceResult:
+            self.calls.append((access, mode))
+            assert "s3_key" not in access.params
+            assert "s3_bucket" not in access.params
+            local_path = Path(access.params["local_path"])
+            local_path.write_text("code\n63000\n", encoding="utf-8")
+            fetched_paths.append(local_path)
+            return SourceResult(
+                payload=Payload.TABLE,
+                mode=mode,
+                data=str(local_path),
+                metadata={"table_format": "csv"},
+            )
+
+    fetcher = _DownloadedCsvFetcher()
+    registry = ProtocolRegistry()
+    registry.register(fetcher)
+    source = _StaticSource(
+        SourceEntryRef(
+            id="sis-bulk",
+            name="SIS bulk",
+            access=AccessSpec(
+                protocol=AccessProtocol.TABLE_FILE,
+                endpoint=(
+                    "https://mapsref.brgm.fr/wxs/georisques/georisques_dl?"
+                    "service=WFS&request=GetFeature&typeName=georisques:sis"
+                    "&outputformat=CSVTEXT"
+                ),
+                params={"table_format": "csv"},
+                format="text/csv",
+            ),
+            payload=Payload.TABLE,
+            metadata={"base_key": "sis", "data_format": "csv"},
+        ),
+        registry=registry,
+    )
+
+    result = BulkIngestRunner(
+        registry=registry,
+        bucket="gispulse",
+        temp_dir=tmp_path,
+    ).run_entry(source, "sis-bulk", revision="smoke")
+
+    assert len(fetcher.calls) == 1
+    access, mode = fetcher.calls[0]
+    assert mode is FetchMode.MATERIALIZE
+    assert access.endpoint.startswith("https://mapsref.brgm.fr/wxs/georisques/")
+    assert fetched_paths
+    assert not fetched_paths[0].exists()
+    assert len(executed) == 1
+    assert f"read_csv_auto('{fetched_paths[0]}')" in executed[0]
+    assert "/vsicurl/" not in executed[0]
+    assert "mapsref.brgm.fr" not in executed[0]
+    assert (
+        "TO 's3://gispulse/stage/georisques/sis-bulk/millesime=smoke/"
+        "national/sis.parquet' (FORMAT PARQUET)"
+    ) in executed[0]
+    assert result.fetch_result.reference == result.manifest["stage_s3_uri"]
+
+
+def test_runner_injects_department_partition_and_resolves_endpoint_before_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from gispulse.core.bulk_runner import BulkIngestRunner
+
+    _patch_duckdb(monkeypatch)
     fetcher = _FakeTableFetcher()
     registry = ProtocolRegistry()
     registry.register(fetcher)
@@ -273,7 +371,7 @@ def test_runner_injects_department_partition_and_resolves_endpoint_before_fetch(
         registry=registry,
     )
 
-    BulkIngestRunner(registry=registry).run_entry(
+    result = BulkIngestRunner(registry=registry).run_entry(
         source,
         "partitioned-table",
         departement="69",
@@ -285,7 +383,9 @@ def test_runner_injects_department_partition_and_resolves_endpoint_before_fetch(
     assert access.endpoint == "https://host.example.org/69/DU_200046977.csv"
     assert access.params["departement"] == "69"
     assert access.params["partition"] == "DU_200046977"
-    assert access.params["s3_key"] == (
+    assert "s3_key" not in access.params
+    assert "s3_bucket" not in access.params
+    assert result.access.params["s3_key"] == (
         "stage/georisques/partitioned-table/millesime=rev-1/"
         "departement=69/partition=DU_200046977/partitioned.parquet"
     )

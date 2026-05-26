@@ -226,25 +226,61 @@ class BulkIngestRunner:
             revision=revision,
             filename=raw_filename,
         )
-        if self._write_table_raw:
-            resolved_access = resolve_access_endpoint(access)
-            guard_outbound_url(resolved_access.endpoint)
-            raw_bytes = _download_bytes(resolved_access.endpoint)
-            storage = self._storage or _create_s3_storage(self._bucket)
-            _await_storage(
-                storage.upload(
-                    raw_key,
-                    raw_bytes,
-                    content_type=_content_type(entry, resolved_access),
-                )
+        stage_uri = bulk_s3_uri(key=stage_key, bucket=self._bucket)
+        resolved_access = resolve_access_endpoint(access)
+        guard_outbound_url(resolved_access.endpoint)
+
+        copy_sql: str
+        fetch_metadata: dict[str, Any]
+        with tempfile.TemporaryDirectory(dir=self._temp_dir) as tmp:
+            local_params = dict(resolved_access.params)
+            local_params.pop("s3_uri", None)
+            local_params.pop("s3_key", None)
+            local_params.pop("s3_bucket", None)
+            local_path = Path(tmp) / raw_filename
+            local_params["local_path"] = str(local_path)
+            fetch_access = replace(resolved_access, params=local_params)
+            fetched = self._registry.dispatch_fetch(
+                fetch_access,
+                mode=FetchMode.MATERIALIZE,
             )
-        params = dict(access.params)
+            table_path = _table_file_path(
+                fetched,
+                tmp_dir=Path(tmp),
+                filename=raw_filename,
+            )
+
+            if self._write_table_raw:
+                storage = self._storage or _create_s3_storage(self._bucket)
+                _await_storage(
+                    storage.upload(
+                        raw_key,
+                        table_path.read_bytes(),
+                        content_type=_content_type(entry, resolved_access),
+                    )
+                )
+
+            from gispulse.persistence.duckdb_engine import DuckDBSession
+
+            copy_sql = _copy_table_to_s3_sql(table_path, resolved_access, stage_uri)
+            with DuckDBSession() as session:
+                session.conn.execute(copy_sql)
+            fetch_metadata = dict(fetched.metadata)
+
+        params = dict(resolved_access.params)
         params["s3_key"] = stage_key
         params["s3_bucket"] = self._bucket
-        stage_access = replace(access, params=params)
-        result = self._registry.dispatch_fetch(
-            stage_access,
+        stage_access = replace(resolved_access, params=params)
+        result = SourceResult(
+            payload=entry.payload or Payload.TABLE,
             mode=FetchMode.MATERIALIZE,
+            data=stage_uri,
+            reference=stage_uri,
+            metadata={
+                **fetch_metadata,
+                "copy_sql": copy_sql,
+                "s3_uri": stage_uri,
+            },
         )
         manifest = bulk_ingest_manifest_record(
             key_prefix=self._key_prefix,
@@ -633,6 +669,59 @@ def _copy_vector_to_s3_sql(
     source = _st_read_scan(vector_path, access)
     dest = _sql_literal(stage_uri)
     return f"COPY (SELECT * FROM {source}) TO {dest} (FORMAT PARQUET)"
+
+
+def _copy_table_to_s3_sql(
+    table_path: Path,
+    access: AccessSpec,
+    stage_uri: str,
+) -> str:
+    source = _table_file_scan(table_path, access)
+    dest = _sql_literal(stage_uri)
+    return f"COPY (SELECT * FROM {source}) TO {dest} (FORMAT PARQUET)"
+
+
+def _table_file_scan(table_path: Path, access: AccessSpec) -> str:
+    if not _is_table_csv(access):
+        raise NotImplementedError(
+            "TABLE_FILE N3 materialization currently supports CSV tables only"
+        )
+    uri = str(table_path)
+    if _is_table_zip(access):
+        member = str(access.params.get("archive_member", "*.csv")).lstrip("/")
+        uri = f"/vsizip/{uri}/{member}"
+    return f"read_csv_auto({_sql_literal(uri)})"
+
+
+def _is_table_csv(access: AccessSpec) -> bool:
+    endpoint = access.endpoint.split("?", 1)[0].lower()
+    return endpoint.endswith(".csv") or access.params.get("table_format") == "csv"
+
+
+def _is_table_zip(access: AccessSpec) -> bool:
+    endpoint = access.endpoint.split("?", 1)[0].lower()
+    return endpoint.endswith(".zip") or access.params.get("archive_format") == "zip"
+
+
+def _table_file_path(
+    result: SourceResult,
+    *,
+    tmp_dir: Path,
+    filename: str,
+) -> Path:
+    data = result.data
+    if isinstance(data, Path):
+        return data
+    if isinstance(data, str):
+        return Path(data)
+    if isinstance(data, (bytes, bytearray, memoryview)):
+        path = tmp_dir / filename
+        path.write_bytes(bytes(data))
+        return path
+    raise TypeError(
+        "TABLE_FILE materialization must return a local path or bytes; "
+        f"got {type(data).__name__}"
+    )
 
 
 def _st_read_scan(vector_path: Path, access: AccessSpec) -> str:
