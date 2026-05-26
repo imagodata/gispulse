@@ -124,6 +124,106 @@ def test_materialize_local_table_file_returns_path(tmp_path: Path) -> None:
     assert result.data == str(csv_path)
 
 
+def test_materialize_can_copy_csv_directly_to_s3_uri(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executed: list[str] = []
+
+    class _FakeConn:
+        def execute(self, sql: str) -> None:
+            executed.append(sql)
+
+    class _FakeSession:
+        conn = _FakeConn()
+
+        def __enter__(self) -> "_FakeSession":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def _unexpected_stream(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("S3 materialization must not stream the raw file")
+
+    import gispulse.persistence.duckdb_engine as duckdb_engine
+    import httpx
+
+    monkeypatch.setattr(duckdb_engine, "DuckDBSession", _FakeSession)
+    monkeypatch.setattr(httpx, "stream", _unexpected_stream)
+
+    uri = "s3://gispulse/stage/georisques/sis-bulk/millesime=2025/national/sis.parquet"
+    result = TableFileFetcher().fetch(
+        _access(
+            "https://host.example.org/sis.csv",
+            table_format="csv",
+            s3_uri=uri,
+        ),
+        mode=FetchMode.MATERIALIZE,
+    )
+
+    assert result.payload is Payload.TABLE
+    assert result.mode is FetchMode.MATERIALIZE
+    assert result.data == uri
+    assert result.reference == uri
+    assert result.metadata["s3_uri"] == uri
+    assert result.metadata["table_format"] == "csv"
+    assert f"TO '{uri}' (FORMAT PARQUET)" in executed[0]
+    assert "read_csv_auto('/vsicurl/https://host.example.org/sis.csv')" in executed[0]
+
+
+def test_materialize_can_copy_zip_csv_to_s3_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executed: list[str] = []
+
+    class _FakeConn:
+        def execute(self, sql: str) -> None:
+            executed.append(sql)
+
+    class _FakeSession:
+        conn = _FakeConn()
+
+        def __enter__(self) -> "_FakeSession":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def _unexpected_stream(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("S3 materialization must not stream the raw file")
+
+    import gispulse.persistence.duckdb_engine as duckdb_engine
+    import httpx
+
+    monkeypatch.setenv("GISPULSE_S3_BUCKET", "gispulse-beta")
+    monkeypatch.setattr(duckdb_engine, "DuckDBSession", _FakeSession)
+    monkeypatch.setattr(httpx, "stream", _unexpected_stream)
+
+    result = TableFileFetcher().fetch(
+        _access(
+            "https://host.example.org/gaspar.zip",
+            archive_format="zip",
+            table_format="csv",
+            archive_member="tables/gaspar.csv",
+            s3_key="stage/georisques/gaspar-bulk/millesime=2025/national/gaspar.parquet",
+        ),
+        mode=FetchMode.MATERIALIZE,
+    )
+
+    uri = (
+        "s3://gispulse-beta/stage/georisques/gaspar-bulk/"
+        "millesime=2025/national/gaspar.parquet"
+    )
+    assert result.data == uri
+    assert result.reference == uri
+    assert result.metadata["s3_uri"] == uri
+    assert f"TO '{uri}' (FORMAT PARQUET)" in executed[0]
+    assert (
+        "read_csv_auto("
+        "'/vsizip//vsicurl/https://host.example.org/gaspar.zip/tables/gaspar.csv')"
+    ) in executed[0]
+
+
 def test_fetch_rejects_private_address() -> None:
     with pytest.raises(SSRFError):
         TableFileFetcher().fetch(_access("http://127.0.0.1/iris.csv"))
