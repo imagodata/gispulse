@@ -25,6 +25,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
+from gispulse.core.config import settings
 from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
     AccessProtocol,
@@ -43,7 +44,28 @@ log = get_logger(__name__)
 #: turns it into a ``CREATE VIEW … AS SELECT * FROM <scan>``.
 DUCKDB_SCAN_KEY = "duckdb_scan"
 
-__all__ = ["DUCKDB_SCAN_KEY", "LazyFetcher"]
+__all__ = ["DUCKDB_SCAN_KEY", "LazyFetcher", "resolve_s3_materialize_uri"]
+
+
+def resolve_s3_materialize_uri(access: AccessSpec) -> str | None:
+    """Resolve an opt-in S3 materialization destination from access params.
+
+    ``s3_uri`` is used as-is. ``s3_key`` is resolved under ``s3_bucket`` or
+    the configured ``GISPULSE_S3_BUCKET``. Absence of both keeps the fetcher
+    on its local-materialization path.
+    """
+    s3_uri = str(access.params.get("s3_uri", "") or "").strip()
+    if s3_uri:
+        return s3_uri
+
+    s3_key = str(access.params.get("s3_key", "") or "").strip().lstrip("/")
+    if not s3_key:
+        return None
+
+    bucket = str(access.params.get("s3_bucket", "") or "").strip()
+    if not bucket:
+        bucket = settings.s3.bucket
+    return f"s3://{bucket}/{s3_key}"
 
 
 class LazyFetcher(ABC):

@@ -10,14 +10,15 @@ The lazy path emits a ``read_parquet(...)`` scan; when a bounding box is
 supplied it is pushed down against the Overture ``bbox`` struct column
 (``bbox.xmin/.ymin/.xmax/.ymax``) so DuckDB prunes row groups before any
 bytes leave the lake. The materialise path runs a ``COPY ... TO`` into a
-local ``.parquet`` file.
+local ``.parquet`` file by default, or directly to S3 when ``s3_uri`` /
+``s3_key`` is supplied.
 """
 
 from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from gispulse.core.fetchers.base import LazyFetcher
+from gispulse.core.fetchers.base import LazyFetcher, resolve_s3_materialize_uri
 from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
     AccessProtocol,
@@ -59,6 +60,10 @@ class GeoParquetS3Fetcher(LazyFetcher):
       inference (default ``True``).
     * ``glob`` — scan suffix appended to the endpoint (default ``"/**"``);
       pass ``""`` when the endpoint is a single ``.parquet`` file.
+    * ``s3_uri`` / ``s3_key`` — opt-in materialisation destination. When
+      present, ``COPY`` writes directly to S3/Garage instead of a local
+      temp file. ``s3_key`` is resolved under ``settings.s3.bucket`` unless
+      ``s3_bucket`` is supplied.
     """
 
     protocol: ClassVar[AccessProtocol] = AccessProtocol.REMOTE_TABLE
@@ -95,37 +100,47 @@ class GeoParquetS3Fetcher(LazyFetcher):
         return f"(SELECT * FROM {scan} WHERE {predicate})"
 
     def _materialize(self, access: AccessSpec, extent: Any | None) -> SourceResult:
-        """Copy the (optionally bbox-clipped) lake into a local parquet file.
+        """Copy the (optionally bbox-clipped) lake into a parquet file.
 
         DuckDB / :class:`DuckDBSession` are imported lazily — ``import
-        gispulse`` must stay free of the engine. The destination path is
-        carried in ``access.params['local_path']`` (default: a temp file).
+        gispulse`` must stay free of the engine. By default the destination
+        path is carried in ``access.params['local_path']`` (or a temp file);
+        ``s3_uri`` / ``s3_key`` opt into a direct S3/Garage ``COPY``.
         """
         import tempfile
 
         from gispulse.persistence.duckdb_engine import DuckDBSession
 
-        local_path = access.params.get("local_path")
-        if not local_path:
-            handle = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
-            handle.close()
-            local_path = handle.name
+        destination = resolve_s3_materialize_uri(access)
+        is_s3_destination = destination is not None
+        if destination is None:
+            local_path = access.params.get("local_path")
+            if local_path:
+                destination = str(local_path)
+            else:
+                handle = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
+                handle.close()
+                destination = handle.name
 
         select = self._reference_scan(access, extent)
         # _reference_scan already yields either a table function or a
         # sub-query; both are valid in a FROM clause.
-        dest = str(local_path).replace("'", "''")
+        dest = str(destination).replace("'", "''")
         copy_sql = (
             f"COPY (SELECT * FROM {select}) TO '{dest}' (FORMAT PARQUET)"
         )
         # DuckDBSession.open() loads httpfs + spatial (A7).
         with DuckDBSession() as session:
             session.conn.execute(copy_sql)
-        log.info("geoparquet_materialized", path=local_path)
+        log.info("geoparquet_materialized", path=destination)
+        metadata = {"copy_sql": copy_sql}
+        if is_s3_destination:
+            metadata["s3_uri"] = destination
         return SourceResult(
             payload=self.payload,
             mode=FetchMode.MATERIALIZE,
-            data=local_path,
+            data=destination,
+            reference=destination if is_s3_destination else None,
             extent=tuple(extent) if extent else None,
-            metadata={"copy_sql": copy_sql},
+            metadata=metadata,
         )

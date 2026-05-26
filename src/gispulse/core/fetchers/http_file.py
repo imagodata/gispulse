@@ -7,15 +7,20 @@ over HTTP.
 
 The lazy path leans on DuckDB's ``/vsicurl/`` GDAL streaming so the file
 is read in place by ``ST_Read`` (spatial formats) or ``read_csv_auto``
-(point CSVs). The materialise path streams the file to local disk with
-``httpx`` — both heavy imports stay inside the methods.
+(point CSVs). The materialise path streams the raw file to local disk by
+default, or copies the parsed table directly to S3/Garage as Parquet when
+``s3_uri`` / ``s3_key`` is supplied.
 """
 
 from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from gispulse.core.fetchers.base import LazyFetcher
+from gispulse.core.fetchers.base import LazyFetcher, resolve_s3_materialize_uri
+from gispulse.core.fetchers.http_download import (
+    download_options,
+    stream_http_download,
+)
 from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
     AccessProtocol,
@@ -46,6 +51,10 @@ def _vsicurl(endpoint: str) -> str:
     return endpoint
 
 
+def _sql_literal(value: object) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
 class HttpFileFetcher(LazyFetcher):
     """Remote single-file adapter — ``/vsicurl/`` lazy scan + streamed download.
 
@@ -55,6 +64,8 @@ class HttpFileFetcher(LazyFetcher):
       ``"latitude"`` / ``"longitude"``); only consulted for ``.csv``.
     * ``layer`` — layer name for a multi-layer source (GPKG).
     * ``local_path`` — materialise destination (default: a temp file).
+    * ``s3_uri`` / ``s3_key`` — opt-in materialisation destination. When
+      present, DuckDB writes the parsed scan to S3/Garage as Parquet.
 
     The payload is declared :attr:`~gispulse.core.plugin_model.Payload.VECTOR`
     — the v1.9.0 download protocol targets vector files.
@@ -100,6 +111,15 @@ class HttpFileFetcher(LazyFetcher):
         if layer:
             st_read += f", layer='{str(layer).replace(chr(39), chr(39) * 2)}'"
         st_read += ")"
+        source_crs = str(access.params.get("source_crs", "") or "").strip()
+        target_crs = str(access.params.get("target_crs", "") or "").strip()
+        if source_crs and target_crs and source_crs != target_crs:
+            geom_expr = (
+                "ST_Transform("
+                f"geom, {_sql_literal(source_crs)}, {_sql_literal(target_crs)}, "
+                "always_xy := true)"
+            )
+            st_read = f"(SELECT * EXCLUDE (geom), {geom_expr} AS geom FROM {st_read})"
         where = self._bbox_clause(extent, "geom")
         if not where:
             return st_read
@@ -121,15 +141,35 @@ class HttpFileFetcher(LazyFetcher):
         return self._spatial_scan(access, extent)
 
     def _materialize(self, access: AccessSpec, extent: Any | None) -> SourceResult:
-        """Stream the remote file to local disk with ``httpx``.
+        """Materialise the remote file.
 
-        ``extent`` is not applied here — a raw file download is verbatim;
-        spatial clipping happens once the copy is loaded. The path is
-        returned in :attr:`SourceResult.data`.
+        By default this streams the raw file to local disk with ``httpx``.
+        When ``s3_uri`` / ``s3_key`` is set, it writes the parsed DuckDB scan
+        directly to S3/Garage as Parquet; in that path ``extent`` is pushed
+        into the scan before ``COPY``.
         """
         import tempfile
 
-        import httpx
+        s3_destination = resolve_s3_materialize_uri(access)
+        if s3_destination:
+            from gispulse.persistence.duckdb_engine import DuckDBSession
+
+            select = self._reference_scan(access, extent)
+            dest = s3_destination.replace("'", "''")
+            copy_sql = (
+                f"COPY (SELECT * FROM {select}) TO '{dest}' (FORMAT PARQUET)"
+            )
+            with DuckDBSession() as session:
+                session.conn.execute(copy_sql)
+            log.info("http_file_materialized", path=s3_destination)
+            return SourceResult(
+                payload=self.payload,
+                mode=FetchMode.MATERIALIZE,
+                data=s3_destination,
+                reference=s3_destination,
+                extent=tuple(extent) if extent else None,
+                metadata={"copy_sql": copy_sql, "s3_uri": s3_destination},
+            )
 
         local_path = access.params.get("local_path")
         if not local_path:
@@ -138,11 +178,11 @@ class HttpFileFetcher(LazyFetcher):
             handle.close()
             local_path = handle.name
 
-        with httpx.stream("GET", access.endpoint, follow_redirects=True) as resp:
-            resp.raise_for_status()
-            with open(local_path, "wb") as fh:
-                for chunk in resp.iter_bytes():
-                    fh.write(chunk)
+        stream_http_download(
+            access.endpoint,
+            local_path,
+            **download_options(access.params),
+        )
         log.info("http_file_materialized", path=local_path)
         return SourceResult(
             payload=self.payload,

@@ -64,6 +64,19 @@ _WFS_CAPABILITIES = (
 )
 _REVISION_TIMEOUT_S = 8.0
 
+_CNIG_DOWNLOAD_BY_PARTITION = (
+    "https://www.geoportail-urbanisme.gouv.fr/api/document/"
+    "download-by-partition/{partition}"
+)
+_GPU_DOCUMENTS_DEFAULT_PARTITION = "DU_200046977"
+_GPU_DOCUMENTS_DEFAULT_DEPARTEMENT = "69"
+_GPU_DOCUMENTS_ARCHIVE_FAMILIES = (
+    "pack_plu1",
+    "pack_plu2",
+    "pack_plui",
+    "pack_cc",
+)
+
 
 # Entry-id → (display label, WFS typename) — every WFS feature type
 # this pilot exposes. Names mirror the layer naming on the Géoportail
@@ -112,6 +125,38 @@ _ENTRIES: dict[str, tuple[str, str]] = {
 }
 
 
+def gpu_du_partition(code: str) -> str:
+    """Return the CNIG/GPU DU partition for an INSEE or SIREN code."""
+    cleaned = str(code).strip().upper()
+    if not cleaned:
+        raise ValueError("GPU DU partition code cannot be empty")
+    return f"DU_{cleaned}"
+
+
+def gpu_du_partitions_for_department(
+    departement: str,
+    *,
+    codes_insee: list[str] | tuple[str, ...] = (),
+    sirens: list[tuple[str, str]] | tuple[tuple[str, str], ...] = (),
+) -> list[str]:
+    """Build DU partitions attached to one département.
+
+    Commune DU partitions are inferred from INSEE prefixes. Intercommunal
+    DU partitions need an explicit ``(departement, siren)`` attachment
+    because the SIREN itself carries no département prefix.
+    """
+    dept = str(departement).strip().upper()
+    partitions: list[str] = []
+    for code in codes_insee:
+        cleaned = str(code).strip().upper()
+        if cleaned.startswith(dept):
+            partitions.append(gpu_du_partition(cleaned))
+    for siren_dept, siren in sirens:
+        if str(siren_dept).strip().upper() == dept:
+            partitions.append(gpu_du_partition(siren))
+    return partitions
+
+
 def _probe_revision(url: str) -> str | None:
     """Return a freshness token for ``url`` via a single HTTP HEAD.
 
@@ -138,6 +183,34 @@ def _probe_revision(url: str) -> str | None:
     return None
 
 
+def _probe_redirect_revision(url: str) -> str | None:
+    """Return a cheap freshness token from a redirecting download endpoint."""
+    import httpx
+
+    try:
+        resp = httpx.head(
+            url, timeout=_REVISION_TIMEOUT_S, follow_redirects=False
+        )
+    except Exception:  # noqa: BLE001 — any transport error ⇒ unknown
+        return None
+    location = resp.headers.get("location")
+    if location:
+        return location
+    etag = resp.headers.get("etag")
+    if etag:
+        return etag.strip('"')
+    last_modified = resp.headers.get("last-modified")
+    if last_modified:
+        return last_modified
+    return None
+
+
+def _resolve_endpoint(access: AccessSpec) -> str:
+    if "{" not in access.endpoint:
+        return access.endpoint
+    return access.endpoint.format_map(access.params)
+
+
 class GpuSource(DeclarativeSource):
     """Géoportail de l'Urbanisme zones / prescriptions / infos."""
 
@@ -147,7 +220,7 @@ class GpuSource(DeclarativeSource):
     jurisdiction = "FR"
 
     def entries(self) -> list[SourceEntryRef]:
-        return [
+        refs = [
             SourceEntryRef(
                 id=entry_id,
                 name=label,
@@ -176,16 +249,52 @@ class GpuSource(DeclarativeSource):
             )
             for entry_id, (label, typename) in _ENTRIES.items()
         ]
+        refs.append(
+            SourceEntryRef(
+                id="gpu_documents_bulk_index",
+                name="Documents GPU CNIG — archives sources bulk par partition",
+                access=AccessSpec(
+                    protocol=AccessProtocol.DOWNLOAD,
+                    endpoint=_CNIG_DOWNLOAD_BY_PARTITION,
+                    params={
+                        "partition": _GPU_DOCUMENTS_DEFAULT_PARTITION,
+                        "departement": _GPU_DOCUMENTS_DEFAULT_DEPARTEMENT,
+                    },
+                    format="application/zip",
+                ),
+                revision_token=None,
+                domain=self.domain,
+                payload=self.payload,
+                jurisdiction=self.jurisdiction,
+                metadata={
+                    "provider": "IGN / DGALN",
+                    "platform": "Géoportail de l'Urbanisme",
+                    "base_key": "gpu_documents",
+                    "archive_family": _GPU_DOCUMENTS_ARCHIVE_FAMILIES,
+                    "archive_format": "zip",
+                    "format": "cnig-zip",
+                    "partition_prefix": "DU_",
+                    "partition_code_fields": ("insee", "siren"),
+                    "department_param": "departement",
+                    "code_insee_param": "code_insee",
+                    "siren_param": "siren",
+                    "join_keys": ("idurba", "insee"),
+                },
+            )
+        )
+        return refs
 
     def revision(self, entry_id: str) -> str | None:
         """Cheap freshness token for the source watcher (#187/#198).
 
-        One HTTP HEAD against the Géoplateforme WFS GetCapabilities —
-        the millésime is service-wide (the Géoportail de l'Urbanisme
-        publishes one consolidated GetCapabilities for all ``wfs_du``
-        layers), so every entry shares one probe.
+        WFS entries use one HTTP HEAD against the Géoplateforme WFS
+        GetCapabilities. The bulk download entry probes its resolved
+        ``download-by-partition`` URL and uses the dated/hash Location
+        redirect when the service exposes it.
         """
-        self._entry(entry_id)  # validate the id
+        entry = self._entry(entry_id)  # validate the id
+        if entry_id == "gpu_documents_bulk_index":
+            return _probe_redirect_revision(_resolve_endpoint(entry.access))
         return _probe_revision(_WFS_CAPABILITIES)
 
     def schema(self, entry_id: str) -> dict:
@@ -198,6 +307,16 @@ class GpuSource(DeclarativeSource):
         urban-planning document.
         """
         self._entry(entry_id)  # validates the id
+        if entry_id == "gpu_documents_bulk_index":
+            return {
+                "idurba": "str",
+                "insee": "str",
+                "siren": "str",
+                "partition": "str",
+                "typedoc": "str",
+                "datappro": "date",
+                "geometry": "geometry",
+            }
         common = {
             "gid": "int",
             "idurba": "str",      # parent document id (joins to doc-urba)

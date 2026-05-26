@@ -23,9 +23,17 @@ services:
     ports:
       - "8001:8001"
     environment:
-      GISPULSE_ENGINE: duckdb
-      GISPULSE_DSN: postgresql://gispulse:gispulse@postgis:5432/gispulse
-      GISPULSE_STORAGE: sqlite
+      GISPULSE_ENGINE: "${GISPULSE_ENGINE:-duckdb}"
+      GISPULSE_DSN: "${GISPULSE_DSN:-postgresql://gispulse:gispulse@postgis:5432/gispulse}"
+      GISPULSE_STORAGE: "${GISPULSE_STORAGE:-sqlite}"
+      GISPULSE_TIER: "${GISPULSE_TIER:-community}"
+      GISPULSE_LICENSE_KEY: "${GISPULSE_LICENSE_KEY:-}"
+      GISPULSE_LICENCE_SKIP_VERIFY: "${GISPULSE_LICENCE_SKIP_VERIFY:-false}"
+      GISPULSE_S3_ENDPOINT: "${GISPULSE_S3_ENDPOINT:-}"
+      GISPULSE_S3_BUCKET: "${GISPULSE_S3_BUCKET:-gispulse}"
+      GISPULSE_S3_ACCESS_KEY: "${GISPULSE_S3_ACCESS_KEY:-}"
+      GISPULSE_S3_SECRET_KEY: "${GISPULSE_S3_SECRET_KEY:-}"
+      GISPULSE_S3_REGION: "${GISPULSE_S3_REGION:-garage}"
       GISPULSE_CORS_ORIGINS: "https://imagodata.github.io,https://demo.gispulse.dev"
     depends_on:
       postgis:
@@ -59,6 +67,36 @@ services:
       - --reload-dir=/app/persistence
       - --reload-dir=/app/adapters
 
+  # Object storage (S3-compatible) — opt-in landing zone for raw/derived data
+  # read in-place by DuckDB (httpfs) and the GeoParquetS3Fetcher (#340).
+  # Enable with: docker compose --profile garage up -d garage
+  # Point GISPULSE_S3_* at it from .env (Docker endpoint: http://garage:3900).
+  # Generate and store Garage daemon secrets in .env first:
+  #   GARAGE_RPC_SECRET=$(openssl rand -hex 32)
+  #   GARAGE_ADMIN_TOKEN=$(openssl rand -base64 32)
+  # First-run init (once, container running):
+  #   docker compose exec garage /garage status            # note the node id
+  #   docker compose exec garage /garage layout assign -z dc1 -c 1G <node-id>
+  #   docker compose exec garage /garage layout apply --version 1
+  #   docker compose exec garage /garage bucket create gispulse
+  #   docker compose exec garage /garage key create gispulse-app
+  #   docker compose exec garage /garage bucket allow --read --write gispulse --key gispulse-app
+  # then copy the printed Key ID / Secret into your .env (GISPULSE_S3_ACCESS_KEY/SECRET_KEY).
+  garage:
+    image: dxflrs/garage:v1.0.1
+    profiles: ["garage"]
+    environment:
+      GARAGE_RPC_SECRET: "${GARAGE_RPC_SECRET:-}"
+      GARAGE_ADMIN_TOKEN: "${GARAGE_ADMIN_TOKEN:-}"
+      GARAGE_METRICS_TOKEN: "${GARAGE_METRICS_TOKEN:-}"
+    ports:
+      - "3900:3900"   # S3 API
+      - "3903:3903"   # admin API
+    volumes:
+      - ./docker/garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+
   # NB: the portal dev server lives in the sibling repository
   # imagodata/gispulse-portal. To run it locally alongside this stack,
   # clone that repo and `pnpm dev` against VITE_API_URL=http://localhost:8001.
@@ -66,6 +104,8 @@ services:
 volumes:
   pgdata:
   gispulse_data:
+  garage_meta:
+  garage_data:
 
 networks:
   default:

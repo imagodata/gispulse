@@ -56,6 +56,47 @@ def test_single_page_materializes_rows_to_jsonl(
     assert rows == [{"code_insee": "63113"}, {"code_insee": "63001"}]
 
 
+def test_s3_uri_materializes_rows_to_storage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hashlib
+
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.adapters.rest.rest_table_fetcher import RestTableFetcher
+
+    def fake_get(url: str, timeout: float) -> dict:
+        return {"data": [{"code_insee": "63113"}, {"code_insee": "63001"}]}
+
+    captured: dict[str, object] = {}
+
+    def fake_upload(s3_uri: str, body) -> None:
+        captured["s3_uri"] = s3_uri
+        captured["body"] = body.read()
+
+    monkeypatch.setattr(rest_table_fetcher, "_get_json", fake_get)
+    monkeypatch.setattr(
+        rest_table_fetcher, "_upload_jsonl_to_s3", fake_upload, raising=False
+    )
+
+    uri = "s3://gispulse/raw/georisques/radon-63113.jsonl"
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_TABLE,
+        endpoint="https://www.georisques.gouv.fr/api/v1/radon",
+        params={"s3_uri": uri},
+    )
+    result = RestTableFetcher().fetch(access)
+
+    body = b'{"code_insee":"63113"}\n{"code_insee":"63001"}\n'
+    assert result.payload is Payload.TABLE
+    assert result.mode is FetchMode.MATERIALIZE
+    assert result.data == uri
+    assert result.reference == uri
+    assert result.metadata["s3_uri"] == uri
+    assert result.metadata["row_count"] == 2
+    assert result.metadata["sha256"] == hashlib.sha256(body).hexdigest()
+    assert captured == {"s3_uri": uri, "body": body}
+
+
 def test_follows_next_url_and_accumulates_pages(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -104,7 +145,7 @@ def _chained_pages(n: int) -> dict[str, dict]:
     }
 
 
-def test_max_pages_caps_pagination(
+def test_max_pages_raises_when_pagination_would_truncate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from gispulse.adapters.rest import rest_table_fetcher
@@ -127,9 +168,8 @@ def test_max_pages_caps_pagination(
             "pagination": {"next_key": "next", "max_pages": 2},
         },
     )
-    result = RestTableFetcher().fetch(access)
-
-    assert result.metadata["page_count"] == 2
+    with pytest.raises(RuntimeError, match="REST_TABLE reached max_pages=2"):
+        RestTableFetcher().fetch(access)
     assert len(calls) == 2
 
 
@@ -397,6 +437,49 @@ def test_non_list_data_key_yields_no_rows(
     assert result.metadata["row_count"] == 0
 
 
+def test_empty_body_decode_error_is_fail_loud_even_when_configured_empty(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.adapters.rest.rest_table_fetcher import RestTableFetcher
+
+    def fake_get(url: str, timeout: float) -> dict:
+        raise json.JSONDecodeError("Expecting value", "", 0)
+
+    monkeypatch.setattr(rest_table_fetcher, "_get_json", fake_get)
+
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_TABLE,
+        endpoint="https://geo.example.org/api/v1/rga",
+        params={
+            "local_path": str(tmp_path / "out.jsonl"),
+            "pagination": {"empty_body_is_empty": True},
+        },
+    )
+    with pytest.raises(ValueError, match="REST_TABLE JSON decode failed"):
+        RestTableFetcher().fetch(access)
+
+
+def test_empty_body_decode_error_still_raises_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.adapters.rest.rest_table_fetcher import RestTableFetcher
+
+    def fake_get(url: str, timeout: float) -> dict:
+        raise json.JSONDecodeError("Expecting value", "", 0)
+
+    monkeypatch.setattr(rest_table_fetcher, "_get_json", fake_get)
+
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_TABLE,
+        endpoint="https://geo.example.org/api/v1/rga",
+        params={"local_path": str(tmp_path / "out.jsonl")},
+    )
+    with pytest.raises(ValueError, match="REST_TABLE JSON decode failed"):
+        RestTableFetcher().fetch(access)
+
+
 def test_get_json_disables_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
     import httpx
 
@@ -420,7 +503,7 @@ def test_get_json_disables_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["follow_redirects"] is False
 
 
-def test_max_total_seconds_caps_wallclock(
+def test_max_total_seconds_raises_when_pagination_would_truncate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from gispulse.adapters.rest import rest_table_fetcher
@@ -442,9 +525,8 @@ def test_max_total_seconds_caps_wallclock(
             "pagination": {"next_key": "next", "max_total_seconds": 0},
         },
     )
-    result = RestTableFetcher().fetch(access)
-
-    assert result.metadata["page_count"] == 1
+    with pytest.raises(RuntimeError, match="REST_TABLE reached max_total_seconds"):
+        RestTableFetcher().fetch(access)
 
 
 def test_package_import_registers_rest_table_in_global_protocols() -> None:
@@ -492,3 +574,87 @@ def test_rejects_malicious_next_urls(
 
     assert calls == [origin]  # the malicious next is never followed
     assert result.metadata["page_count"] == 1
+
+
+def test_empty_status_returns_empty_table(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import httpx
+
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.adapters.rest.rest_table_fetcher import RestTableFetcher
+
+    def fake_get(url: str, timeout: float) -> dict:
+        request = httpx.Request("GET", url)
+        response = httpx.Response(404, request=request)
+        raise httpx.HTTPStatusError("404", request=request, response=response)
+
+    monkeypatch.setattr(rest_table_fetcher, "_get_json", fake_get)
+
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_TABLE,
+        endpoint="https://geo.example.org/api/v1/tri_zonage",
+        params={
+            "local_path": str(tmp_path / "out.jsonl"),
+            "pagination": {"empty_statuses": [404]},
+        },
+    )
+    result = RestTableFetcher().fetch(access)
+
+    assert result.metadata["row_count"] == 0
+    assert result.metadata["page_count"] == 0
+
+
+def test_non_empty_status_still_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import httpx
+
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.adapters.rest.rest_table_fetcher import RestTableFetcher
+
+    def fake_get(url: str, timeout: float) -> dict:
+        request = httpx.Request("GET", url)
+        response = httpx.Response(500, request=request)
+        raise httpx.HTTPStatusError("500", request=request, response=response)
+
+    monkeypatch.setattr(rest_table_fetcher, "_get_json", fake_get)
+
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_TABLE,
+        endpoint="https://geo.example.org/api/v1/tri_zonage",
+        params={
+            "local_path": str(tmp_path / "out.jsonl"),
+            "pagination": {"empty_statuses": [404]},  # 500 not listed → must raise
+        },
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        RestTableFetcher().fetch(access)
+
+
+def test_body_row_source_wraps_whole_body(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.adapters.rest.rest_table_fetcher import RestTableFetcher
+
+    def fake_get(url: str, timeout: float) -> dict:
+        # Géorisques RGA 2024+ shape: a top-level object, no "data" list.
+        return {"codeExposition": "2", "exposition": "moyen"}
+
+    monkeypatch.setattr(rest_table_fetcher, "_get_json", fake_get)
+
+    out = tmp_path / "out.jsonl"
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_TABLE,
+        endpoint="https://geo.example.org/api/v1/rga",
+        params={
+            "local_path": str(out),
+            "pagination": {"row_source": "body"},
+        },
+    )
+    result = RestTableFetcher().fetch(access)
+
+    assert result.metadata["row_count"] == 1
+    rows = [json.loads(line) for line in out.read_text().splitlines()]
+    assert rows == [{"codeExposition": "2", "exposition": "moyen"}]

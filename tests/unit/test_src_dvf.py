@@ -5,13 +5,19 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import duckdb
 import pytest
 
 _PKG = Path(__file__).resolve().parents[2] / "plugins" / "gispulse-src-dvf"
 if str(_PKG) not in sys.path:
     sys.path.insert(0, str(_PKG))
 
-from gispulse_src_dvf.source import DvfSource  # noqa: E402
+from gispulse_src_dvf.source import (  # noqa: E402
+    DvfSource,
+    _DvfGeoCsvFetcher,
+    dvf_registry,
+    resolve_dvf_scan,
+)
 
 from gispulse.core.plugin_model import (  # noqa: E402
     AccessProtocol,
@@ -21,6 +27,8 @@ from gispulse.core.plugin_model import (  # noqa: E402
     SourceResult,
 )
 from gispulse.core.sources import DataSource, ProtocolRegistry  # noqa: E402
+
+pytestmark = pytest.mark.usefixtures("offline_ssrf")
 
 
 class FakeRemoteTable:
@@ -71,16 +79,129 @@ def test_catalog_search(source: DvfSource) -> None:
 # --------------------------------------------------------------------------
 
 
-def test_access_spec_targets_etalab_geo_dvf(source: DvfSource) -> None:
-    """The declared endpoint must point at the geo-dvf parquet mirror so
-    the shipped GeoParquetS3Fetcher (#256) can scan it with bbox
-    pushdown via DuckDB httpfs."""
+def test_access_spec_targets_live_etalab_geo_dvf_csv(source: DvfSource) -> None:
+    """The declared endpoint must point at the living geo-dvf CSV mirror."""
     entry = next(iter(source.catalog()))
     access = entry.access
     assert access.protocol is AccessProtocol.REMOTE_TABLE
-    assert "files.data.gouv.fr/geo-dvf" in access.endpoint
-    assert access.endpoint.endswith(".parquet")
-    assert access.format == "application/parquet"
+    assert access.endpoint == "https://files.data.gouv.fr/geo-dvf/latest/csv"
+    assert access.params["years"] == ("2021", "2022", "2023", "2024", "2025")
+    assert (
+        access.params["department_endpoint_template"]
+        == "{base}/{year}/departements/{departement}.csv.gz"
+    )
+    assert "full_endpoint_template" not in access.params
+    assert access.format == "text/csv"
+
+
+def test_reference_scan_uses_department_csv_shards_when_requested() -> None:
+    """A department hint selects the lighter geo-dvf shard before bbox filter."""
+    src = DvfSource()
+
+    result = src.fetch(
+        "mutations",
+        extent={"bbox": (3.0, 45.0, 4.0, 46.0), "departement": "63"},
+        mode=FetchMode.REFERENCE,
+    )
+
+    scan = result.metadata["duckdb_scan"]
+    assert result.payload is Payload.TABLE
+    assert "read_csv_auto(" in scan
+    assert "all_varchar=true" in scan
+    assert "/2021/departements/63.csv.gz" in scan
+    assert "/2025/departements/63.csv.gz" in scan
+    assert "/full.csv.gz" not in scan
+    assert 'try_cast(replace(cast("longitude" as varchar)' in scan
+    assert "as double) BETWEEN 3.0 AND 4.0" in scan
+    assert 'try_cast(replace(cast("latitude" as varchar)' in scan
+    assert "as double) BETWEEN 45.0 AND 46.0" in scan
+
+
+def test_reference_scan_requires_department_hint() -> None:
+    """National DVF runs fan out by department; missing dept must fail loud."""
+    src = DvfSource()
+
+    with pytest.raises(ValueError, match="DVF requires an explicit departement"):
+        src.fetch(
+            "mutations",
+            extent=(3.0, 45.0, 4.0, 46.0),
+            mode=FetchMode.REFERENCE,
+        )
+
+
+def test_reference_scan_restores_legacy_cadastral_columns() -> None:
+    """The CSV lacks raw pivot fields, so the scan recreates them."""
+    result = DvfSource().fetch(
+        "mutations",
+        extent={"departement": "63"},
+        mode=FetchMode.REFERENCE,
+    )
+    scan = result.metadata["duckdb_scan"]
+
+    assert 'substr("id_parcelle", 6, 3) AS "prefixe_section"' in scan
+    assert 'substr("id_parcelle", 9, 2) AS "section"' in scan
+    assert 'substr("id_parcelle", 11, 4) AS "numero_plan"' in scan
+
+
+def test_public_dvf_registry_dispatches_to_csv_fetcher() -> None:
+    """Consumers can explicitly bypass the global REMOTE_TABLE slot."""
+    entry = next(iter(DvfSource().catalog()))
+
+    result = dvf_registry().dispatch_fetch(
+        entry.access,
+        extent={"bbox": (3.0, 45.0, 4.0, 46.0), "departement": "63"},
+        mode=FetchMode.REFERENCE,
+    )
+    scan = result.metadata["duckdb_scan"]
+
+    assert "read_csv_auto(" in scan
+    assert "all_varchar=true" in scan
+    assert "read_parquet" not in scan
+    assert "/departements/63.csv.gz" in scan
+
+
+def test_resolve_dvf_scan_returns_csv_scan() -> None:
+    entry = next(iter(DvfSource().catalog()))
+
+    scan = resolve_dvf_scan(
+        entry,
+        extent={"bbox": (3.0, 45.0, 4.0, 46.0), "departement": "63"},
+    )
+
+    assert "read_csv_auto(" in scan
+    assert "all_varchar=true" in scan
+    assert "read_parquet" not in scan
+    assert 'try_cast(replace(cast("longitude" as varchar)' in scan
+
+
+def test_dvf_csv_scan_reads_dirty_numeric_columns_as_varchar(tmp_path: Path) -> None:
+    """Live DVF millesimes can contain non-numeric labels in numeric-looking columns."""
+    csv_path = tmp_path / "dvf-dirty.csv"
+    csv_path.write_text(
+        "\n".join(
+            (
+                "id_parcelle,surface_reelle_bati,longitude,latitude",
+                "631130000A0001,85,3.08,45.77",
+                "631130000A0002,Dépendance,3.09,45.78",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    scan = _DvfGeoCsvFetcher._read_csv_auto([str(csv_path)])
+
+    assert "all_varchar=true" in scan
+    con = duckdb.connect()
+    try:
+        rows = con.execute(f'SELECT "surface_reelle_bati" FROM {scan}').fetchall()
+        dtype = con.execute(
+            f'SELECT typeof("surface_reelle_bati") FROM {scan} LIMIT 1'
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+    assert dtype == "VARCHAR"
+    assert rows == [("85",), ("Dépendance",)]
 
 
 # --------------------------------------------------------------------------
