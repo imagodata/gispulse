@@ -188,6 +188,70 @@ def test_runner_materializes_table_file_entry_to_stage_s3_key() -> None:
     assert result.fetch_result.reference == result.manifest["stage_s3_uri"]
 
 
+def test_runner_can_prefix_and_upload_raw_table_file_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from gispulse.core import bulk_runner
+    from gispulse.core.bulk_runner import BulkIngestRunner
+
+    fetcher = _FakeTableFetcher()
+    registry = ProtocolRegistry()
+    registry.register(fetcher)
+    storage = _FakeStorage()
+    monkeypatch.setattr(bulk_runner, "_download_bytes", lambda endpoint: b"code\n63000\n")
+    source = _StaticSource(
+        SourceEntryRef(
+            id="sis-bulk",
+            name="SIS bulk",
+            access=AccessSpec(
+                protocol=AccessProtocol.TABLE_FILE,
+                endpoint="https://host.example.org/{dataset}.csv",
+                params={"dataset": "sis", "table_format": "csv"},
+                format="text/csv",
+            ),
+            payload=Payload.TABLE,
+            metadata={"base_key": "sis", "data_format": "csv"},
+        ),
+        registry=registry,
+    )
+
+    result = BulkIngestRunner(
+        registry=registry,
+        storage=storage,
+        bucket="gispulse",
+        key_prefix="smoke-n3/",
+        write_table_raw=True,
+    ).run_entry(
+        source,
+        "sis-bulk",
+        departement="63",
+        revision="smoke",
+    )
+
+    access, _mode = fetcher.calls[0]
+    assert access.endpoint == "https://host.example.org/sis.csv"
+    assert access.params["s3_key"] == (
+        "smoke-n3/stage/georisques/sis-bulk/millesime=smoke/"
+        "departement=63/sis.parquet"
+    )
+    assert storage.uploads == [
+        (
+            "smoke-n3/raw/georisques/sis-bulk/millesime=smoke/"
+            "departement=63/sis.csv",
+            b"code\n63000\n",
+            "text/csv",
+        )
+    ]
+    assert result.manifest["raw_s3_uri"] == (
+        "s3://gispulse/smoke-n3/raw/georisques/sis-bulk/millesime=smoke/"
+        "departement=63/sis.csv"
+    )
+    assert result.manifest["stage_s3_uri"] == (
+        "s3://gispulse/smoke-n3/stage/georisques/sis-bulk/millesime=smoke/"
+        "departement=63/sis.parquet"
+    )
+
+
 def test_runner_injects_department_partition_and_resolves_endpoint_before_fetch() -> None:
     from gispulse.core.bulk_runner import BulkIngestRunner
 

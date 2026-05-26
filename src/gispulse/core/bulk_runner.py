@@ -64,6 +64,8 @@ class BulkIngestRunner:
         registry: ProtocolRegistry | None = None,
         storage: DatasetStorage | None = None,
         bucket: str | None = None,
+        key_prefix: str | None = None,
+        write_table_raw: bool = False,
         temp_dir: str | Path | None = None,
     ) -> None:
         if registry is None:
@@ -72,6 +74,8 @@ class BulkIngestRunner:
         self._registry = registry
         self._storage = storage
         self._bucket = bucket or settings.s3.bucket
+        self._key_prefix = key_prefix
+        self._write_table_raw = write_table_raw
         self._temp_dir = Path(temp_dir) if temp_dir is not None else None
 
     def run_registered(
@@ -203,6 +207,7 @@ class BulkIngestRunner:
         stage_filename = _stage_filename(entry)
         raw_filename = _raw_filename(entry, access)
         stage_key = bulk_s3_key(
+            key_prefix=self._key_prefix,
             kind=BULK_STAGE_PREFIX,
             source=source_name,
             entry=entry.id,
@@ -211,6 +216,28 @@ class BulkIngestRunner:
             revision=revision,
             filename=stage_filename,
         )
+        raw_key = bulk_s3_key(
+            key_prefix=self._key_prefix,
+            kind=BULK_RAW_PREFIX,
+            source=source_name,
+            entry=entry.id,
+            departement=departement,
+            partition=partition,
+            revision=revision,
+            filename=raw_filename,
+        )
+        if self._write_table_raw:
+            resolved_access = resolve_access_endpoint(access)
+            guard_outbound_url(resolved_access.endpoint)
+            raw_bytes = _download_bytes(resolved_access.endpoint)
+            storage = self._storage or _create_s3_storage(self._bucket)
+            _await_storage(
+                storage.upload(
+                    raw_key,
+                    raw_bytes,
+                    content_type=_content_type(entry, resolved_access),
+                )
+            )
         params = dict(access.params)
         params["s3_key"] = stage_key
         params["s3_bucket"] = self._bucket
@@ -220,6 +247,7 @@ class BulkIngestRunner:
             mode=FetchMode.MATERIALIZE,
         )
         manifest = bulk_ingest_manifest_record(
+            key_prefix=self._key_prefix,
             bucket=self._bucket,
             source=source_name,
             entry=entry.id,
@@ -253,6 +281,7 @@ class BulkIngestRunner:
 
         raw_filename = _raw_filename(entry, resolved_access)
         raw_key = bulk_s3_key(
+            key_prefix=self._key_prefix,
             kind=BULK_RAW_PREFIX,
             source=source_name,
             entry=entry.id,
@@ -296,6 +325,7 @@ class BulkIngestRunner:
                         force_vector_stem=len(vector_paths) > 1,
                     )
                     stage_key = bulk_s3_key(
+                        key_prefix=self._key_prefix,
                         kind=BULK_STAGE_PREFIX,
                         source=source_name,
                         entry=entry.id,
@@ -316,6 +346,7 @@ class BulkIngestRunner:
 
         first_stage_filename = _filename_from_s3_uri(stage_uris[0])
         manifest = bulk_ingest_manifest_record(
+            key_prefix=self._key_prefix,
             bucket=self._bucket,
             source=source_name,
             entry=entry.id,

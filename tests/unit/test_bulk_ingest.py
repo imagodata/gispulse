@@ -47,6 +47,23 @@ def test_bulk_s3_key_normalizes_department_codes() -> None:
     )
 
 
+def test_bulk_s3_key_applies_isolation_prefix() -> None:
+    key = bulk_s3_key(
+        key_prefix="smoke-n3/",
+        kind=BULK_STAGE_PREFIX,
+        source="georisques",
+        entry="sis-bulk",
+        departement="63",
+        revision="smoke",
+        filename="sis.parquet",
+    )
+
+    assert key == (
+        "smoke-n3/stage/georisques/sis-bulk/millesime=smoke/"
+        "departement=63/sis.parquet"
+    )
+
+
 @pytest.mark.parametrize("unsafe", ["../69", "69/70", "", "."])
 def test_bulk_s3_key_rejects_unsafe_path_segments(unsafe: str) -> None:
     with pytest.raises(ValueError):
@@ -57,6 +74,20 @@ def test_bulk_s3_key_rejects_unsafe_path_segments(unsafe: str) -> None:
             departement="69",
             revision="2026",
             filename="gaspar.parquet",
+        )
+
+
+@pytest.mark.parametrize("unsafe", ["../smoke", "smoke//n3", "/../smoke"])
+def test_bulk_s3_key_rejects_unsafe_prefixes(unsafe: str) -> None:
+    with pytest.raises(ValueError):
+        bulk_s3_key(
+            key_prefix=unsafe,
+            kind=BULK_STAGE_PREFIX,
+            source="georisques",
+            entry="sis-bulk",
+            departement="63",
+            revision="smoke",
+            filename="sis.parquet",
         )
 
 
