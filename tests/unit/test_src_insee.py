@@ -21,6 +21,8 @@ from gispulse.core.plugin_model import (  # noqa: E402
 )
 from gispulse.core.sources import DataSource, ProtocolRegistry  # noqa: E402
 
+pytestmark = pytest.mark.usefixtures("offline_ssrf")
+
 
 _SOCIODEMO_ENTRY_IDS = {
     "iris_population_2022",
@@ -208,6 +210,26 @@ def test_iris_sociodemo_entries_are_table_files(source) -> None:
         )
         assert entry.access.params["archive_format"] == "zip"
         assert entry.access.params["table_format"] == "csv"
+        assert entry.access.params["archive_member"]
+        assert "*" not in entry.access.params["archive_member"]
+
+
+def test_iris_sociodemo_entries_pin_data_csv_archive_members(source) -> None:
+    members = {
+        entry.id: entry.access.params["archive_member"]
+        for entry in source.catalog()
+        if entry.id in _SOCIODEMO_ENTRY_IDS
+    }
+
+    assert members == {
+        "iris_population_2022": "base-ic-evol-struct-pop-2022.CSV",
+        "iris_logement_2022": "base-ic-logement-2022.CSV",
+        "iris_menages_2022": "base-ic-couples-familles-menages-2022.CSV",
+        "iris_activite_2022": "base-ic-activite-residents-2022.CSV",
+        "iris_diplomes_2022": "base-ic-diplomes-formation-2022.CSV",
+        "iris_filosofi_revenus_declares_2021": "BASE_TD_FILO_IRIS_2021_DEC.csv",
+        "iris_filosofi_revenus_disponibles_2021": "BASE_TD_FILO_IRIS_2021_DISP.csv",
+    }
 
 
 def test_iris_sociodemo_entries_keep_official_download_urls(source) -> None:
@@ -244,11 +266,19 @@ def test_iris_bulk_declares_geoplateforme_department_download(source) -> None:
         "IRIS-GE_3-0__GPKG_LAMB93_{zone}_2026-01-01/"
         "IRIS-GE_3-0__GPKG_LAMB93_{zone}_2026-01-01.7z"
     )
-    assert access.params == {"zone": "D075", "layer": "iris_ge"}
+    assert access.params == {
+        "zone": "D075",
+        "layer": "iris_ge",
+        "source_crs": "EPSG:2154",
+        "target_crs": "EPSG:4326",
+    }
     assert access.format == "application/x-7z-compressed"
     assert entry.payload is Payload.VECTOR
     assert entry.metadata["resource"] == "IRIS-GE"
     assert entry.metadata["format"] == "GPKG"
+    assert entry.metadata["source_projection"] == "LAMB93"
+    assert entry.metadata["source_crs"] == "EPSG:2154"
+    assert entry.metadata["projection"] == "EPSG:4326"
     assert entry.metadata["zone_format"] == "D{code_departement:0>3}"
 
 

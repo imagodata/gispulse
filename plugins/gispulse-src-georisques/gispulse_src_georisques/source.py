@@ -70,7 +70,7 @@ _ENTRIES: dict[str, dict[str, Any]] = {
         "scope": "point",
         "static_query": {},
         # 2024+ API answers a top-level object, not {"data": [...]}.
-        "pagination": {"row_source": "body", "empty_body_is_empty": True},
+        "pagination": {"row_source": "body"},
     },
     "tri-zonage": {
         "label": "Territoire à risque important d'inondation (point)",
@@ -159,7 +159,11 @@ _BULK_ENTRIES: dict[str, dict[str, Any]] = {
         "join_keys": ("code_insee",),
         "echelle": "nationale",
         "department_param": None,
-        "params": {"archive_format": "zip", "table_format": "csv"},
+        "params": {
+            "archive_format": "zip",
+            "table_format": "csv",
+            "archive_member": "risq_gaspar.csv",
+        },
     },
 }
 

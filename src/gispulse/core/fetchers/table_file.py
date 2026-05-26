@@ -11,6 +11,10 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from gispulse.core.fetchers.base import LazyFetcher
+from gispulse.core.fetchers.http_download import (
+    download_options,
+    stream_http_download,
+)
 from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
     AccessProtocol,
@@ -63,15 +67,24 @@ class TableFileFetcher(LazyFetcher):
     def _table_uri(access: AccessSpec) -> str:
         uri = _vsicurl(access.endpoint).replace("'", "''")
         if TableFileFetcher._is_zip(access):
-            member = str(access.params.get("archive_member", "*.csv")).lstrip("/")
+            raw_member = access.params.get("archive_member")
+            if not raw_member:
+                raise ValueError(
+                    "TABLE_FILE zip archives require access.params.archive_member"
+                )
+            member = str(raw_member).lstrip("/")
+            if not member or "*" in member:
+                raise ValueError(
+                    "TABLE_FILE zip archive_member must name one concrete member"
+                )
             return f"/vsizip/{uri}/{member}"
         return uri
 
     def _reference_scan(self, access: AccessSpec, extent: Any | None) -> str:
         """Lazy scan for CSV tables.
 
-        ZIP archives use GDAL's ``/vsizip/`` virtual path and default to all
-        CSV members. Callers can narrow the member path via ``archive_member``.
+        ZIP archives use GDAL's ``/vsizip/`` virtual path and require
+        ``archive_member`` so multiple CSV members are never read silently.
         """
         if not self._is_csv(access):
             raise NotImplementedError(
@@ -92,8 +105,6 @@ class TableFileFetcher(LazyFetcher):
 
         import tempfile
 
-        import httpx
-
         local_path = access.params.get("local_path")
         if not local_path:
             suffix = "." + access.endpoint.split("?")[0].rsplit(".", 1)[-1]
@@ -101,11 +112,11 @@ class TableFileFetcher(LazyFetcher):
             handle.close()
             local_path = handle.name
 
-        with httpx.stream("GET", access.endpoint, follow_redirects=True) as resp:
-            resp.raise_for_status()
-            with open(local_path, "wb") as fh:
-                for chunk in resp.iter_bytes():
-                    fh.write(chunk)
+        stream_http_download(
+            access.endpoint,
+            local_path,
+            **download_options(access.params),
+        )
         log.info("table_file_materialized", path=local_path)
         return SourceResult(
             payload=self.payload,

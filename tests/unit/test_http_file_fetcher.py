@@ -60,6 +60,21 @@ def test_reference_scan_gpkg_with_layer() -> None:
     assert "layer='parcels'" in scan
 
 
+def test_reference_scan_spatial_file_reprojects_when_crs_declared() -> None:
+    result = HttpFileFetcher().virtual_table(
+        _access(
+            "https://host.example.org/iris.gpkg",
+            layer="iris_ge",
+            source_crs="EPSG:2154",
+            target_crs="EPSG:4326",
+        )
+    )
+
+    scan = result.metadata[DUCKDB_SCAN_KEY]
+    assert "ST_Transform(geom, 'EPSG:2154', 'EPSG:4326', always_xy := true)" in scan
+    assert "AS geom" in scan
+
+
 def test_reference_scan_pushdown_bbox_for_spatial_file() -> None:
     result = HttpFileFetcher().virtual_table(
         _access("https://host.example.org/cities.geojson"),
@@ -112,6 +127,8 @@ def test_reference_scan_local_path_not_vsicurl_wrapped() -> None:
 def test_fetch_materialize_streams_file_to_disk(
     monkeypatch: pytest.MonkeyPatch, tmp_path: object
 ) -> None:
+    captured: dict[str, object] = {}
+
     class _FakeResponse:
         def raise_for_status(self) -> None:
             return None
@@ -128,6 +145,7 @@ def test_fetch_materialize_streams_file_to_disk(
 
     def _fake_stream(method: str, url: str, **kw: object) -> _FakeResponse:
         assert method == "GET"
+        captured.update(kw)
         return _FakeResponse()
 
     import httpx
@@ -141,8 +159,56 @@ def test_fetch_materialize_streams_file_to_disk(
     )
     assert result.mode is FetchMode.MATERIALIZE
     assert result.data == dest
+    assert captured["timeout"] == 120.0
+    assert captured["follow_redirects"] is True
     with open(dest, "rb") as fh:
         assert fh.read() == b"chunk-1chunk-2"
+
+
+def test_fetch_materialize_retries_transient_download_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    import httpx
+
+    calls = 0
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_bytes(self):
+            yield b"ok"
+
+        def __enter__(self) -> "_FakeResponse":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def _fake_stream(method: str, url: str, **kw: object) -> _FakeResponse:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            request = httpx.Request(method, url)
+            raise httpx.ReadTimeout("temporary read timeout", request=request)
+        return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "stream", _fake_stream)
+
+    dest = str(tmp_path / "out.geojson")  # type: ignore[operator]
+    result = HttpFileFetcher().fetch(
+        _access(
+            "https://host.example.org/cities.geojson",
+            local_path=dest,
+            retry_backoff=0,
+        ),
+        mode=FetchMode.MATERIALIZE,
+    )
+
+    assert result.data == dest
+    assert calls == 2
+    with open(dest, "rb") as fh:
+        assert fh.read() == b"ok"
 
 
 def test_fetch_materialize_can_copy_csv_directly_to_s3_uri(

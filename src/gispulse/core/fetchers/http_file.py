@@ -17,6 +17,10 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from gispulse.core.fetchers.base import LazyFetcher, resolve_s3_materialize_uri
+from gispulse.core.fetchers.http_download import (
+    download_options,
+    stream_http_download,
+)
 from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
     AccessProtocol,
@@ -45,6 +49,10 @@ def _vsicurl(endpoint: str) -> str:
     if endpoint.startswith(("http://", "https://")):
         return f"/vsicurl/{endpoint}"
     return endpoint
+
+
+def _sql_literal(value: object) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
 
 
 class HttpFileFetcher(LazyFetcher):
@@ -103,6 +111,15 @@ class HttpFileFetcher(LazyFetcher):
         if layer:
             st_read += f", layer='{str(layer).replace(chr(39), chr(39) * 2)}'"
         st_read += ")"
+        source_crs = str(access.params.get("source_crs", "") or "").strip()
+        target_crs = str(access.params.get("target_crs", "") or "").strip()
+        if source_crs and target_crs and source_crs != target_crs:
+            geom_expr = (
+                "ST_Transform("
+                f"geom, {_sql_literal(source_crs)}, {_sql_literal(target_crs)}, "
+                "always_xy := true)"
+            )
+            st_read = f"(SELECT * EXCLUDE (geom), {geom_expr} AS geom FROM {st_read})"
         where = self._bbox_clause(extent, "geom")
         if not where:
             return st_read
@@ -133,8 +150,6 @@ class HttpFileFetcher(LazyFetcher):
         """
         import tempfile
 
-        import httpx
-
         s3_destination = resolve_s3_materialize_uri(access)
         if s3_destination:
             from gispulse.persistence.duckdb_engine import DuckDBSession
@@ -163,11 +178,11 @@ class HttpFileFetcher(LazyFetcher):
             handle.close()
             local_path = handle.name
 
-        with httpx.stream("GET", access.endpoint, follow_redirects=True) as resp:
-            resp.raise_for_status()
-            with open(local_path, "wb") as fh:
-                for chunk in resp.iter_bytes():
-                    fh.write(chunk)
+        stream_http_download(
+            access.endpoint,
+            local_path,
+            **download_options(access.params),
+        )
         log.info("http_file_materialized", path=local_path)
         return SourceResult(
             payload=self.payload,

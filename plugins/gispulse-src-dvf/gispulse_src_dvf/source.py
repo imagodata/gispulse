@@ -58,7 +58,6 @@ _DVF_CSV_YEARS = ("2021", "2022", "2023", "2024", "2025")
 _DVF_DEPARTMENT_ENDPOINT_TEMPLATE = (
     "{base}/{year}/departements/{departement}.csv.gz"
 )
-_DVF_FULL_ENDPOINT_TEMPLATE = "{base}/{year}/full.csv.gz"
 
 _DVF_STRING_COLUMNS = (
     "id_mutation",
@@ -189,13 +188,9 @@ class _DvfGeoCsvFetcher(LazyFetcher):
         base = access.endpoint.rstrip("/")
         years = _normalise_years(access.params.get("years"))
         if departement is None:
-            template = str(
-                access.params.get(
-                    "full_endpoint_template", _DVF_FULL_ENDPOINT_TEMPLATE
-                )
-            )
-            return tuple(
-                template.format(base=base, year=year) for year in years
+            raise ValueError(
+                "DVF requires an explicit departement for national fan-out; "
+                "refusing to fall back to full.csv.gz"
             )
         template = str(
             access.params.get(
@@ -352,7 +347,6 @@ class DvfSource(DeclarativeSource):
                     "department_endpoint_template": (
                         _DVF_DEPARTMENT_ENDPOINT_TEMPLATE
                     ),
-                    "full_endpoint_template": _DVF_FULL_ENDPOINT_TEMPLATE,
                     "lat": "latitude",
                     "lon": "longitude",
                 },

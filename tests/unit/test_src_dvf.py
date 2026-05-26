@@ -28,6 +28,8 @@ from gispulse.core.plugin_model import (  # noqa: E402
 )
 from gispulse.core.sources import DataSource, ProtocolRegistry  # noqa: E402
 
+pytestmark = pytest.mark.usefixtures("offline_ssrf")
+
 
 class FakeRemoteTable:
     """Records the AccessSpec it is handed and returns a marker result."""
@@ -88,7 +90,7 @@ def test_access_spec_targets_live_etalab_geo_dvf_csv(source: DvfSource) -> None:
         access.params["department_endpoint_template"]
         == "{base}/{year}/departements/{departement}.csv.gz"
     )
-    assert access.params["full_endpoint_template"] == "{base}/{year}/full.csv.gz"
+    assert "full_endpoint_template" not in access.params
     assert access.format == "text/csv"
 
 
@@ -115,26 +117,25 @@ def test_reference_scan_uses_department_csv_shards_when_requested() -> None:
     assert "as double) BETWEEN 45.0 AND 46.0" in scan
 
 
-def test_reference_scan_falls_back_to_full_csv_without_department() -> None:
-    """Without a department hint, the scan uses full yearly CSVs plus bbox."""
+def test_reference_scan_requires_department_hint() -> None:
+    """National DVF runs fan out by department; missing dept must fail loud."""
     src = DvfSource()
 
-    result = src.fetch(
-        "mutations",
-        extent=(3.0, 45.0, 4.0, 46.0),
-        mode=FetchMode.REFERENCE,
-    )
-
-    scan = result.metadata["duckdb_scan"]
-    assert "/2021/full.csv.gz" in scan
-    assert "/2025/full.csv.gz" in scan
-    assert "/departements/" not in scan
-    assert 'try_cast(replace(cast("longitude" as varchar)' in scan
+    with pytest.raises(ValueError, match="DVF requires an explicit departement"):
+        src.fetch(
+            "mutations",
+            extent=(3.0, 45.0, 4.0, 46.0),
+            mode=FetchMode.REFERENCE,
+        )
 
 
 def test_reference_scan_restores_legacy_cadastral_columns() -> None:
     """The CSV lacks raw pivot fields, so the scan recreates them."""
-    result = DvfSource().fetch("mutations", mode=FetchMode.REFERENCE)
+    result = DvfSource().fetch(
+        "mutations",
+        extent={"departement": "63"},
+        mode=FetchMode.REFERENCE,
+    )
     scan = result.metadata["duckdb_scan"]
 
     assert 'substr("id_parcelle", 6, 3) AS "prefixe_section"' in scan

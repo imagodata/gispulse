@@ -38,20 +38,18 @@ def test_reference_scan_plain_csv_uses_duckdb_read_csv() -> None:
     )
 
 
-def test_reference_scan_zip_csv_uses_duckdb_read_csv() -> None:
-    result = TableFileFetcher().virtual_table(
-        _access(
-            "https://host.example.org/iris_csv.zip",
-            archive_format="zip",
-            table_format="csv",
+def test_reference_scan_zip_csv_requires_explicit_archive_member() -> None:
+    with pytest.raises(
+        ValueError,
+        match="TABLE_FILE zip archives require access.params.archive_member",
+    ):
+        TableFileFetcher().virtual_table(
+            _access(
+                "https://host.example.org/iris_csv.zip",
+                archive_format="zip",
+                table_format="csv",
+            )
         )
-    )
-
-    assert result.payload is Payload.TABLE
-    assert result.mode is FetchMode.REFERENCE
-    assert result.metadata[DUCKDB_SCAN_KEY] == (
-        "read_csv_auto('/vsizip//vsicurl/https://host.example.org/iris_csv.zip/*.csv')"
-    )
 
 
 def test_reference_scan_zip_csv_can_target_archive_member() -> None:
@@ -73,6 +71,8 @@ def test_reference_scan_zip_csv_can_target_archive_member() -> None:
 def test_materialize_streams_remote_table_file_to_disk(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    captured: dict[str, object] = {}
+
     class _FakeResponse:
         def raise_for_status(self) -> None:
             return None
@@ -90,6 +90,7 @@ def test_materialize_streams_remote_table_file_to_disk(
     def _fake_stream(method: str, url: str, **kw: object) -> _FakeResponse:
         assert method == "GET"
         assert url == "https://host.example.org/iris_csv.zip"
+        captured.update(kw)
         return _FakeResponse()
 
     import httpx
@@ -111,7 +112,54 @@ def test_materialize_streams_remote_table_file_to_disk(
     assert result.mode is FetchMode.MATERIALIZE
     assert result.data == str(dest)
     assert result.metadata == {"archive_format": "zip", "table_format": "csv"}
+    assert captured["timeout"] == 120.0
+    assert captured["follow_redirects"] is True
     assert dest.read_bytes() == b"IRIS;LIBIRIS\n631130101;La Gauthiere\n"
+
+
+def test_materialize_retries_transient_table_file_download(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import httpx
+
+    calls = 0
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_bytes(self):
+            yield b"ok"
+
+        def __enter__(self) -> "_FakeResponse":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def _fake_stream(method: str, url: str, **kw: object) -> _FakeResponse:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            request = httpx.Request(method, url)
+            raise httpx.ConnectError("temporary network failure", request=request)
+        return _FakeResponse()
+
+    monkeypatch.setattr(httpx, "stream", _fake_stream)
+
+    dest = tmp_path / "iris_csv.zip"
+    result = TableFileFetcher().fetch(
+        _access(
+            "https://host.example.org/iris_csv.zip",
+            local_path=str(dest),
+            retry_backoff=0,
+        ),
+        mode=FetchMode.MATERIALIZE,
+    )
+
+    assert result.data == str(dest)
+    assert calls == 2
+    assert dest.read_bytes() == b"ok"
 
 
 def test_materialize_local_table_file_returns_path(tmp_path: Path) -> None:

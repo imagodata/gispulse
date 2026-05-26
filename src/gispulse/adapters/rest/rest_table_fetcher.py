@@ -89,6 +89,8 @@ class PaginationSpec:
     next_key: Any | None = None
     row_source: str = _ROW_SOURCE_KEY
     empty_statuses: frozenset[Any] = field(default_factory=frozenset)
+    # Retained for old AccessSpecs but deliberately ignored: malformed JSON
+    # must fail loud, never materialize an empty table silently.
     empty_body_is_empty: bool = False
     max_pages: int = _DEFAULT_MAX_PAGES
     max_rows: int | None = None
@@ -291,10 +293,11 @@ class RestTableFetcher:
                     if exc.response.status_code in pagination.empty_statuses:
                         break  # "no data here" — leave the result empty
                     raise
-                except json.JSONDecodeError:
-                    if pagination.empty_body_is_empty:
-                        break  # empty/malformed body configured as "no data here"
-                    raise
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        "REST_TABLE JSON decode failed for "
+                        f"{url!r}; malformed bodies are not empty results"
+                    ) from exc
                 page_count += 1
                 for row in _rows_from_body(body, pagination):
                     if (
@@ -308,11 +311,22 @@ class RestTableFetcher:
                     and row_count >= pagination.max_rows
                 ):
                     break
+                next_url = _next_page_url(body, url, origin, seen, pagination)
+                if not next_url:
+                    break
                 if page_count >= pagination.max_pages:
-                    break
+                    raise RuntimeError(
+                        "REST_TABLE reached "
+                        f"max_pages={pagination.max_pages} before pagination "
+                        f"completed for {access.endpoint!r}"
+                    )
                 if deadline is not None and time.monotonic() >= deadline:
-                    break
-                url = _next_page_url(body, url, origin, seen, pagination)
+                    raise RuntimeError(
+                        "REST_TABLE reached "
+                        f"max_total_seconds={pagination.max_total_seconds} "
+                        f"before pagination completed for {access.endpoint!r}"
+                    )
+                url = next_url
 
             if s3_uri:
                 fh.seek(0)

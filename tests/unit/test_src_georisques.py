@@ -134,6 +134,7 @@ def test_table_bulk_entries_use_table_file_and_keep_georisques_metadata(
     assert by_id["gaspar-bulk"].access.params == {
         "archive_format": "zip",
         "table_format": "csv",
+        "archive_member": "risq_gaspar.csv",
     }
     assert by_id["gaspar-bulk"].payload is Payload.TABLE
     assert by_id["gaspar-bulk"].metadata["base_key"] == "gaspar"
@@ -168,9 +169,9 @@ def test_rga_and_ssp_use_body_row_source(source: GeorisquesSource) -> None:
         assert by_id[entry_id].access.params["pagination"]["row_source"] == "body"
 
 
-def test_rga_treats_empty_body_as_empty(source: GeorisquesSource) -> None:
+def test_rga_does_not_treat_decode_errors_as_empty(source: GeorisquesSource) -> None:
     by_id = {e.id: e for e in source.entries()}
-    assert by_id["rga"].access.params["pagination"]["empty_body_is_empty"] is True
+    assert "empty_body_is_empty" not in by_id["rga"].access.params["pagination"]
 
 
 def test_tri_treats_404_as_empty(source: GeorisquesSource) -> None:
