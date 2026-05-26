@@ -157,6 +157,19 @@ def test_bulk_entry_metadata_advertises_etalab(source: CadastreSource) -> None:
     assert entry.metadata["redistributor"] == "Etalab"
     assert entry.metadata["mirror"] == "cadastre.data.gouv.fr"
     assert entry.metadata["update_cadence"] == "quarterly"
+    assert entry.metadata["foncier_dbt_columns"] == (
+        "id",
+        "commune",
+        "prefixe",
+        "section",
+        "numero",
+        "contenance",
+        "geom",
+    )
+    assert entry.metadata["wfs_column_aliases"] == {
+        "idu": "id",
+        "code_insee": "commune",
+    }
 
 
 def test_fetch_bulk_resolves_departement_template() -> None:
@@ -193,6 +206,22 @@ def test_schema_per_layer(source: CadastreSource) -> None:
     b_bulk = source.schema("batiments_bulk")
     assert "id" not in b_bulk
     assert b_bulk["type"] == "str" and b_bulk["nom"] == "str"
+
+
+def test_batiments_bulk_declares_only_safe_wfs_aliases(source: CadastreSource) -> None:
+    entry = next(e for e in source.catalog() if e.id == "batiments_bulk")
+    schema = source.schema("batiments_bulk")
+
+    assert schema["type"] == "str"
+    assert schema["nature"] == "str"
+    assert "idu" not in schema
+    assert entry.metadata["wfs_column_aliases"] == {
+        "code_insee": "commune",
+        "nature": "type",
+    }
+    assert entry.metadata["wfs_missing_columns"] == {
+        "idu": "Etalab batiments bulk has no stable feature id"
+    }
 
 
 class _FakeResponse:

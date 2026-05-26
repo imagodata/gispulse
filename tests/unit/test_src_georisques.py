@@ -94,10 +94,14 @@ def test_bulk_entries_use_download_and_keep_georisques_metadata(
     by_id = {e.id: e for e in source.entries()}
 
     assert by_id["rga-bulk"].access.protocol is AccessProtocol.DOWNLOAD
+    assert by_id["rga-bulk"].name == (
+        "Retrait-gonflement des argiles 2025 (bulk, département)"
+    )
     assert by_id["rga-bulk"].access.endpoint == (
         "https://files.georisques.fr/argiles/2025/AleaRG_2025_{departement}_L93.zip"
     )
     assert by_id["rga-bulk"].access.params == {"departement": "69"}
+    assert by_id["rga-bulk"].metadata["millesime"] == "2025"
     assert by_id["rga-bulk"].metadata["base_key"] == "alearg_25"
     assert by_id["rga-bulk"].metadata["department_param"] == "codeDepartement"
     assert by_id["rga-bulk"].metadata["format"] == "zip"

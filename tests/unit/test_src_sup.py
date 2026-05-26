@@ -91,6 +91,7 @@ def test_catalog_lists_raw_layers_and_filtered_views(source: SupSource) -> None:
         "generateur-surf",
         "generateur-lin",
         "generateur-pct",
+        "acte-sup",
         "heritage-abf",
         "risk-ppr-zoning",
         "pack_sup",
@@ -129,6 +130,7 @@ def test_every_entry_targets_wfs_sup_typename(source: SupSource) -> None:
         "generateur-surf": ("wfs_sup:generateur_sup_s", None),
         "generateur-lin": ("wfs_sup:generateur_sup_l", None),
         "generateur-pct": ("wfs_sup:generateur_sup_p", None),
+        "acte-sup": ("wfs_sup:acte_sup", None),
         "heritage-abf": (
             "wfs_sup:assiette_sup_s",
             "suptype IN ('AC1','AC2','AC4')",
@@ -170,6 +172,7 @@ def test_every_entry_carries_provider_metadata(source: SupSource) -> None:
         assert entry.metadata["provider"] == "IGN / Géoportail de l'Urbanisme"
         assert entry.metadata["platform"] == "WFS SUP"
         assert entry.metadata["typename"] == entry.access.params["typename"]
+        assert entry.metadata["layer"]
 
 
 # --------------------------------------------------------------------------
@@ -269,6 +272,15 @@ def test_pack_sup_schema_exposes_cnig_join_keys(source: SupSource) -> None:
     assert schema["idsup"] == "str"
     assert schema["suptype"] == "str"
     assert schema["partition"] == "str"
+
+
+def test_acte_sup_schema_exposes_raw_wfs_sup_fields(source: SupSource) -> None:
+    schema = source.schema("acte-sup")
+
+    assert schema["gid"] == "int"
+    assert schema["idsup"] == "str"
+    assert schema["nomsuplitt"] == "str"
+    assert schema["geometry"] == "geometry"
 
 
 # --------------------------------------------------------------------------

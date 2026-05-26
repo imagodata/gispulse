@@ -81,6 +81,35 @@ _BULK_LABELS: dict[str, str] = {
     "batiments_bulk": "Bâtiments cadastraux (bulk Etalab, par département)",
 }
 
+_BULK_FONCIER_DBT_COLUMNS: dict[str, tuple[str, ...]] = {
+    "parcelles_bulk": (
+        "id",
+        "commune",
+        "prefixe",
+        "section",
+        "numero",
+        "contenance",
+        "geom",
+    ),
+    "communes_bulk": ("id", "nom", "geom"),
+    "sections_bulk": ("commune", "prefixe", "code", "geom"),
+    # gispulse-foncier currently does not consume batiments_bulk in dbt.
+    "batiments_bulk": (),
+}
+
+_BULK_WFS_COLUMN_ALIASES: dict[str, dict[str, str]] = {
+    "parcelles_bulk": {"idu": "id", "code_insee": "commune"},
+    "communes_bulk": {"code_insee": "id"},
+    "sections_bulk": {"code_insee": "commune", "section": "code"},
+    "batiments_bulk": {"code_insee": "commune", "nature": "type"},
+}
+
+_BULK_WFS_MISSING_COLUMNS: dict[str, dict[str, str]] = {
+    "batiments_bulk": {
+        "idu": "Etalab batiments bulk has no stable feature id",
+    },
+}
+
 
 def _probe_revision_head(url: str) -> str | None:
     """Return a freshness token for ``url`` via a single HTTP HEAD.
@@ -218,6 +247,9 @@ class CadastreSource(DeclarativeSource):
                 "mirror": "cadastre.data.gouv.fr",
                 "update_cadence": "quarterly",
                 "license": "Licence Ouverte 2.0",
+                "foncier_dbt_columns": _BULK_FONCIER_DBT_COLUMNS[entry_id],
+                "wfs_column_aliases": _BULK_WFS_COLUMN_ALIASES[entry_id],
+                "wfs_missing_columns": _BULK_WFS_MISSING_COLUMNS.get(entry_id, {}),
             },
         )
 
@@ -258,6 +290,7 @@ class CadastreSource(DeclarativeSource):
         if entry_id == "parcelles_bulk":
             return {
                 "id": "str", "geometry": "geometry",
+                "idu": "str", "code_insee": "str",
                 "commune": "str", "prefixe": "str", "section": "str",
                 "numero": "str", "contenance": "int", "arpente": "bool",
                 "created": "date", "updated": "date",
@@ -265,11 +298,13 @@ class CadastreSource(DeclarativeSource):
         if entry_id == "communes_bulk":
             return {
                 "id": "str", "geometry": "geometry",
+                "code_insee": "str",
                 "nom": "str", "created": "date", "updated": "date",
             }
         if entry_id == "sections_bulk":
             return {
                 "id": "str", "geometry": "geometry",
+                "code_insee": "str", "section": "str",
                 "commune": "str", "prefixe": "str", "code": "str",
                 "created": "date", "updated": "date",
             }
@@ -278,7 +313,8 @@ class CadastreSource(DeclarativeSource):
             # identity is decomposed across ``type`` / ``nom`` / ``commune``.
             return {
                 "geometry": "geometry",
-                "type": "str", "nom": "str", "commune": "str",
+                "type": "str", "nature": "str", "nom": "str", "commune": "str",
+                "code_insee": "str",
                 "created": "date", "updated": "date",
             }
         # Unreachable — ``_entry()`` above raised for unknown ids.

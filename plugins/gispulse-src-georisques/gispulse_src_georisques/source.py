@@ -94,7 +94,7 @@ _ENTRIES: dict[str, dict[str, Any]] = {
 
 _BULK_ENTRIES: dict[str, dict[str, Any]] = {
     "rga-bulk": {
-        "label": "Retrait-gonflement des argiles 2026 (bulk, département)",
+        "label": "Retrait-gonflement des argiles 2025 (bulk, département)",
         "endpoint": (
             "https://files.georisques.fr/argiles/2025/"
             "AleaRG_2025_{departement}_L93.zip"
@@ -102,6 +102,7 @@ _BULK_ENTRIES: dict[str, dict[str, Any]] = {
         "payload": Payload.VECTOR,
         "protocol": AccessProtocol.DOWNLOAD,
         "base_key": "alearg_25",
+        "millesime": "2025",
         "format": "zip",
         "archive_format": "zip",
         "data_format": "shapefile",
@@ -330,6 +331,11 @@ class GeorisquesSource(DeclarativeSource):
                 "download_service": GEORISQUES_DOWNLOAD_SERVICE,
                 "download_index_endpoint": catalog_endpoint,
                 "base_key": base_key,
+                **(
+                    {"millesime": spec["millesime"]}
+                    if "millesime" in spec
+                    else {}
+                ),
                 "format": fmt,
                 "archive_format": spec["archive_format"],
                 "data_format": spec["data_format"],

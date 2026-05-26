@@ -76,6 +76,11 @@ _ENTRIES: dict[str, tuple[str, str, str | None]] = {
         "wfs_sup:generateur_sup_p",
         None,
     ),
+    "acte-sup": (
+        "SUP — actes",
+        "wfs_sup:acte_sup",
+        None,
+    ),
     "heritage-abf": (
         "SUP — assiettes patrimoine et abords ABF",
         "wfs_sup:assiette_sup_s",
@@ -86,6 +91,19 @@ _ENTRIES: dict[str, tuple[str, str, str | None]] = {
         "wfs_sup:assiette_sup_s",
         "suptype IN ('PM1','PM1BIS','PM3')",
     ),
+}
+
+_ENTRY_LAYERS: dict[str, str] = {
+    "servitude": "servitude",
+    "assiette-surf": "assiette_sup_s",
+    "assiette-lin": "assiette_sup_l",
+    "assiette-pct": "assiette_sup_p",
+    "generateur-surf": "generateur_sup_s",
+    "generateur-lin": "generateur_sup_l",
+    "generateur-pct": "generateur_sup_p",
+    "acte-sup": "acte_sup",
+    "heritage-abf": "assiette_sup_s",
+    "risk-ppr-zoning": "assiette_sup_s",
 }
 
 
@@ -164,6 +182,7 @@ class SupSource(DeclarativeSource):
                 "provider": "IGN / Géoportail de l'Urbanisme",
                 "platform": "WFS SUP",
                 "typename": typename,
+                "layer": _ENTRY_LAYERS[entry_id],
             }
             if cql_filter:
                 params["cql_filter"] = cql_filter
