@@ -42,6 +42,7 @@ from gispulse.persistence.storage import DatasetStorage, S3Storage
 __all__ = ["BulkIngestResult", "BulkIngestRunner"]
 
 _VECTOR_SUFFIXES = (".gpkg", ".shp", ".geojson", ".json", ".fgb", ".gml")
+_SPATIAL_GZIP_ARCHIVE_FORMATS = {"geojson.gz", "json.gz"}
 
 
 @dataclass(frozen=True)
@@ -342,24 +343,12 @@ class BulkIngestRunner:
             tmp_dir = Path(tmp)
             archive_path = tmp_dir / raw_filename
             archive_path.write_bytes(raw_bytes)
-            extract_dir = tmp_dir / "extract"
-            extract_dir.mkdir()
-            extracted = _extract_archive(
-                archive_path,
-                extract_dir,
-                archive_format=_archive_format(entry, resolved_access),
-            )
-            vector_paths = _vector_members(extract_dir, extracted)
 
             from gispulse.persistence.duckdb_engine import DuckDBSession
 
             with DuckDBSession() as session:
-                for vector_path in vector_paths:
-                    stage_filename = _stage_filename(
-                        entry,
-                        vector_path=vector_path,
-                        force_vector_stem=len(vector_paths) > 1,
-                    )
+                if _is_spatial_gzip_download(entry, resolved_access):
+                    stage_filename = _stage_filename(entry)
                     stage_key = bulk_s3_key(
                         key_prefix=self._key_prefix,
                         kind=BULK_STAGE_PREFIX,
@@ -371,14 +360,48 @@ class BulkIngestRunner:
                         filename=stage_filename,
                     )
                     stage_uri = bulk_s3_uri(key=stage_key, bucket=self._bucket)
-                    copy_sql = _copy_vector_to_s3_sql(
-                        vector_path,
+                    copy_sql = _copy_gzip_vector_to_s3_sql(
+                        archive_path,
                         resolved_access,
                         stage_uri,
                     )
                     session.conn.execute(copy_sql)
                     copy_sqls.append(copy_sql)
                     stage_uris.append(stage_uri)
+                else:
+                    extract_dir = tmp_dir / "extract"
+                    extract_dir.mkdir()
+                    extracted = _extract_archive(
+                        archive_path,
+                        extract_dir,
+                        archive_format=_archive_format(entry, resolved_access),
+                    )
+                    vector_paths = _vector_members(extract_dir, extracted)
+                    for vector_path in vector_paths:
+                        stage_filename = _stage_filename(
+                            entry,
+                            vector_path=vector_path,
+                            force_vector_stem=len(vector_paths) > 1,
+                        )
+                        stage_key = bulk_s3_key(
+                            key_prefix=self._key_prefix,
+                            kind=BULK_STAGE_PREFIX,
+                            source=source_name,
+                            entry=entry.id,
+                            departement=departement,
+                            partition=partition,
+                            revision=revision,
+                            filename=stage_filename,
+                        )
+                        stage_uri = bulk_s3_uri(key=stage_key, bucket=self._bucket)
+                        copy_sql = _copy_vector_to_s3_sql(
+                            vector_path,
+                            resolved_access,
+                            stage_uri,
+                        )
+                        session.conn.execute(copy_sql)
+                        copy_sqls.append(copy_sql)
+                        stage_uris.append(stage_uri)
 
         first_stage_filename = _filename_from_s3_uri(stage_uris[0])
         manifest = bulk_ingest_manifest_record(
@@ -492,6 +515,10 @@ def _metadata_str(entry: SourceEntryRef, key: str) -> str | None:
 
 
 def _archive_format(entry: SourceEntryRef, access: AccessSpec) -> str:
+    endpoint_path = access.endpoint.split("?", 1)[0].lower()
+    for suffix in (".geojson.gz", ".json.gz"):
+        if endpoint_path.endswith(suffix):
+            return suffix.lstrip(".")
     raw = (
         access.params.get("archive_format")
         or entry.metadata.get("archive_format")
@@ -517,6 +544,10 @@ def _stage_filename(
 
 def _raw_filename(entry: SourceEntryRef, access: AccessSpec) -> str:
     if access.protocol is AccessProtocol.DOWNLOAD:
+        if _is_spatial_gzip_download(entry, access):
+            filename = _endpoint_filename(access.endpoint)
+            if filename is not None:
+                return filename
         archive_format = _archive_format(entry, access)
         return f"archive.{_safe_stem(archive_format)}"
 
@@ -555,7 +586,23 @@ def _content_type(entry: SourceEntryRef, access: AccessSpec) -> str:
         return "application/zip"
     if archive_format == "7z":
         return "application/x-7z-compressed"
+    if archive_format in _SPATIAL_GZIP_ARCHIVE_FORMATS:
+        return "application/geo+json+gzip"
     return ""
+
+
+def _endpoint_filename(endpoint: str) -> str | None:
+    path = endpoint.split("?", 1)[0].rstrip("/")
+    filename = Path(path).name
+    if not filename:
+        return None
+    return _clean_segment(filename, label="filename")
+
+
+def _is_spatial_gzip_download(entry: SourceEntryRef, access: AccessSpec) -> bool:
+    if access.protocol is not AccessProtocol.DOWNLOAD:
+        return False
+    return _archive_format(entry, access) in _SPATIAL_GZIP_ARCHIVE_FORMATS
 
 
 def _download_bytes(endpoint: str) -> bytes:
@@ -671,6 +718,16 @@ def _copy_vector_to_s3_sql(
     return f"COPY (SELECT * FROM {source}) TO {dest} (FORMAT PARQUET)"
 
 
+def _copy_gzip_vector_to_s3_sql(
+    gzip_path: Path,
+    access: AccessSpec,
+    stage_uri: str,
+) -> str:
+    source = _st_read_scan(gzip_path, access, vsi_prefix="/vsigzip/")
+    dest = _sql_literal(stage_uri)
+    return f"COPY (SELECT * FROM {source}) TO {dest} (FORMAT PARQUET)"
+
+
 def _copy_table_to_s3_sql(
     table_path: Path,
     access: AccessSpec,
@@ -724,8 +781,14 @@ def _table_file_path(
     )
 
 
-def _st_read_scan(vector_path: Path, access: AccessSpec) -> str:
-    path_sql = _sql_literal(vector_path)
+def _st_read_scan(
+    vector_path: Path,
+    access: AccessSpec,
+    *,
+    vsi_prefix: str = "",
+) -> str:
+    uri = f"{vsi_prefix}{vector_path}" if vsi_prefix else str(vector_path)
+    path_sql = _sql_literal(uri)
     st_read = f"ST_Read({path_sql}"
     layer = access.params.get("layer")
     if layer:

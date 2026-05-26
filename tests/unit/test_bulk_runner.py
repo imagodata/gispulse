@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
@@ -564,3 +565,85 @@ def test_download_archive_derives_iris_zone_and_reads_gpkg_layer(
         "s3://gispulse/stage/insee/iris_bulk/millesime=2026-01-01/"
         "departement=75/iris.parquet"
     )
+
+
+def test_download_spatial_json_gz_uploads_raw_and_copies_vsigzip_to_stage(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from gispulse.core.bulk_runner import BulkIngestRunner
+
+    geojson = (
+        b'{"type":"FeatureCollection","features":[{"type":"Feature",'
+        b'"properties":{"id":"630000000A0001"},"geometry":null}]}'
+    )
+    payload = gzip.compress(geojson)
+    requested = _patch_http_stream(monkeypatch, payload)
+    executed = _patch_duckdb(monkeypatch)
+    storage = _FakeStorage()
+    source = _StaticSource(
+        SourceEntryRef(
+            id="parcelles_bulk",
+            name="Parcelles bulk",
+            access=AccessSpec(
+                protocol=AccessProtocol.DOWNLOAD,
+                endpoint=(
+                    "https://cadastre.data.gouv.fr/data/etalab-cadastre/latest/"
+                    "geojson/departements/{departement}/"
+                    "cadastre-{departement}-parcelles.json.gz"
+                ),
+                params={"departement": "75", "layer": "parcelles"},
+                format="application/geo+json+gzip",
+            ),
+            payload=Payload.VECTOR,
+            metadata={"base_key": "parcelles", "archive_format": "json.gz"},
+        ),
+        name="cadastre",
+    )
+
+    result = BulkIngestRunner(
+        storage=storage,
+        temp_dir=tmp_path,
+        key_prefix="smoke-n3/",
+    ).run_entry(
+        source,
+        "parcelles_bulk",
+        departement="63",
+        revision="cadastre-smoke",
+    )
+
+    assert requested == [
+        (
+            "GET https://cadastre.data.gouv.fr/data/etalab-cadastre/latest/"
+            "geojson/departements/63/cadastre-63-parcelles.json.gz"
+        )
+    ]
+    assert storage.uploads == [
+        (
+            "smoke-n3/raw/cadastre/parcelles_bulk/millesime=cadastre-smoke/"
+            "departement=63/cadastre-63-parcelles.json.gz",
+            payload,
+            "application/geo+json+gzip",
+        )
+    ]
+    assert len(executed) == 1
+    assert "ST_Read('/vsigzip/" in executed[0]
+    assert "cadastre-63-parcelles.json.gz'" in executed[0]
+    assert "layer='parcelles')" in executed[0]
+    assert (
+        "TO 's3://gispulse/smoke-n3/stage/cadastre/parcelles_bulk/"
+        "millesime=cadastre-smoke/departement=63/parcelles.parquet' "
+        "(FORMAT PARQUET)"
+    ) in executed[0]
+    assert result.manifest["raw_s3_uri"] == (
+        "s3://gispulse/smoke-n3/raw/cadastre/parcelles_bulk/"
+        "millesime=cadastre-smoke/departement=63/"
+        "cadastre-63-parcelles.json.gz"
+    )
+    assert result.manifest["stage_s3_uri"] == (
+        "s3://gispulse/smoke-n3/stage/cadastre/parcelles_bulk/"
+        "millesime=cadastre-smoke/departement=63/parcelles.parquet"
+    )
+    assert result.fetch_result.metadata["stage_s3_uris"] == [
+        result.manifest["stage_s3_uri"]
+    ]
