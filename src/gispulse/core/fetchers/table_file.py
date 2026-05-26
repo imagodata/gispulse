@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from gispulse.core.fetchers.base import LazyFetcher
+from gispulse.core.fetchers.base import LazyFetcher, resolve_s3_materialize_uri
 from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
     AccessProtocol,
@@ -44,6 +44,8 @@ class TableFileFetcher(LazyFetcher):
     * ``archive_format`` — e.g. ``"zip"`` for a compressed CSV archive.
     * ``table_format`` — e.g. ``"csv"`` for the contained table format.
     * ``local_path`` — materialise destination (default: a temp file).
+    * ``s3_uri`` / ``s3_key`` — opt-in materialisation destination. When
+      present, DuckDB writes the parsed table scan to S3/Garage as Parquet.
     """
 
     protocol: ClassVar[AccessProtocol] = AccessProtocol.TABLE_FILE
@@ -81,7 +83,30 @@ class TableFileFetcher(LazyFetcher):
         return f"read_csv_auto('{uri}')"
 
     def _materialize(self, access: AccessSpec, extent: Any | None) -> SourceResult:
-        """Return a local table file path, downloading remote endpoints if needed."""
+        """Return a table file path, or write a parsed Parquet copy to S3."""
+        s3_destination = resolve_s3_materialize_uri(access)
+        if s3_destination:
+            from gispulse.persistence.duckdb_engine import DuckDBSession
+
+            select = self._reference_scan(access, extent)
+            dest = s3_destination.replace("'", "''")
+            copy_sql = (
+                f"COPY (SELECT * FROM {select}) TO '{dest}' (FORMAT PARQUET)"
+            )
+            with DuckDBSession() as session:
+                session.conn.execute(copy_sql)
+            log.info("table_file_materialized", path=s3_destination)
+            metadata = _metadata(access)
+            metadata.update({"copy_sql": copy_sql, "s3_uri": s3_destination})
+            return SourceResult(
+                payload=self.payload,
+                mode=FetchMode.MATERIALIZE,
+                data=s3_destination,
+                reference=s3_destination,
+                extent=tuple(extent) if extent else None,
+                metadata=metadata,
+            )
+
         if not access.endpoint.startswith(("http://", "https://")):
             return SourceResult(
                 payload=self.payload,
