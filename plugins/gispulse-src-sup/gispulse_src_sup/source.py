@@ -34,7 +34,6 @@ _CNIG_DOWNLOAD_BY_PARTITION = (
 _PACK_SUP_DEFAULT_PARTITION = "172014607_SUP_69_AC1"
 _PACK_SUP_DEFAULT_CODE_GEO = "69"
 _PACK_SUP_DEFAULT_CATEGORIE = "AC1"
-_PACK_SUP_REVISION = "gpu-cnig-sup-bulk"
 
 # Entry-id -> (display label, WFS typename, optional CQL filter).
 #
@@ -119,6 +118,34 @@ def _probe_revision(url: str) -> str | None:
     if last_modified:
         return last_modified
     return None
+
+
+def _probe_redirect_revision(url: str) -> str | None:
+    """Return Location / ETag / Last-Modified from a cheap HEAD probe."""
+    import httpx
+
+    try:
+        resp = httpx.head(
+            url, timeout=_REVISION_TIMEOUT_S, follow_redirects=False
+        )
+    except Exception:  # noqa: BLE001 - transport errors mean unknown freshness
+        return None
+    location = resp.headers.get("location")
+    if location:
+        return location
+    etag = resp.headers.get("etag")
+    if etag:
+        return etag.strip('"')
+    last_modified = resp.headers.get("last-modified")
+    if last_modified:
+        return last_modified
+    return None
+
+
+def _resolve_endpoint(access: AccessSpec) -> str:
+    if "{" not in access.endpoint:
+        return access.endpoint
+    return access.endpoint.format_map(access.params)
 
 
 class SupSource(DeclarativeSource):
@@ -213,8 +240,8 @@ class SupSource(DeclarativeSource):
         }
 
     def revision(self, entry_id: str) -> str | None:
-        """Cheap freshness token from the WFS GetCapabilities headers."""
-        self._entry(entry_id)
+        """Cheap freshness token from WFS headers or bulk redirect Location."""
+        entry = self._entry(entry_id)
         if entry_id == "pack_sup":
-            return _PACK_SUP_REVISION
+            return _probe_redirect_revision(_resolve_endpoint(entry.access))
         return _probe_revision(_WFS_CAPABILITIES)

@@ -8,8 +8,12 @@ from pathlib import Path
 import pytest
 
 _PKG = Path(__file__).resolve().parents[2] / "plugins" / "gispulse-src-gpu"
-if str(_PKG) not in sys.path:
-    sys.path.insert(0, str(_PKG))
+_PKG_PATH = str(_PKG)
+if _PKG_PATH in sys.path:
+    sys.path.remove(_PKG_PATH)
+sys.path.insert(0, _PKG_PATH)
+for _module in ("gispulse_src_gpu.source", "gispulse_src_gpu"):
+    sys.modules.pop(_module, None)
 
 from gispulse_src_gpu.source import (  # noqa: E402
     GpuSource,
@@ -327,7 +331,39 @@ def test_revision_returns_none_on_network_error(
     assert source.revision("info-surf") is None
 
 
-def test_revision_returns_static_token_for_gpu_documents_bulk(
-    source: GpuSource,
+def test_revision_probes_gpu_documents_bulk_redirect_location(
+    source: GpuSource, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert source.revision("gpu_documents_bulk_index") == "gpu-cnig-documents-bulk"
+    captured: list[str] = []
+
+    def fake_head(url, **_kw):
+        captured.append(url)
+        return _FakeResponse(
+            {
+                "location": (
+                    "https://www.geoportail-urbanisme.gouv.fr/document/"
+                    "du/2026-05-26/DU_200046977-9f13.zip"
+                )
+            }
+        )
+
+    monkeypatch.setattr("httpx.head", fake_head)
+
+    assert source.revision("gpu_documents_bulk_index") == (
+        "https://www.geoportail-urbanisme.gouv.fr/document/"
+        "du/2026-05-26/DU_200046977-9f13.zip"
+    )
+    assert captured == [
+        "https://www.geoportail-urbanisme.gouv.fr/api/document/"
+        "download-by-partition/DU_200046977"
+    ]
+
+
+def test_revision_returns_none_for_gpu_documents_bulk_without_redirect_or_headers(
+    source: GpuSource, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_head(url, **_kw):
+        return _FakeResponse({})
+
+    monkeypatch.setattr("httpx.head", fake_head)
+    assert source.revision("gpu_documents_bulk_index") is None

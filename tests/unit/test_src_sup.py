@@ -8,8 +8,12 @@ from pathlib import Path
 import pytest
 
 _PKG = Path(__file__).resolve().parents[2] / "plugins" / "gispulse-src-sup"
-if str(_PKG) not in sys.path:
-    sys.path.insert(0, str(_PKG))
+_PKG_PATH = str(_PKG)
+if _PKG_PATH in sys.path:
+    sys.path.remove(_PKG_PATH)
+sys.path.insert(0, _PKG_PATH)
+for _module in ("gispulse_src_sup.source", "gispulse_src_sup"):
+    sys.modules.pop(_module, None)
 
 from gispulse_src_sup import register  # noqa: E402
 from gispulse_src_sup.source import SupSource, sup_partition  # noqa: E402
@@ -315,8 +319,42 @@ def test_revision_returns_none_on_network_error(
     assert source.revision("risk-ppr-zoning") is None
 
 
-def test_revision_returns_static_token_for_pack_sup(source: SupSource) -> None:
-    assert source.revision("pack_sup") == "gpu-cnig-sup-bulk"
+def test_revision_probes_pack_sup_redirect_location(
+    source: SupSource, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[str] = []
+
+    def fake_head(url, **_kw):
+        captured.append(url)
+        return _FakeResponse(
+            {
+                "location": (
+                    "https://www.geoportail-urbanisme.gouv.fr/document/"
+                    "sup/2026-05-26/172014607_SUP_69_AC1-a4d8.zip"
+                )
+            }
+        )
+
+    monkeypatch.setattr("httpx.head", fake_head)
+
+    assert source.revision("pack_sup") == (
+        "https://www.geoportail-urbanisme.gouv.fr/document/"
+        "sup/2026-05-26/172014607_SUP_69_AC1-a4d8.zip"
+    )
+    assert captured == [
+        "https://www.geoportail-urbanisme.gouv.fr/api/document/"
+        "download-by-partition/172014607_SUP_69_AC1"
+    ]
+
+
+def test_revision_returns_none_for_pack_sup_without_redirect_or_headers(
+    source: SupSource, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_head(url, **_kw):
+        return _FakeResponse({})
+
+    monkeypatch.setattr("httpx.head", fake_head)
+    assert source.revision("pack_sup") is None
 
 
 # --------------------------------------------------------------------------

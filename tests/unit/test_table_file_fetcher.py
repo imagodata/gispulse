@@ -38,15 +38,36 @@ def test_reference_scan_plain_csv_uses_duckdb_read_csv() -> None:
     )
 
 
-def test_reference_scan_zip_csv_is_not_claimed_lazy() -> None:
-    with pytest.raises(NotImplementedError, match="zipped table files"):
-        TableFileFetcher().virtual_table(
-            _access(
-                "https://host.example.org/iris_csv.zip",
-                archive_format="zip",
-                table_format="csv",
-            )
+def test_reference_scan_zip_csv_uses_duckdb_read_csv() -> None:
+    result = TableFileFetcher().virtual_table(
+        _access(
+            "https://host.example.org/iris_csv.zip",
+            archive_format="zip",
+            table_format="csv",
         )
+    )
+
+    assert result.payload is Payload.TABLE
+    assert result.mode is FetchMode.REFERENCE
+    assert result.metadata[DUCKDB_SCAN_KEY] == (
+        "read_csv_auto('/vsizip//vsicurl/https://host.example.org/iris_csv.zip/*.csv')"
+    )
+
+
+def test_reference_scan_zip_csv_can_target_archive_member() -> None:
+    result = TableFileFetcher().virtual_table(
+        _access(
+            "https://host.example.org/iris_csv.zip",
+            archive_format="zip",
+            table_format="csv",
+            archive_member="tables/iris.csv",
+        )
+    )
+
+    assert result.metadata[DUCKDB_SCAN_KEY] == (
+        "read_csv_auto("
+        "'/vsizip//vsicurl/https://host.example.org/iris_csv.zip/tables/iris.csv')"
+    )
 
 
 def test_materialize_streams_remote_table_file_to_disk(

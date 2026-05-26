@@ -1,7 +1,8 @@
 """Géorisques DataSource — natural/technological risk signals (#196).
 
 A :class:`DeclarativeSource` over :attr:`AccessProtocol.REST_TABLE` for the
-runtime APIs plus :attr:`AccessProtocol.DOWNLOAD` for confirmed bulk datasets.
+runtime APIs plus :attr:`AccessProtocol.DOWNLOAD` / ``TABLE_FILE`` for
+confirmed bulk datasets.
 Each API endpoint remains one declarative entry; the endpoint and its static
 query (page size, radius) are fixed here, but the **runtime spatial key** —
 ``code_insee`` for the communal endpoints, ``latlon`` for the point endpoints
@@ -32,6 +33,7 @@ GEORISQUES_BASE_URL = "https://www.georisques.gouv.fr"
 GEORISQUES_DOWNLOAD_SERVICE = (
     "https://www.georisques.gouv.fr/webappReport/ws/telechargements"
 )
+_REVISION_TIMEOUT_S = 8.0
 
 # entry_id -> declarative spec. ``query_key`` names the runtime spatial
 # parameter; ``scope`` is the granularity it filters at. ``static_query``
@@ -98,14 +100,16 @@ _BULK_ENTRIES: dict[str, dict[str, Any]] = {
             "AleaRG_2025_{departement}_L93.zip"
         ),
         "payload": Payload.VECTOR,
+        "protocol": AccessProtocol.DOWNLOAD,
         "base_key": "alearg_25",
         "format": "zip",
         "archive_format": "zip",
         "data_format": "shapefile",
+        "join_strategy": "spatial",
+        "geometry_key": "geometry",
         "echelle": "departementale",
         "department_param": "codeDepartement",
         "params": {"departement": "69"},
-        "revision": "georisques-alearg_25-zip",
     },
     "tri-bulk": {
         "label": "TRI rapportage 2020 (bulk, département)",
@@ -114,14 +118,16 @@ _BULK_ENTRIES: dict[str, dict[str, Any]] = {
             "tri_2020_sig_di_{departement}.zip"
         ),
         "payload": Payload.VECTOR,
+        "protocol": AccessProtocol.DOWNLOAD,
         "base_key": "tri_2020",
         "format": "zip",
         "archive_format": "zip",
         "data_format": "shapefile",
+        "join_strategy": "spatial",
+        "geometry_key": "geometry",
         "echelle": "departementale",
         "department_param": "codeDepartement",
         "params": {"departement": "69"},
-        "revision": "georisques-tri_2020-zip",
     },
     "sis-bulk": {
         "label": "Secteurs d'informations sur les sols (bulk CSV)",
@@ -131,27 +137,29 @@ _BULK_ENTRIES: dict[str, dict[str, Any]] = {
             "&typename=classification&outputformat=CSVTEXT"
         ),
         "payload": Payload.TABLE,
+        "protocol": AccessProtocol.TABLE_FILE,
         "base_key": "sis",
         "format": "csv",
         "archive_format": None,
         "data_format": "csv",
+        "join_keys": ("code_insee",),
         "echelle": "nationale",
         "department_param": None,
-        "params": {},
-        "revision": "georisques-sis-csv",
+        "params": {"table_format": "csv"},
     },
     "gaspar-bulk": {
         "label": "Procédures administratives GASPAR (bulk ZIP)",
         "endpoint": "https://files.georisques.fr/GASPAR/gaspar.zip",
         "payload": Payload.TABLE,
+        "protocol": AccessProtocol.TABLE_FILE,
         "base_key": "gaspar",
         "format": "zip",
         "archive_format": "zip",
         "data_format": "csv",
+        "join_keys": ("code_insee",),
         "echelle": "nationale",
         "department_param": None,
-        "params": {},
-        "revision": "georisques-gaspar-zip",
+        "params": {"archive_format": "zip", "table_format": "csv"},
     },
 }
 
@@ -217,6 +225,32 @@ _SCHEMAS: dict[str, dict[str, str]] = {
 }
 
 
+def _resolve_endpoint(access: AccessSpec) -> str:
+    """Resolve owned ``{key}`` endpoint templates for cheap probes."""
+    if "{" not in access.endpoint:
+        return access.endpoint
+    return access.endpoint.format_map(access.params)
+
+
+def _probe_revision_head(url: str) -> str | None:
+    """Return ETag / Last-Modified from a cheap HTTP HEAD probe."""
+    import httpx
+
+    try:
+        resp = httpx.head(
+            url, timeout=_REVISION_TIMEOUT_S, follow_redirects=True
+        )
+    except Exception:  # noqa: BLE001 - unreachable source means unknown freshness
+        return None
+    etag = resp.headers.get("etag")
+    if etag:
+        return etag.strip('"')
+    last_modified = resp.headers.get("last-modified")
+    if last_modified:
+        return last_modified
+    return None
+
+
 class GeorisquesSource(DeclarativeSource):
     """Géorisques risk signals exposed as a GISPulse declarative source."""
 
@@ -277,7 +311,7 @@ class GeorisquesSource(DeclarativeSource):
             id=entry_id,
             name=spec["label"],
             access=AccessSpec(
-                protocol=AccessProtocol.DOWNLOAD,
+                protocol=spec["protocol"],
                 endpoint=spec["endpoint"],
                 params=dict(spec["params"]),
                 format="application/zip" if fmt == "zip" else "text/csv",
@@ -297,6 +331,14 @@ class GeorisquesSource(DeclarativeSource):
                 "data_format": spec["data_format"],
                 "echelle": echelle,
                 "department_param": department_param,
+                **(
+                    {"join_keys": spec["join_keys"]}
+                    if "join_keys" in spec
+                    else {
+                        "join_strategy": spec["join_strategy"],
+                        "geometry_key": spec["geometry_key"],
+                    }
+                ),
             },
         )
 
@@ -346,15 +388,14 @@ class GeorisquesSource(DeclarativeSource):
         return dict(_SCHEMAS[entry_id])
 
     def revision(self, entry_id: str) -> str | None:
-        """No cheap source-wide freshness token.
+        """Cheap freshness token when the entry exposes one.
 
-        Géorisques has no dataset-level ``last_modified`` and the data is
-        keyed on a runtime spatial parameter, so there is nothing to probe
-        without a full per-unit fetch. The guide says ``revision()`` must
-        stay cheap, so it returns ``None`` (= freshness unknown) and the
-        source watcher skips it.
+        Runtime API entries are keyed on a spatial parameter, so there is
+        nothing source-wide to probe. Bulk files expose HTTP headers, so
+        those entries use one HEAD request and return ETag / Last-Modified
+        when available.
         """
-        self._entry(entry_id)  # validates the id
+        entry = self._entry(entry_id)  # validates the id
         if entry_id in _BULK_ENTRIES:
-            return str(_BULK_ENTRIES[entry_id]["revision"])
+            return _probe_revision_head(_resolve_endpoint(entry.access))
         return None

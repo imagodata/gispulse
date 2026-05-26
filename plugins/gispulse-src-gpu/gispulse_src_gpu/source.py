@@ -68,7 +68,6 @@ _CNIG_DOWNLOAD_BY_PARTITION = (
     "https://www.geoportail-urbanisme.gouv.fr/api/document/"
     "download-by-partition/{partition}"
 )
-_GPU_DOCUMENTS_BULK_REVISION = "gpu-cnig-documents-bulk"
 _GPU_DOCUMENTS_DEFAULT_PARTITION = "DU_200046977"
 _GPU_DOCUMENTS_DEFAULT_DEPARTEMENT = "69"
 _GPU_DOCUMENTS_ARCHIVE_FAMILIES = (
@@ -184,6 +183,34 @@ def _probe_revision(url: str) -> str | None:
     return None
 
 
+def _probe_redirect_revision(url: str) -> str | None:
+    """Return a cheap freshness token from a redirecting download endpoint."""
+    import httpx
+
+    try:
+        resp = httpx.head(
+            url, timeout=_REVISION_TIMEOUT_S, follow_redirects=False
+        )
+    except Exception:  # noqa: BLE001 — any transport error ⇒ unknown
+        return None
+    location = resp.headers.get("location")
+    if location:
+        return location
+    etag = resp.headers.get("etag")
+    if etag:
+        return etag.strip('"')
+    last_modified = resp.headers.get("last-modified")
+    if last_modified:
+        return last_modified
+    return None
+
+
+def _resolve_endpoint(access: AccessSpec) -> str:
+    if "{" not in access.endpoint:
+        return access.endpoint
+    return access.endpoint.format_map(access.params)
+
+
 class GpuSource(DeclarativeSource):
     """Géoportail de l'Urbanisme zones / prescriptions / infos."""
 
@@ -260,14 +287,14 @@ class GpuSource(DeclarativeSource):
     def revision(self, entry_id: str) -> str | None:
         """Cheap freshness token for the source watcher (#187/#198).
 
-        One HTTP HEAD against the Géoplateforme WFS GetCapabilities —
-        the millésime is service-wide (the Géoportail de l'Urbanisme
-        publishes one consolidated GetCapabilities for all ``wfs_du``
-        layers), so every entry shares one probe.
+        WFS entries use one HTTP HEAD against the Géoplateforme WFS
+        GetCapabilities. The bulk download entry probes its resolved
+        ``download-by-partition`` URL and uses the dated/hash Location
+        redirect when the service exposes it.
         """
-        self._entry(entry_id)  # validate the id
+        entry = self._entry(entry_id)  # validate the id
         if entry_id == "gpu_documents_bulk_index":
-            return _GPU_DOCUMENTS_BULK_REVISION
+            return _probe_redirect_revision(_resolve_endpoint(entry.access))
         return _probe_revision(_WFS_CAPABILITIES)
 
     def schema(self, entry_id: str) -> dict:

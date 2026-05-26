@@ -1,8 +1,9 @@
 """Tabular file fetcher for ``AccessProtocol.TABLE_FILE``.
 
 This adapter is intentionally non-spatial: it materializes CSV/XLSX/ZIP table
-files as files and never invents geometries. Plain CSV files can also be exposed
-as DuckDB lazy scans with ``read_csv_auto``.
+files as files and never invents geometries. CSV files, including CSV members
+inside ZIP archives, can also be exposed as DuckDB lazy scans with
+``read_csv_auto``.
 """
 
 from __future__ import annotations
@@ -55,24 +56,28 @@ class TableFileFetcher(LazyFetcher):
 
     @staticmethod
     def _is_csv(access: AccessSpec) -> bool:
-        return access.endpoint.split("?")[0].lower().endswith(".csv")
+        endpoint = access.endpoint.split("?")[0].lower()
+        return endpoint.endswith(".csv") or access.params.get("table_format") == "csv"
+
+    @staticmethod
+    def _table_uri(access: AccessSpec) -> str:
+        uri = _vsicurl(access.endpoint).replace("'", "''")
+        if TableFileFetcher._is_zip(access):
+            member = str(access.params.get("archive_member", "*.csv")).lstrip("/")
+            return f"/vsizip/{uri}/{member}"
+        return uri
 
     def _reference_scan(self, access: AccessSpec, extent: Any | None) -> str:
-        """Lazy scan for plain CSV tables.
+        """Lazy scan for CSV tables.
 
-        Zipped INSEE CSV archives must be materialized first because DuckDB's
-        simple ``read_csv_auto`` path cannot address the intended member file
-        inside the archive without extra extraction policy.
+        ZIP archives use GDAL's ``/vsizip/`` virtual path and default to all
+        CSV members. Callers can narrow the member path via ``archive_member``.
         """
-        if self._is_zip(access):
-            raise NotImplementedError(
-                "zipped table files must be materialized before scanning"
-            )
         if not self._is_csv(access):
             raise NotImplementedError(
                 "TABLE_FILE reference mode currently supports plain CSV files only"
             )
-        uri = _vsicurl(access.endpoint).replace("'", "''")
+        uri = self._table_uri(access)
         return f"read_csv_auto('{uri}')"
 
     def _materialize(self, access: AccessSpec, extent: Any | None) -> SourceResult:
