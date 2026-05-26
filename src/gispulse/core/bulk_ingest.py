@@ -41,6 +41,18 @@ def _clean_segment(value: object, *, label: str) -> str:
     return segment
 
 
+def _prefix_segments(key_prefix: object | None) -> tuple[str, ...]:
+    if key_prefix is None:
+        return ()
+    prefix = str(key_prefix).strip().replace("\\", "/")
+    if not prefix:
+        return ()
+    clean = prefix.strip("/")
+    if not clean or "//" in clean:
+        raise ValueError(f"Invalid key_prefix path: {key_prefix!r}")
+    return tuple(_clean_segment(part, label="key_prefix") for part in clean.split("/"))
+
+
 def normalize_bulk_department(departement: object | None) -> str:
     """Return the canonical department scope used in bulk S3 keys."""
     if departement is None:
@@ -76,6 +88,7 @@ def _scope_value(*, departement: object | None, partition: object | None) -> str
 
 def bulk_s3_key(
     *,
+    key_prefix: object | None = None,
     kind: BulkS3Kind,
     source: object,
     entry: object,
@@ -104,6 +117,7 @@ def bulk_s3_key(
     clean_filename = _clean_segment(filename, label="filename")
 
     segments = [
+        *_prefix_segments(key_prefix),
         clean_kind,
         clean_source,
         clean_entry,
@@ -125,6 +139,7 @@ def bulk_s3_uri(*, key: str, bucket: object | None = None) -> str:
 
 def bulk_ingest_manifest_record(
     *,
+    key_prefix: object | None = None,
     source: object,
     entry: object,
     departement: object | None,
@@ -143,6 +158,7 @@ def bulk_ingest_manifest_record(
     clean_status = _clean_segment(status, label="status")
 
     raw_key = bulk_s3_key(
+        key_prefix=key_prefix,
         kind=BULK_RAW_PREFIX,
         source=clean_source,
         entry=clean_entry,
@@ -152,6 +168,7 @@ def bulk_ingest_manifest_record(
         filename=raw_filename,
     )
     stage_key = bulk_s3_key(
+        key_prefix=key_prefix,
         kind=BULK_STAGE_PREFIX,
         source=clean_source,
         entry=clean_entry,
