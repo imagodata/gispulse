@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gispulse-src-dpe"
+version = "0.1.0"
+description = "French DPE data source for GISPulse (ADEME — diagnostics de performance énergétique)"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "GISPulse", email = "dev@gispulse.io" }]
+dependencies = [
+    "gispulse>=2.0.0,<3.0.0",
+]
+
+# Registered as a data source — discovered by core.plugin_hub.PluginHub.
+[project.entry-points."gispulse.data_sources"]
+dpe = "gispulse_src_dpe:register"
+
+[tool.gispulse.plugin]
+kind = "source"
+protocol = ">=1.0,<2.0"
+domain = "statistique"
+jurisdiction = "FR"
+display_name = "DPE — Diagnostics de Performance Énergétique logements (ADEME, France)"
