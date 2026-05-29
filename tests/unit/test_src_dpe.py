@@ -215,6 +215,22 @@ def test_access_for_neufs_entry(source: DpeSource) -> None:
     assert access.params["query"]["qs"] == "code_insee_ban:75056"
 
 
+def test_fetch_delegates_to_rest_table_adapter() -> None:
+    """fetch() must hand the AccessSpec to the REST_TABLE adapter unchanged."""
+    adapter = FakeRestTable()
+    reg = ProtocolRegistry()
+    reg.register(adapter)
+    src = DpeSource(registry=reg)
+
+    result = src.fetch("logements-existants")
+
+    assert result.payload is Payload.TABLE
+    assert _DATASET_EXISTANTS in result.data
+    assert len(adapter.calls) == 1
+    assert adapter.calls[0].protocol is AccessProtocol.REST_TABLE
+    assert adapter.calls[0].endpoint.startswith(_ADEME_BASE)
+
+
 # ---------------------------------------------------------------------------
 # schema — key columns declared
 # ---------------------------------------------------------------------------
