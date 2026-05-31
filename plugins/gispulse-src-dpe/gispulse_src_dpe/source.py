@@ -19,6 +19,10 @@ Lines: ``{base}/{dataset_id}/lines?size=10000&qs=code_insee_ban:{code}``
 Metadata: ``{base}/{dataset_id}`` — ``dataUpdatedAt`` carries the freshness
 token for :meth:`revision`.
 
+Upstream churn warning: ADEME announces that DPE "Depuis juillet 2021" dataset
+URLs/API URLs are being replaced; keep this plugin's dataset IDs under watch:
+``https://data.ademe.fr/pages/dpe``.
+
 Pagination: ``{"total": N, "results": [...], "next": "<url>"}``
 → ``pagination = {"data_key": "results", "next_key": "next"}``
 
@@ -66,7 +70,9 @@ Géolocalisation / liaison foncier:
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
+import re
 from typing import Any
 
 from gispulse.plugins.api import (
@@ -81,10 +87,28 @@ from gispulse.plugins.api import (
 # ADEME data-fair base URL (open-data, no auth required).
 _ADEME_BASE_URL = "https://data.ademe.fr/data-fair/api/v1/datasets"
 _REVISION_TIMEOUT_S = 8.0
+_REST_TIMEOUT_S = 20.0
+_REST_MAX_PAGES = 1000
+_REST_MAX_TOTAL_SECONDS_S = 600.0
 
 # ADEME data-fair dataset IDs (stable, verified 2026-05-29).
 _DATASET_EXISTANTS = "meg-83tjwtg8dyz4vv7h1dqe"
 _DATASET_NEUFS = "g3cgx7jb3cmys5voxz1mrm22"
+
+_METROPOLITAN_DEPARTMENT_PATTERN = r"(?:0[1-9]|1\d|2[1-9]|[3-8]\d|9[0-5])"
+_CORSICA_DEPARTMENT_PATTERN = r"2[AB]"
+_OVERSEAS_DEPARTMENT_PATTERN = r"97[1-8]"
+
+_CODE_INSEE_RE = re.compile(
+    rf"(?:{_METROPOLITAN_DEPARTMENT_PATTERN}\d{{3}}"
+    rf"|{_CORSICA_DEPARTMENT_PATTERN}\d{{3}}"
+    rf"|{_OVERSEAS_DEPARTMENT_PATTERN}\d{{2}})"
+)
+_CODE_DEPARTEMENT_RE = re.compile(
+    rf"(?:{_METROPOLITAN_DEPARTMENT_PATTERN}"
+    rf"|{_CORSICA_DEPARTMENT_PATTERN}"
+    rf"|{_OVERSEAS_DEPARTMENT_PATTERN})"
+)
 
 # Entries: entry_id → dataset config.
 # ``filter_field`` names the ADEME column used to filter at commune scope.
@@ -119,6 +143,23 @@ _METADATA_COMMON = {
         "ou coordonnées Lambert-93 (coordonnee_cartographique_x/y_ban) "
         "si le statut_geocodage est satisfaisant."
     ),
+    "geometry": {
+        "type": "point",
+        "x_field": "coordonnee_cartographique_x_ban",
+        "y_field": "coordonnee_cartographique_y_ban",
+        "crs": "EPSG:2154",
+        "quality_field": "statut_geocodage",
+        "recommended_quality_value": "adresse géocodée ban à l'adresse",
+    },
+    "upstream_churn_risk": {
+        "status": "decommissioning-announced",
+        "notice_url": "https://data.ademe.fr/pages/dpe",
+        "risk": (
+            "ADEME indique que les dataset URLs/API URLs DPE depuis juillet "
+            "2021 changent avec les nouveaux jeux de données; surveiller les "
+            "nouveaux identifiants avant décommissionnement des anciens."
+        ),
+    },
 }
 
 # Raw upstream fields per entry, limited to the columns most consumed
@@ -129,8 +170,16 @@ _SCHEMAS: dict[str, dict[str, str]] = {
     "logements-existants": {
         # identity
         "numero_dpe": "str",
+        "numero_dpe_immeuble_associe": "str",
         "date_etablissement_dpe": "str",
+        "date_reception_dpe": "str",
         "date_fin_validite_dpe": "str",
+        "date_derniere_modification_dpe": "str",
+        "modele_dpe": "str",
+        "version_dpe": "float",
+        "methode_application_dpe": "str",
+        "id_rnb": "str",
+        "provenance_id_rnb": "str",
         # performance labels
         "etiquette_dpe": "str",
         "etiquette_ges": "str",
@@ -145,24 +194,41 @@ _SCHEMAS: dict[str, dict[str, str]] = {
         "emission_ges_5_usages_par_m2": "float",
         # logement characteristics
         "surface_habitable_logement": "float",
+        "surface_habitable_immeuble": "float",
         "type_batiment": "str",
         "annee_construction": "int",
         "periode_construction": "str",
         "nombre_niveau_logement": "int",
+        "nombre_niveau_immeuble": "int",
+        "nombre_appartement": "int",
         # geography / spatial join
         "code_insee_ban": "str",
         "code_departement_ban": "str",
+        "code_region_ban": "str",
+        "code_postal_ban": "str",
+        "nom_commune_ban": "str",
         "adresse_ban": "str",
+        "adresse_complete_brut": "str",
         "identifiant_ban": "str",
+        "score_ban": "float",
         "coordonnee_cartographique_x_ban": "float",
         "coordonnee_cartographique_y_ban": "float",
+        "_geopoint": "str",
         "statut_geocodage": "str",
     },
     "logements-neufs": {
         # identity
         "numero_dpe": "str",
+        "numero_dpe_immeuble_associe": "str",
         "date_etablissement_dpe": "str",
+        "date_reception_dpe": "str",
         "date_fin_validite_dpe": "str",
+        "date_derniere_modification_dpe": "str",
+        "modele_dpe": "str",
+        "version_dpe": "float",
+        "methode_application_dpe": "str",
+        "id_rnb": "str",
+        "provenance_id_rnb": "str",
         # performance labels
         "etiquette_dpe": "str",
         "etiquette_ges": "str",
@@ -177,20 +243,37 @@ _SCHEMAS: dict[str, dict[str, str]] = {
         "emission_ges_5_usages_par_m2": "float",
         # logement characteristics
         "surface_habitable_logement": "float",
+        "surface_habitable_immeuble": "float",
         "type_batiment": "str",
         "annee_construction": "int",
         "periode_construction": "str",
         "nombre_niveau_logement": "int",
+        "nombre_niveau_immeuble": "int",
+        "nombre_appartement": "int",
         # geography / spatial join
         "code_insee_ban": "str",
         "code_departement_ban": "str",
+        "code_region_ban": "str",
+        "code_postal_ban": "str",
+        "nom_commune_ban": "str",
         "adresse_ban": "str",
+        "adresse_complete_brut": "str",
         "identifiant_ban": "str",
+        "score_ban": "float",
         "coordonnee_cartographique_x_ban": "float",
         "coordonnee_cartographique_y_ban": "float",
+        "_geopoint": "str",
         "statut_geocodage": "str",
     },
 }
+
+
+def _normalise_code(value: object, *, field: str, pattern: re.Pattern[str]) -> str:
+    """Normalise a trusted spatial code before embedding it in a Lucene ``qs``."""
+    text = str(value).strip().upper()
+    if not pattern.fullmatch(text):
+        raise ValueError(f"Invalid {field}: {value!r}")
+    return text
 
 
 def _probe_revision(dataset_id: str) -> str | None:
@@ -246,7 +329,13 @@ class DpeSource(DeclarativeSource):
                 endpoint=f"{_ADEME_BASE_URL}/{dataset_id}/lines",
                 params={
                     "query": {"size": spec["page_size"]},
-                    "pagination": {"data_key": "results", "next_key": "next"},
+                    "pagination": {
+                        "data_key": "results",
+                        "next_key": "next",
+                        "max_pages": _REST_MAX_PAGES,
+                        "max_total_seconds": _REST_MAX_TOTAL_SECONDS_S,
+                    },
+                    "timeout": _REST_TIMEOUT_S,
                 },
                 format="application/json",
             ),
@@ -256,7 +345,7 @@ class DpeSource(DeclarativeSource):
             payload=self.payload,
             jurisdiction=self.jurisdiction,
             metadata={
-                **_METADATA_COMMON,
+                **deepcopy(_METADATA_COMMON),
                 "dataset_id": dataset_id,
                 "dataset_url": f"https://data.ademe.fr/datasets/{dataset_id}",
                 "filter_field": spec["filter_field"],
@@ -281,7 +370,7 @@ class DpeSource(DeclarativeSource):
         filter (``code_insee_ban:{code}`` or ``code_departement_ban:{dept}``),
         which is the filter mechanism of the ADEME data-fair ``/lines`` API.
 
-        Exactly one of ``code_insee`` or ``code_departement`` must be provided.
+        At least one of ``code_insee`` or ``code_departement`` must be provided.
         ``code_insee`` takes precedence when both are given.
 
         No network — it only shapes the :class:`AccessSpec` the orchestrator
@@ -291,21 +380,26 @@ class DpeSource(DeclarativeSource):
         spec = _ENTRIES[entry_id]
 
         if code_insee is not None:
-            qs_filter = f"{spec['filter_field']}:{code_insee}"
+            code = _normalise_code(
+                code_insee, field="code_insee", pattern=_CODE_INSEE_RE
+            )
+            qs_filter = f"{spec['filter_field']}:{code}"
         elif code_departement is not None:
-            qs_filter = f"{spec['dept_field']}:{code_departement}"
+            dept = _normalise_code(
+                code_departement,
+                field="code_departement",
+                pattern=_CODE_DEPARTEMENT_RE,
+            )
+            qs_filter = f"{spec['dept_field']}:{dept}"
         else:
             raise ValueError(
                 f"entry {entry_id!r}: pass code_insee=<code> or "
                 "code_departement=<dept>"
             )
 
-        params = dict(entry.access.params)
-        # Deep-copy mutable nested dicts to avoid mutating the shared entry.
-        for nested_key in ("query", "pagination"):
-            nested = params.get(nested_key)
-            if isinstance(nested, dict):
-                params[nested_key] = dict(nested)
+        # Deep-copy mutable nested REST_TABLE params to avoid mutating the
+        # shared declarative entry as destinations and qs filters are added.
+        params = deepcopy(entry.access.params)
 
         params["query"] = {**params.get("query", {}), "qs": qs_filter}
 

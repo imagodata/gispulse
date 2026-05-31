@@ -20,7 +20,11 @@ sys.path.insert(0, _PKG_PATH)
 for _module in ("gispulse_src_dpe.source", "gispulse_src_dpe"):
     sys.modules.pop(_module, None)
 
-from gispulse_src_dpe.source import DpeSource  # noqa: E402
+from gispulse_src_dpe.source import (  # noqa: E402
+    _CODE_DEPARTEMENT_RE,
+    _CODE_INSEE_RE,
+    DpeSource,
+)
 
 from gispulse.core.plugin_model import (  # noqa: E402
     AccessProtocol,
@@ -132,6 +136,14 @@ def test_static_query_sets_page_size(source: DpeSource) -> None:
         assert entry.access.params["query"]["size"] == 10000
 
 
+def test_entries_set_rest_pagination_guards(source: DpeSource) -> None:
+    for entry in source.entries():
+        params = entry.access.params
+        assert params["timeout"] == 20.0
+        assert params["pagination"]["max_pages"] == 1000
+        assert params["pagination"]["max_total_seconds"] == 600.0
+
+
 # ---------------------------------------------------------------------------
 # access_for — builds the Lucene qs filter
 # ---------------------------------------------------------------------------
@@ -146,6 +158,39 @@ def test_access_for_code_insee_builds_qs_filter(source: DpeSource) -> None:
 def test_access_for_code_departement_builds_qs_filter(source: DpeSource) -> None:
     access = source.access_for("logements-existants", code_departement="63")
     assert access.params["query"]["qs"] == "code_departement_ban:63"
+
+
+@pytest.mark.parametrize(
+    ("code_insee", "expected_qs"),
+    [
+        ("63113", "code_insee_ban:63113"),
+        ("2a004", "code_insee_ban:2A004"),
+        ("97411", "code_insee_ban:97411"),
+    ],
+)
+def test_access_for_accepts_canonical_code_insee(
+    source: DpeSource,
+    code_insee: str,
+    expected_qs: str,
+) -> None:
+    access = source.access_for("logements-existants", code_insee=code_insee)
+    assert access.params["query"]["qs"] == expected_qs
+
+
+@pytest.mark.parametrize("code_departement", ["2A", "2B", "974"])
+def test_access_for_accepts_canonical_department_codes(
+    source: DpeSource,
+    code_departement: str,
+) -> None:
+    access = source.access_for(
+        "logements-existants", code_departement=code_departement
+    )
+    assert access.params["query"]["qs"] == f"code_departement_ban:{code_departement}"
+
+
+def test_access_for_normalizes_corsica_department_code(source: DpeSource) -> None:
+    access = source.access_for("logements-neufs", code_departement="2a")
+    assert access.params["query"]["qs"] == "code_departement_ban:2A"
 
 
 def test_access_for_code_insee_takes_precedence_over_departement(
@@ -190,6 +235,56 @@ def test_access_for_without_spatial_key_raises(source: DpeSource) -> None:
         source.access_for("logements-existants")
 
 
+def test_access_for_rejects_unsafe_code_insee_filter(source: DpeSource) -> None:
+    with pytest.raises(ValueError, match="Invalid code_insee"):
+        source.access_for("logements-existants", code_insee="63113 OR *:*")
+
+
+def test_access_for_rejects_unsafe_department_filter(source: DpeSource) -> None:
+    with pytest.raises(ValueError, match="Invalid code_departement"):
+        source.access_for("logements-existants", code_departement="63 OR *:*")
+
+
+@pytest.mark.parametrize("code_insee", ["20123", "6311"])
+def test_access_for_rejects_non_canonical_code_insee(
+    source: DpeSource,
+    code_insee: str,
+) -> None:
+    with pytest.raises(ValueError, match="Invalid code_insee"):
+        source.access_for("logements-existants", code_insee=code_insee)
+
+
+def test_access_for_rejects_non_canonical_department_code(source: DpeSource) -> None:
+    with pytest.raises(ValueError, match="Invalid code_departement"):
+        source.access_for("logements-existants", code_departement="20")
+
+
+@pytest.mark.parametrize("code_insee", ["63113", "2A004", "97411"])
+def test_code_insee_regex_accepts_canonical_commune_codes(code_insee: str) -> None:
+    assert _CODE_INSEE_RE.fullmatch(code_insee)
+
+
+@pytest.mark.parametrize("code_insee", ["20123", "6311"])
+def test_code_insee_regex_rejects_non_canonical_commune_codes(
+    code_insee: str,
+) -> None:
+    assert _CODE_INSEE_RE.fullmatch(code_insee) is None
+
+
+@pytest.mark.parametrize("code_departement", ["63", "2A", "2B", "974"])
+def test_department_regex_accepts_canonical_department_codes(
+    code_departement: str,
+) -> None:
+    assert _CODE_DEPARTEMENT_RE.fullmatch(code_departement)
+
+
+@pytest.mark.parametrize("code_departement", ["20", "6311"])
+def test_department_regex_rejects_non_canonical_department_codes(
+    code_departement: str,
+) -> None:
+    assert _CODE_DEPARTEMENT_RE.fullmatch(code_departement) is None
+
+
 def test_access_for_unknown_entry_raises(source: DpeSource) -> None:
     with pytest.raises(KeyError, match="unknown_entry"):
         source.access_for("unknown_entry", code_insee="63113")
@@ -207,6 +302,20 @@ def test_access_for_does_not_mutate_shared_entry(source: DpeSource) -> None:
     assert second.params["query"]["qs"] == "code_insee_ban:69123"
     # the canonical entry must not carry qs — it was not in the original spec
     assert "qs" not in entry.access.params["query"]
+
+
+def test_access_for_deep_copies_nested_params(source: DpeSource) -> None:
+    """Future nested REST_TABLE params must not leak through shallow copies."""
+    entry = source._entry("logements-existants")
+    entry.access.params["pagination"]["cursor"] = {"field": "_i"}
+
+    first = source.access_for("logements-existants", code_insee="63113")
+    first.params["pagination"]["cursor"]["field"] = "MUTATED"
+
+    second = source.access_for("logements-existants", code_insee="69123")
+
+    assert second.params["pagination"]["cursor"]["field"] == "_i"
+    assert entry.access.params["pagination"]["cursor"]["field"] == "_i"
 
 
 def test_access_for_neufs_entry(source: DpeSource) -> None:
@@ -276,6 +385,20 @@ def test_schema_exposes_geo_join_fields(source: DpeSource) -> None:
         assert schema["statut_geocodage"] == "str"
 
 
+def test_schema_exposes_incremental_and_address_fields(source: DpeSource) -> None:
+    for entry_id in _ENTRY_IDS:
+        schema = source.schema(entry_id)
+        assert schema["date_derniere_modification_dpe"] == "str"
+        assert schema["score_ban"] == "float"
+        assert schema["nom_commune_ban"] == "str"
+        assert schema["code_postal_ban"] == "str"
+        assert schema["code_region_ban"] == "str"
+        assert schema["adresse_complete_brut"] == "str"
+        assert schema["id_rnb"] == "str"
+        assert schema["provenance_id_rnb"] == "str"
+        assert schema["_geopoint"] == "str"
+
+
 def test_schema_unknown_entry_raises(source: DpeSource) -> None:
     with pytest.raises(KeyError):
         source.schema("ghost")
@@ -301,6 +424,36 @@ def test_metadata_carries_filter_fields(source: DpeSource) -> None:
 def test_metadata_carries_geo_join_note(source: DpeSource) -> None:
     for entry in source.entries():
         assert "code_insee_ban" in entry.metadata["geo_join_note"]
+
+
+def test_metadata_carries_geometry_mapping(source: DpeSource) -> None:
+    for entry in source.entries():
+        geometry = entry.metadata["geometry"]
+        assert geometry["type"] == "point"
+        assert geometry["x_field"] == "coordonnee_cartographique_x_ban"
+        assert geometry["y_field"] == "coordonnee_cartographique_y_ban"
+        assert geometry["crs"] == "EPSG:2154"
+        assert geometry["quality_field"] == "statut_geocodage"
+        assert geometry["recommended_quality_value"] == "adresse géocodée ban à l'adresse"
+
+
+def test_entries_do_not_share_nested_metadata(source: DpeSource) -> None:
+    entries = {e.id: e for e in source.entries()}
+    entries["logements-existants"].metadata["geometry"]["x_field"] = "MUTATED"
+
+    fresh_entries = {e.id: e for e in source.entries()}
+    assert (
+        fresh_entries["logements-neufs"].metadata["geometry"]["x_field"]
+        == "coordonnee_cartographique_x_ban"
+    )
+
+
+def test_metadata_carries_ademe_decommission_notice(source: DpeSource) -> None:
+    for entry in source.entries():
+        notice = entry.metadata["upstream_churn_risk"]
+        assert notice["status"] == "decommissioning-announced"
+        assert notice["notice_url"] == "https://data.ademe.fr/pages/dpe"
+        assert "dataset URLs" in notice["risk"]
 
 
 # ---------------------------------------------------------------------------
