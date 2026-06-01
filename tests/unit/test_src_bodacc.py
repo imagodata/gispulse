@@ -69,12 +69,15 @@ def test_declares_commercial_notice_entries(source: BodaccSource) -> None:
         "annonces-commerciales",
         "ventes-cessions",
         "procedures-collectives",
+        "depots-comptes",
         "immatriculations",
         "creations-etablissements",
         "modifications",
         "radiations",
         "conciliations",
         "retablissements-professionnels",
+        "annonces-diverses",
+        "famille-inconnue",
     }
 
 
@@ -97,8 +100,12 @@ def test_entries_use_bodacc_opendatasoft_rest_table(source: BodaccSource) -> Non
     assert entry.access.params["query"]["where"] == 'familleavis="vente"'
     assert entry.metadata["dataset_id"] == "annonces-commerciales"
     assert entry.metadata["ods_pagination"] == "limit-offset"
-    assert entry.metadata["core_fetcher_note"] == (
-        "REST_TABLE currently materializes one ODS page; pass offset for more."
+    assert entry.metadata["pagination_scope"] == "single_ods_page"
+    assert entry.metadata["page_size_parameter"] == "limit"
+    assert entry.metadata["page_offset_parameter"] == "offset"
+    assert entry.metadata["orchestration_note"] == (
+        "Loop explicitly by calling access_for(..., offset=offset+limit) "
+        "until total_count is reached or the page is empty."
     )
 
 
@@ -107,11 +114,15 @@ def test_entry_metadata_records_real_family_codes(source: BodaccSource) -> None:
 
     assert by_id["ventes-cessions"].metadata["familleavis"] == "vente"
     assert by_id["procedures-collectives"].metadata["familleavis"] == "collective"
+    assert by_id["depots-comptes"].metadata["familleavis"] == "dpc"
     assert by_id["conciliations"].metadata["familleavis"] == "conciliation"
     assert (
         by_id["retablissements-professionnels"].metadata["familleavis"]
         == "retablissement_professionnel"
     )
+    assert by_id["annonces-diverses"].metadata["familleavis"] == "divers"
+    assert by_id["famille-inconnue"].metadata["familleavis"] == "inconnue"
+    assert by_id["famille-inconnue"].metadata["familleavis_lib"] is None
     assert by_id["annonces-commerciales"].metadata["familleavis"] is None
 
 
@@ -166,6 +177,19 @@ def test_access_for_supports_department_offset_limit_and_s3_key(
     }
     assert access.params["s3_key"] == "raw/bodacc/59/page-200.jsonl"
     assert access.params["pagination"]["max_rows"] == 25
+
+
+def test_access_for_keeps_limit_as_single_page_size(source: BodaccSource) -> None:
+    first_page = source.access_for("annonces-commerciales", offset=0, limit=25)
+    next_page = source.access_for("annonces-commerciales", offset=25, limit=25)
+
+    assert first_page.params["query"]["offset"] == 0
+    assert next_page.params["query"]["offset"] == 25
+    assert first_page.params["pagination"] == {
+        "data_key": "results",
+        "max_pages": 1,
+        "max_rows": 25,
+    }
 
 
 def test_access_for_copies_nested_params(source: BodaccSource) -> None:
@@ -244,5 +268,9 @@ def test_register_adds_source_to_registry() -> None:
     from gispulse.core.sources import SOURCES
     from gispulse_src_bodacc import register
 
-    register()
-    assert SOURCES.get("bodacc") is not None
+    SOURCES.clear()
+    try:
+        register()
+        assert SOURCES.get("bodacc") is not None
+    finally:
+        SOURCES.clear()

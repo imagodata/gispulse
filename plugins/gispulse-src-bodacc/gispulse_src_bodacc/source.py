@@ -36,8 +36,16 @@ _COMMON_METADATA = {
     "dataset_id": BODACC_DATASET_ID,
     "license": "Licence Ouverte 2.0",
     "ods_pagination": "limit-offset",
+    "pagination_scope": "single_ods_page",
+    "page_size_parameter": "limit",
+    "page_offset_parameter": "offset",
+    "total_count_key": "total_count",
     "core_fetcher_note": (
-        "REST_TABLE currently materializes one ODS page; pass offset for more."
+        "BODACC REST_TABLE entries intentionally materialize one ODS page."
+    ),
+    "orchestration_note": (
+        "Loop explicitly by calling access_for(..., offset=offset+limit) "
+        "until total_count is reached or the page is empty."
     ),
     "filter_fields": (
         "registre",
@@ -68,6 +76,11 @@ _ENTRIES: dict[str, dict[str, str | None]] = {
         "familleavis": "collective",
         "familleavis_lib": "Procedures collectives",
     },
+    "depots-comptes": {
+        "label": "BODACC depots des comptes",
+        "familleavis": "dpc",
+        "familleavis_lib": "Depots des comptes",
+    },
     "immatriculations": {
         "label": "BODACC immatriculations",
         "familleavis": "immatriculation",
@@ -97,6 +110,16 @@ _ENTRIES: dict[str, dict[str, str | None]] = {
         "label": "BODACC retablissements professionnels",
         "familleavis": "retablissement_professionnel",
         "familleavis_lib": "Procedures de retablissement professionnel",
+    },
+    "annonces-diverses": {
+        "label": "BODACC annonces diverses",
+        "familleavis": "divers",
+        "familleavis_lib": "Annonces diverses",
+    },
+    "famille-inconnue": {
+        "label": "BODACC famille inconnue",
+        "familleavis": "inconnue",
+        "familleavis_lib": None,
     },
 }
 
