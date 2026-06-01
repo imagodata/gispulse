@@ -36,7 +36,7 @@ _DEFAULT_LON = 3.087025
 _DEFAULT_LAT = 45.777222
 _DEFAULT_SEARCH_LIMIT = 5
 _DEFAULT_REVERSE_LIMIT = 1
-_MAX_API_LIMIT = 20
+_MAX_API_LIMIT = 50
 
 _API_PAGINATION = {"data_key": "features", "max_pages": 1, "max_rows": 5}
 _BULK_PARAMS = {"departement": _DEFAULT_DEPARTEMENT, "table_format": "csv", "delimiter": ";"}
@@ -55,6 +55,10 @@ _COMMON_METADATA = {
     "api_host": "data.geopf.fr/geocodage",
     "legacy_api_host": "api-adresse.data.gouv.fr",
     "legacy_api_status": "deprecated; use Geoplateforme host",
+    "unmodelled_endpoints": (
+        "POST /search/csv requires multipart CSV upload and is not represented "
+        "as a declarative table source",
+    ),
 }
 
 _FEATURE_SCHEMA = {
@@ -330,22 +334,29 @@ class BanSource(DeclarativeSource):
         lat: float | None,
         limit: int | None,
     ) -> dict[str, Any]:
-        query = dict(base_query)
+        scope_filters = {
+            "citycode": citycode,
+            "postcode": postcode,
+            "depcode": depcode,
+        }
+        selected_scope_filters = {
+            key: value for key, value in scope_filters.items() if value is not None
+        }
+        if len(selected_scope_filters) > 1:
+            raise ValueError("citycode, postcode and depcode filters are exclusive")
+
+        replaces_default_query = q is not None or bool(selected_scope_filters)
+        query = {} if replaces_default_query else dict(base_query)
         if q is not None:
             query["q"] = q
-        if citycode is not None:
-            query["citycode"] = citycode
-        if postcode is not None:
-            query["postcode"] = postcode
-        if depcode is not None:
-            query["depcode"] = depcode
+        query.update(selected_scope_filters)
         if address_type is not None:
             query["type"] = address_type
         if lon is not None:
             query["lon"] = float(lon)
         if lat is not None:
             query["lat"] = float(lat)
-        query["limit"] = _coerce_limit(limit or int(query["limit"]))
+        query["limit"] = _coerce_limit(limit or int(base_query["limit"]))
         return query
 
     @staticmethod

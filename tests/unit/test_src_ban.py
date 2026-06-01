@@ -204,6 +204,35 @@ def test_access_for_search_overrides_query_without_mutating_catalog(source) -> N
     assert original.params["query"]["citycode"] == "63113"
 
 
+def test_access_for_search_q_replaces_clermont_default_citycode(source) -> None:
+    access = source.access_for(
+        "addresses-search",
+        q="10 rue de Rivoli Paris",
+    )
+
+    assert access.params["query"] == {
+        "q": "10 rue de Rivoli Paris",
+        "limit": 5,
+    }
+
+
+def test_access_for_search_depcode_replaces_clermont_default_filter(source) -> None:
+    access = source.access_for(
+        "addresses-search",
+        depcode="75",
+    )
+
+    assert access.params["query"] == {
+        "depcode": "75",
+        "limit": 5,
+    }
+
+
+def test_access_for_search_rejects_ambiguous_geographic_filters(source) -> None:
+    with pytest.raises(ValueError, match="exclusive"):
+        source.access_for("addresses-search", citycode="75101", depcode="75")
+
+
 def test_access_for_reverse_replaces_coordinates_and_type_filter(source) -> None:
     access = source.access_for(
         "addresses-reverse",
@@ -241,10 +270,17 @@ def test_access_for_bulk_normalises_department_and_materialization(source) -> No
 
 def test_access_for_rejects_invalid_limit_and_department(source) -> None:
     with pytest.raises(ValueError, match="limit"):
-        source.access_for("addresses-search", limit=21)
+        source.access_for("addresses-search", limit=51)
 
     with pytest.raises(ValueError, match="department"):
         source.access_for("addresses-departement", departement="999")
+
+
+def test_access_for_accepts_geoplateforme_limit_50(source) -> None:
+    access = source.access_for("addresses-search", limit=50)
+
+    assert access.params["query"]["limit"] == 50
+    assert access.params["pagination"]["max_rows"] == 50
 
 
 def test_fetch_delegates_search_to_rest_table_adapter() -> None:
@@ -291,6 +327,15 @@ def test_schema_exposes_search_feature_and_bulk_csv_fields(source) -> None:
     assert bulk_schema["lon"] == "float"
     assert bulk_schema["lat"] == "float"
     assert bulk_schema["cad_parcelles"] == "str"
+
+
+def test_metadata_documents_unmodelled_csv_post_endpoint(source) -> None:
+    entry = source._entry("addresses-search")
+
+    assert entry.metadata["unmodelled_endpoints"] == (
+        "POST /search/csv requires multipart CSV upload and is not represented "
+        "as a declarative table source",
+    )
 
 
 def test_revision_is_unknown_for_api_entries(source) -> None:
