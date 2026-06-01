@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
+from urllib.parse import quote
 
 from gispulse.plugins.api import (
     AccessProtocol,
@@ -153,6 +154,12 @@ def _coerce_limit(limit: int) -> int:
     return int(limit)
 
 
+def _coerce_max_rows(max_rows: int) -> int:
+    if max_rows < 1:
+        raise ValueError("max_rows must be at least 1")
+    return int(max_rows)
+
+
 def _normalise_bbox(value: str | Sequence[float | int | str]) -> str:
     if isinstance(value, str):
         parts = [part.strip() for part in value.split(",")]
@@ -160,6 +167,11 @@ def _normalise_bbox(value: str | Sequence[float | int | str]) -> str:
         parts = [str(part).strip() for part in value]
     if len(parts) != 4 or any(not part for part in parts):
         raise ValueError("bbox must contain four comma-separated coordinates")
+    for part in parts:
+        try:
+            float(part)
+        except ValueError as exc:
+            raise ValueError("bbox coordinates must be numeric") from exc
     return ",".join(parts)
 
 
@@ -167,7 +179,7 @@ def _normalise_plot_id(value: object | None) -> str:
     plot_id = str(value or "").strip().upper()
     if not plot_id:
         raise ValueError("plot_id must not be empty")
-    return plot_id
+    return quote(plot_id, safe="")
 
 
 def _status_query(status: str | Sequence[str]) -> str:
@@ -237,6 +249,7 @@ class RnbSource(DeclarativeSource):
         with_plots: bool | None = None,
         min_score: float | None = None,
         limit: int = _DEFAULT_LIMIT,
+        max_rows: int | None = None,
         local_path: str | None = None,
         s3_uri: str | None = None,
         s3_key: str | None = None,
@@ -281,7 +294,8 @@ class RnbSource(DeclarativeSource):
             raise ValueError(f"unsupported RNB query kind: {query_kind!r}")
 
         params["query"] = query
-        params["pagination"]["max_rows"] = limit
+        if max_rows is not None:
+            params["pagination"]["max_rows"] = _coerce_max_rows(max_rows)
         _apply_materialization(
             params,
             local_path=local_path,
