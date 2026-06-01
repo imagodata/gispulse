@@ -27,12 +27,15 @@ _BDNB_S3_BASE = (
     f"https://open-data.s3.fr-par.scw.cloud/bdnb_millesime_{_MILLESIME_PATH}"
 )
 
-_VALID_DEPARTEMENTS = (
-    {f"{value:02d}" for value in range(1, 96)}
-    - {"20"}
-    | {"2A", "2B"}
-    | {str(value) for value in range(971, 979)}
+_PUBLISHED_DEPARTEMENTS = (
+    *(f"{value:02d}" for value in range(1, 20)),
+    *(f"{value:02d}" for value in range(21, 96)),
+    "2a",
+    "2b",
 )
+_VALID_DEPARTEMENTS = set(_PUBLISHED_DEPARTEMENTS)
+_BUILDING_GROUP_TABLE = "batiment_groupe"
+_BUILDING_GROUP_ARCHIVE_MEMBER = f"csv/{_BUILDING_GROUP_TABLE}.csv"
 
 
 @dataclass(frozen=True)
@@ -59,7 +62,7 @@ _ENTRY_SPECS: dict[str, _EntrySpec] = {
         },
     ),
     "batiments_tables": _EntrySpec(
-        label="BDNB - batiments, archive CSV departementale",
+        label="BDNB - batiment_groupe, table CSV departementale",
         protocol=AccessProtocol.TABLE_FILE,
         payload=Payload.TABLE,
         archive_kind="csv",
@@ -68,16 +71,13 @@ _ENTRY_SPECS: dict[str, _EntrySpec] = {
             "departement": _DEFAULT_DEPARTEMENT,
             "archive_format": "zip",
             "table_format": "csv",
+            "archive_member": _BUILDING_GROUP_ARCHIVE_MEMBER,
         },
     ),
 }
 
 _SOURCE_TABLES = (
-    "batiment_groupe",
-    "batiment_groupe_compile",
-    "batiment_groupe_bdtopo_bat",
-    "batiment_groupe_dpe_representatif_logement",
-    "batiment_groupe_dpe_statistique_logement",
+    _BUILDING_GROUP_TABLE,
 )
 
 _SCHEMA = {
@@ -102,7 +102,9 @@ def _department_archive_endpoint(kind: str) -> str:
 
 
 def _normalise_departement(raw: object | None) -> str:
-    value = str(raw or "").strip().upper()
+    value = str(raw or "").strip()
+    if value.upper() in {"2A", "2B"}:
+        value = value.lower()
     if value.isdigit() and len(value) <= 2:
         value = value.zfill(2)
     if value in _VALID_DEPARTEMENTS:
@@ -166,6 +168,34 @@ class BdnbSource(DeclarativeSource):
 
     @staticmethod
     def _entry_ref(entry_id: str, spec: _EntrySpec) -> SourceEntryRef:
+        metadata = {
+            "provider": "CSTB",
+            "dataset": "Base de Donnees Nationale des Batiments",
+            "platform": "bdnb.io / data.gouv.fr",
+            "license": "Licence Ouverte 2.0",
+            "millesime": _MILLESIME_LABEL,
+            "update_cadence": "semestrial",
+            "archive_format": "zip",
+            "data_format": spec.data_format,
+            "archive_scope": (
+                "single_member"
+                if "archive_member" in spec.params
+                else "full_archive"
+            ),
+            "department_param": "departement",
+            "default_departement": _DEFAULT_DEPARTEMENT,
+            "published_departements": _PUBLISHED_DEPARTEMENTS,
+            "join_key": "batiment_groupe_id",
+            "geometry_key": "geometry",
+        }
+        if "archive_member" in spec.params:
+            metadata.update(
+                {
+                    "archive_member": spec.params["archive_member"],
+                    "source_tables": _SOURCE_TABLES,
+                    "table_name": _BUILDING_GROUP_TABLE,
+                }
+            )
         return SourceEntryRef(
             id=entry_id,
             name=spec.label,
@@ -179,19 +209,5 @@ class BdnbSource(DeclarativeSource):
             domain=SourceDomain.FONCIER,
             payload=spec.payload,
             jurisdiction="FR",
-            metadata={
-                "provider": "CSTB",
-                "dataset": "Base de Donnees Nationale des Batiments",
-                "platform": "bdnb.io / data.gouv.fr",
-                "license": "Licence Ouverte 2.0",
-                "millesime": _MILLESIME_LABEL,
-                "update_cadence": "semestrial",
-                "archive_format": "zip",
-                "data_format": spec.data_format,
-                "department_param": "departement",
-                "default_departement": _DEFAULT_DEPARTEMENT,
-                "source_tables": _SOURCE_TABLES,
-                "join_key": "batiment_groupe_id",
-                "geometry_key": "geometry",
-            },
+            metadata=metadata,
         )
