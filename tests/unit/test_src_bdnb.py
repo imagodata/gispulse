@@ -130,9 +130,13 @@ def test_catalog_declares_departmental_gpkg_and_csv_building_archives(source) ->
         "departement": "63",
         "archive_format": "zip",
         "table_format": "csv",
+        "archive_member": "csv/batiment_groupe.csv",
     }
     assert tables.payload is Payload.TABLE
-    assert "batiment_groupe_compile" in tables.metadata["source_tables"]
+    assert tables.metadata["table_name"] == "batiment_groupe"
+    assert tables.metadata["archive_member"] == "csv/batiment_groupe.csv"
+    assert "971" not in tables.metadata["published_departements"]
+    assert "2a" in tables.metadata["published_departements"]
 
 
 def test_access_for_resolves_department_without_mutating_catalog(source) -> None:
@@ -157,9 +161,18 @@ def test_access_for_accepts_code_departement_alias_and_normalises_single_digit(
     assert access.endpoint.endswith("_dep{departement}_csv.zip")
 
 
-def test_access_for_rejects_unknown_department(source) -> None:
+def test_access_for_maps_corsica_to_published_lowercase_key(source) -> None:
+    access = source.access_for("batiments_tables", departement="2A")
+
+    assert access.params["departement"] == "2a"
+
+
+def test_access_for_rejects_unpublished_department_keys(source) -> None:
     with pytest.raises(ValueError, match="invalid BDNB department code"):
         source.access_for("batiments", departement="999")
+
+    with pytest.raises(ValueError, match="invalid BDNB department code"):
+        source.access_for("batiments", departement="971")
 
 
 def test_fetch_batiments_resolves_default_department_template() -> None:
@@ -195,6 +208,7 @@ def test_fetch_tables_resolves_default_department_template() -> None:
     )
     assert len(table_file.calls) == 1
     assert table_file.calls[0].protocol is AccessProtocol.TABLE_FILE
+    assert table_file.calls[0].params["archive_member"] == "csv/batiment_groupe.csv"
 
 
 def test_schema_exposes_bdnb_building_headline_fields(source) -> None:
