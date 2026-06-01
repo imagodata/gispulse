@@ -142,6 +142,12 @@ def test_entries_set_rest_pagination_guards(source: DpeSource) -> None:
         assert params["timeout"] == 20.0
         assert params["pagination"]["max_pages"] == 1000
         assert params["pagination"]["max_total_seconds"] == 600.0
+        assert params["retry"] == {
+            "max_attempts": 4,
+            "backoff_seconds": 1.0,
+            "backoff_factor": 2.0,
+            "statuses": [429, 500, 502, 503, 504],
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +441,7 @@ def test_metadata_carries_geometry_mapping(source: DpeSource) -> None:
         assert geometry["crs"] == "EPSG:2154"
         assert geometry["quality_field"] == "statut_geocodage"
         assert geometry["recommended_quality_value"] == "adresse géocodée ban à l'adresse"
+        assert geometry["missing_coordinates"] == "preserve_row_without_geometry"
 
 
 def test_entries_do_not_share_nested_metadata(source: DpeSource) -> None:

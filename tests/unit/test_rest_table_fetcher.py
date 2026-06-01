@@ -662,3 +662,77 @@ def test_body_row_source_wraps_whole_body(
     assert result.metadata["row_count"] == 1
     rows = [json.loads(line) for line in out.read_text().splitlines()]
     assert rows == [{"codeExposition": "2", "exposition": "moyen"}]
+
+
+def test_retries_transient_http_status_before_materializing_page(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import httpx
+
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.adapters.rest.rest_table_fetcher import RestTableFetcher
+
+    calls: list[str] = []
+
+    def fake_get(url: str, timeout: float) -> dict:
+        calls.append(url)
+        if len(calls) == 1:
+            request = httpx.Request("GET", url)
+            response = httpx.Response(503, request=request)
+            raise httpx.HTTPStatusError("503", request=request, response=response)
+        return {"data": [{"i": 1}]}
+
+    monkeypatch.setattr(rest_table_fetcher, "_get_json", fake_get)
+    monkeypatch.setattr(rest_table_fetcher, "_sleep", lambda _seconds: None)
+
+    out = tmp_path / "out.jsonl"
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_TABLE,
+        endpoint="https://geo.example.org/api/v1/rga",
+        params={
+            "local_path": str(out),
+            "retry": {"max_attempts": 2, "backoff_seconds": 0.0},
+        },
+    )
+    result = RestTableFetcher().fetch(access)
+
+    assert calls == ["https://geo.example.org/api/v1/rga"] * 2
+    assert result.metadata["row_count"] == 1
+    assert [json.loads(line) for line in out.read_text().splitlines()] == [{"i": 1}]
+
+
+def test_rate_limit_retry_uses_retry_after_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import httpx
+
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.adapters.rest.rest_table_fetcher import RestTableFetcher
+
+    calls = 0
+    sleeps: list[float] = []
+
+    def fake_get(url: str, timeout: float) -> dict:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            request = httpx.Request("GET", url)
+            response = httpx.Response(429, headers={"Retry-After": "0.25"}, request=request)
+            raise httpx.HTTPStatusError("429", request=request, response=response)
+        return {"data": [{"i": 1}]}
+
+    monkeypatch.setattr(rest_table_fetcher, "_get_json", fake_get)
+    monkeypatch.setattr(rest_table_fetcher, "_sleep", sleeps.append)
+
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_TABLE,
+        endpoint="https://geo.example.org/api/v1/rga",
+        params={
+            "local_path": str(tmp_path / "out.jsonl"),
+            "retry": {"max_attempts": 2, "backoff_seconds": 3.0},
+        },
+    )
+    RestTableFetcher().fetch(access)
+
+    assert calls == 2
+    assert sleeps == [0.25]

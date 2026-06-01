@@ -90,6 +90,10 @@ _REVISION_TIMEOUT_S = 8.0
 _REST_TIMEOUT_S = 20.0
 _REST_MAX_PAGES = 1000
 _REST_MAX_TOTAL_SECONDS_S = 600.0
+_REST_RETRY_ATTEMPTS = 4
+_REST_RETRY_BACKOFF_S = 1.0
+_REST_RETRY_BACKOFF_FACTOR = 2.0
+_REST_RETRY_STATUSES = [429, 500, 502, 503, 504]
 
 # ADEME data-fair dataset IDs (stable, verified 2026-05-29).
 _DATASET_EXISTANTS = "meg-83tjwtg8dyz4vv7h1dqe"
@@ -150,6 +154,7 @@ _METADATA_COMMON = {
         "crs": "EPSG:2154",
         "quality_field": "statut_geocodage",
         "recommended_quality_value": "adresse géocodée ban à l'adresse",
+        "missing_coordinates": "preserve_row_without_geometry",
     },
     "upstream_churn_risk": {
         "status": "decommissioning-announced",
@@ -336,6 +341,12 @@ class DpeSource(DeclarativeSource):
                         "max_total_seconds": _REST_MAX_TOTAL_SECONDS_S,
                     },
                     "timeout": _REST_TIMEOUT_S,
+                    "retry": {
+                        "max_attempts": _REST_RETRY_ATTEMPTS,
+                        "backoff_seconds": _REST_RETRY_BACKOFF_S,
+                        "backoff_factor": _REST_RETRY_BACKOFF_FACTOR,
+                        "statuses": _REST_RETRY_STATUSES,
+                    },
                 },
                 format="application/json",
             ),
