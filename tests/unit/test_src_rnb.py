@@ -25,6 +25,7 @@ from gispulse.core.plugin_model import (  # noqa: E402
     AccessProtocol,
     Payload,
     SourceDomain,
+    resolve_access_endpoint,
 )
 from gispulse.core.sources import DataSource  # noqa: E402
 
@@ -144,9 +145,32 @@ def test_access_for_bbox_overrides_query_without_mutating_catalog(
         "status": "constructed,demolished",
         "withPlots": 0,
     }
-    assert access.params["pagination"]["max_rows"] == 25
+    assert access.params["pagination"]["max_rows"] == 1000
     assert access.params["s3_key"] == "raw/rnb/paris.jsonl"
     assert original.params["query"]["bbox"] == "3.0885,45.7943,3.0895,45.7950"
+
+
+def test_access_for_can_set_page_size_without_forcing_row_cap(
+    source: RnbSource,
+) -> None:
+    access = source.access_for("buildings-bbox", limit=25)
+
+    assert access.params["query"]["limit"] == 25
+    assert access.params["pagination"]["max_rows"] == 1000
+
+
+def test_access_for_can_set_explicit_row_cap_separately_from_page_size(
+    source: RnbSource,
+) -> None:
+    access = source.access_for("buildings-bbox", limit=25, max_rows=40)
+
+    assert access.params["query"]["limit"] == 25
+    assert access.params["pagination"]["max_rows"] == 40
+
+
+def test_access_for_rejects_non_numeric_bbox_coordinates(source: RnbSource) -> None:
+    with pytest.raises(ValueError, match="numeric"):
+        source.access_for("buildings-bbox", bbox="2.42,48.83,boom,48.84")
 
 
 def test_access_for_plot_replaces_path_parameter_and_materialization(
@@ -165,6 +189,22 @@ def test_access_for_plot_replaces_path_parameter_and_materialization(
     assert access.params["local_path"] == "/tmp/rnb-plot.jsonl"
 
 
+def test_access_for_plot_encodes_malicious_path_fragments(source: RnbSource) -> None:
+    access = source.access_for(
+        "buildings-parcelle",
+        plot_id="63113000MT0158/../../evil?next=http://evil.test",
+    )
+    resolved = resolve_access_endpoint(access)
+
+    assert access.params["plot_id"] == (
+        "63113000MT0158%2F..%2F..%2FEVIL%3FNEXT%3DHTTP%3A%2F%2FEVIL.TEST"
+    )
+    assert resolved.endpoint == (
+        "https://rnb-api.beta.gouv.fr/api/alpha/buildings/plot/"
+        "63113000MT0158%2F..%2F..%2FEVIL%3FNEXT%3DHTTP%3A%2F%2FEVIL.TEST/"
+    )
+
+
 def test_access_for_address_prefers_ban_key_over_text_query(
     source: RnbSource,
 ) -> None:
@@ -174,6 +214,7 @@ def test_access_for_address_prefers_ban_key_over_text_query(
         cle_interop_ban="63113_2615_00089",
         min_score=0.9,
         limit=1,
+        max_rows=1,
     )
 
     assert access.params["query"] == {
@@ -187,6 +228,9 @@ def test_access_for_address_prefers_ban_key_over_text_query(
 def test_access_for_rejects_unbounded_limit(source: RnbSource) -> None:
     with pytest.raises(ValueError, match="limit"):
         source.access_for("buildings-bbox", limit=101)
+
+    with pytest.raises(ValueError, match="max_rows"):
+        source.access_for("buildings-bbox", max_rows=0)
 
 
 def test_schema_exposes_identity_geometry_and_join_fields(source: RnbSource) -> None:
