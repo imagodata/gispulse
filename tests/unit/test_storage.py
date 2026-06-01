@@ -15,6 +15,7 @@ from gispulse.persistence.storage import (
     LocalStorage,
     StorageError,
     create_storage,
+    _make_s3_boto_config,
     validate_storage_key,
 )
 
@@ -201,6 +202,40 @@ class TestS3Storage:
         key = _run(storage.upload("org1/ds1/file.gpkg", b"data", "application/geopackage"))
         assert key == "org1/ds1/file.gpkg"
         client.upload_fileobj.assert_called_once()
+
+    def test_boto_config_uses_garage_compatible_checksums(self):
+        mock_boto3, mock_botocore_config, _ = _make_mock_boto3()
+        _create_s3_storage(mock_boto3, mock_botocore_config)
+
+        mock_botocore_config.Config.assert_called_once_with(
+            signature_version="s3v4",
+            retries={"max_attempts": 3, "mode": "standard"},
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
+        )
+
+    def test_boto_config_falls_back_for_older_botocore(self):
+        mock_config = MagicMock(side_effect=[TypeError("unknown"), "legacy-config"])
+
+        assert _make_s3_boto_config(mock_config) == "legacy-config"
+        assert mock_config.call_args_list == [
+            (
+                (),
+                {
+                    "signature_version": "s3v4",
+                    "retries": {"max_attempts": 3, "mode": "standard"},
+                    "request_checksum_calculation": "when_required",
+                    "response_checksum_validation": "when_required",
+                },
+            ),
+            (
+                (),
+                {
+                    "signature_version": "s3v4",
+                    "retries": {"max_attempts": 3, "mode": "standard"},
+                },
+            ),
+        ]
 
     def test_download(self):
         storage, client = self._make()

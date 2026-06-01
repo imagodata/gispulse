@@ -13,15 +13,82 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import duckdb
 import geopandas as gpd
 from shapely import wkb
 
+from gispulse.core.config import settings
 from gispulse.core.logging import get_logger
 from gispulse.persistence.engine import SpatialEngine
 
 log = get_logger(__name__)
+
+
+def _sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _normalise_s3_endpoint(endpoint: str) -> tuple[str, bool]:
+    """Return DuckDB's ENDPOINT value and whether it should use TLS."""
+    endpoint = endpoint.strip().rstrip("/")
+    parsed = urlparse(endpoint if "://" in endpoint else f"https://{endpoint}")
+    host = parsed.netloc or parsed.path
+    return host, parsed.scheme != "http"
+
+
+def _configure_s3_secret(conn: duckdb.DuckDBPyConnection, s3: Any) -> None:
+    """Configure DuckDB httpfs from ``GISPULSE_S3_*`` settings."""
+    raw_endpoint = str(getattr(s3, "endpoint", "") or "").strip()
+    if not raw_endpoint:
+        return
+
+    endpoint, use_ssl = _normalise_s3_endpoint(raw_endpoint)
+    bucket = str(getattr(s3, "bucket", "") or "").strip() or "gispulse"
+    region = str(getattr(s3, "region", "") or "").strip() or "us-east-1"
+    access_key = str(getattr(s3, "access_key", "") or "").strip()
+    secret_key = str(getattr(s3, "secret_key", "") or "").strip()
+
+    clauses = [
+        "TYPE s3",
+        "PROVIDER config",
+    ]
+    if access_key and secret_key:
+        clauses.extend([
+            f"KEY_ID {_sql_literal(access_key)}",
+            f"SECRET {_sql_literal(secret_key)}",
+        ])
+    elif access_key or secret_key:
+        log.warning("duckdb_s3_secret_credentials_incomplete", bucket=bucket)
+
+    clauses.extend([
+        f"REGION {_sql_literal(region)}",
+        f"ENDPOINT {_sql_literal(endpoint)}",
+        "URL_STYLE 'path'",
+        f"USE_SSL {'true' if use_ssl else 'false'}",
+        f"SCOPE {_sql_literal(f's3://{bucket}')}",
+    ])
+
+    sql = "CREATE OR REPLACE SECRET gispulse_s3 (\n    "
+    sql += ",\n    ".join(clauses)
+    sql += "\n);"
+
+    try:
+        conn.execute(sql)
+        log.debug(
+            "duckdb_s3_secret_configured",
+            endpoint=endpoint,
+            bucket=bucket,
+            region=region,
+        )
+    except Exception as exc:
+        log.warning(
+            "duckdb_s3_secret_failed",
+            endpoint=endpoint,
+            bucket=bucket,
+            error_type=type(exc).__name__,
+        )
 
 
 class DuckDBSession(SpatialEngine):
@@ -59,6 +126,7 @@ class DuckDBSession(SpatialEngine):
         # effort — a missing httpfs (no network, locked-down host) must not
         # break the offline GPKG path, which goes through GeoPandas/Fiona.
         self._load_extension("httpfs")
+        _configure_s3_secret(self.conn, settings.s3)
         log.debug("duckdb_session_opened", database=self.database)
 
     def _load_extension(self, name: str) -> None:

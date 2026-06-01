@@ -22,6 +22,17 @@ from gispulse.core.plugin_model import (  # noqa: E402
 from gispulse.core.sources import DataSource, ProtocolRegistry  # noqa: E402
 
 
+_SOCIODEMO_ENTRY_IDS = {
+    "iris_population_2022",
+    "iris_logement_2022",
+    "iris_menages_2022",
+    "iris_activite_2022",
+    "iris_diplomes_2022",
+    "iris_filosofi_revenus_declares_2021",
+    "iris_filosofi_revenus_disponibles_2021",
+}
+
+
 class FakeWFS:
     """Records the AccessSpec it is handed and returns a marker result."""
 
@@ -32,9 +43,33 @@ class FakeWFS:
 
     def fetch(self, access, *, extent=None, mode=FetchMode.MATERIALIZE):
         self.calls.append(access)
-        return SourceResult(
-            payload=Payload.VECTOR, mode=mode, data=access.params["typename"]
-        )
+        return SourceResult(payload=Payload.VECTOR, mode=mode, data=access.params["typename"])
+
+
+class FakeTableFile:
+    """Records tabular file AccessSpecs and returns a marker result."""
+
+    protocol = AccessProtocol.TABLE_FILE
+
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    def fetch(self, access, *, extent=None, mode=FetchMode.MATERIALIZE):
+        self.calls.append(access)
+        return SourceResult(payload=Payload.TABLE, mode=mode, data=access.endpoint)
+
+
+class FakeDownload:
+    """Records resolved bulk download AccessSpecs and returns the endpoint."""
+
+    protocol = AccessProtocol.DOWNLOAD
+
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    def fetch(self, access, *, extent=None, mode=FetchMode.MATERIALIZE):
+        self.calls.append(access)
+        return SourceResult(payload=Payload.VECTOR, mode=mode, data=access.endpoint)
 
 
 def _source_class():
@@ -45,6 +80,8 @@ def _source_class():
 def source():
     reg = ProtocolRegistry()
     reg.register(FakeWFS())
+    reg.register(FakeTableFile())
+    reg.register(FakeDownload())
     return _source_class()(registry=reg)
 
 
@@ -79,7 +116,11 @@ def test_register_adds_insee_source_to_global_registry() -> None:
         register()
         registered = SOURCES.get("insee")
         assert isinstance(registered, InseeSource)
-        assert {entry.id for entry in registered.catalog()} == {"iris"}
+        assert {entry.id for entry in registered.catalog()} == {
+            "iris",
+            "iris_bulk",
+            *_SOCIODEMO_ENTRY_IDS,
+        }
     finally:
         SOURCES.clear()
 
@@ -97,14 +138,29 @@ def test_insee_is_a_statistical_vector_datasource(source) -> None:
     assert source.jurisdiction == "FR"
 
 
-def test_catalog_lists_only_iris_entry(source) -> None:
+def test_catalog_lists_iris_and_sociodemo_entries(source) -> None:
     ids = {entry.id for entry in source.catalog()}
-    assert ids == {"iris"}
+    assert ids == {"iris", "iris_bulk", *_SOCIODEMO_ENTRY_IDS}
 
 
 def test_catalog_search_iris(source) -> None:
     found = source.catalog(search="iris")
-    assert [entry.id for entry in found] == ["iris"]
+    assert [entry.id for entry in found] == [
+        "iris",
+        "iris_bulk",
+        "iris_population_2022",
+        "iris_logement_2022",
+        "iris_menages_2022",
+        "iris_activite_2022",
+        "iris_diplomes_2022",
+        "iris_filosofi_revenus_declares_2021",
+        "iris_filosofi_revenus_disponibles_2021",
+    ]
+
+
+def test_catalog_search_sociodemo_theme(source) -> None:
+    found = source.catalog(search="logement")
+    assert [entry.id for entry in found] == ["iris_logement_2022"]
 
 
 # --------------------------------------------------------------------------
@@ -113,17 +169,17 @@ def test_catalog_search_iris(source) -> None:
 
 
 def test_iris_targets_geoplateforme_wfs_typename(source) -> None:
-    entry = next(iter(source.catalog()))
+    entry = source._entry("iris")
     access = entry.access
 
     assert access.protocol is AccessProtocol.WFS
     assert access.endpoint == "https://data.geopf.fr/wfs/ows"
-    assert access.params == {"typename": "STATISTICALUNITS.IRIS:contour_iris"}
+    assert access.params == {"typename": "STATISTICALUNITS.IRIS:contours_iris"}
     assert access.format == "application/json"
 
 
 def test_iris_entry_carries_classification_axes_and_metadata(source) -> None:
-    entry = next(iter(source.catalog()))
+    entry = source._entry("iris")
 
     assert entry.domain is SourceDomain.STATISTIQUE
     assert entry.payload is Payload.VECTOR
@@ -133,8 +189,67 @@ def test_iris_entry_carries_classification_axes_and_metadata(source) -> None:
         "platform": "WFS Géoplateforme",
         "license": "Licence Ouverte 2.0",
         "update_cadence": "annuel",
-        "typename": "STATISTICALUNITS.IRIS:contour_iris",
+        "typename": "STATISTICALUNITS.IRIS:contours_iris",
     }
+
+
+def test_iris_sociodemo_entries_are_table_files(source) -> None:
+    entries = {entry.id: entry for entry in source.catalog()}
+
+    for entry_id in _SOCIODEMO_ENTRY_IDS:
+        entry = entries[entry_id]
+        assert entry.domain is SourceDomain.STATISTIQUE
+        assert entry.payload is Payload.TABLE
+        assert entry.jurisdiction == "FR"
+        assert entry.access.protocol is AccessProtocol.TABLE_FILE
+        assert entry.access.endpoint.startswith("https://www.insee.fr/fr/statistiques/fichier/")
+        assert entry.access.endpoint.endswith("_CSV.zip") or entry.access.endpoint.endswith(
+            "_csv.zip"
+        )
+        assert entry.access.params["archive_format"] == "zip"
+        assert entry.access.params["table_format"] == "csv"
+
+
+def test_iris_sociodemo_entries_keep_official_download_urls(source) -> None:
+    endpoints = {entry.id: entry.access.endpoint for entry in source.catalog()}
+
+    assert endpoints["iris_population_2022"].endswith(
+        "/8647014/base-ic-evol-struct-pop-2022_csv.zip"
+    )
+    assert endpoints["iris_logement_2022"].endswith("/8647012/base-ic-logement-2022_csv.zip")
+    assert endpoints["iris_menages_2022"].endswith(
+        "/8647008/base-ic-couples-familles-menages-2022_csv.zip"
+    )
+    assert endpoints["iris_activite_2022"].endswith(
+        "/8647006/base-ic-activite-residents-2022_csv.zip"
+    )
+    assert endpoints["iris_diplomes_2022"].endswith(
+        "/8647010/base-ic-diplomes-formation-2022_csv.zip"
+    )
+    assert endpoints["iris_filosofi_revenus_declares_2021"].endswith(
+        "/8229323/BASE_TD_FILO_IRIS_2021_DEC_CSV.zip"
+    )
+    assert endpoints["iris_filosofi_revenus_disponibles_2021"].endswith(
+        "/8229323/BASE_TD_FILO_IRIS_2021_DISP_CSV.zip"
+    )
+
+
+def test_iris_bulk_declares_geoplateforme_department_download(source) -> None:
+    entry = source._entry("iris_bulk")
+    access = entry.access
+
+    assert access.protocol is AccessProtocol.DOWNLOAD
+    assert access.endpoint == (
+        "https://data.geopf.fr/telechargement/download/IRIS-GE/"
+        "IRIS-GE_3-0__GPKG_LAMB93_{zone}_2026-01-01/"
+        "IRIS-GE_3-0__GPKG_LAMB93_{zone}_2026-01-01.7z"
+    )
+    assert access.params == {"zone": "D075", "layer": "iris_ge"}
+    assert access.format == "application/x-7z-compressed"
+    assert entry.payload is Payload.VECTOR
+    assert entry.metadata["resource"] == "IRIS-GE"
+    assert entry.metadata["format"] == "GPKG"
+    assert entry.metadata["zone_format"] == "D{code_departement:0>3}"
 
 
 # --------------------------------------------------------------------------
@@ -151,9 +266,41 @@ def test_fetch_delegates_to_wfs_adapter() -> None:
     result = src.fetch("iris")
 
     assert result.payload is Payload.VECTOR
-    assert result.data == "STATISTICALUNITS.IRIS:contour_iris"
+    assert result.data == "STATISTICALUNITS.IRIS:contours_iris"
     assert len(wfs.calls) == 1
     assert wfs.calls[0].protocol is AccessProtocol.WFS
+
+
+def test_fetch_delegates_sociodemo_entry_to_table_file_adapter() -> None:
+    adapter = FakeTableFile()
+    reg = ProtocolRegistry()
+    reg.register(FakeWFS())
+    reg.register(adapter)
+    src = _source_class()(registry=reg)
+
+    result = src.fetch("iris_population_2022")
+
+    assert result.payload is Payload.TABLE
+    assert result.data.endswith("/8647014/base-ic-evol-struct-pop-2022_csv.zip")
+    assert len(adapter.calls) == 1
+    assert adapter.calls[0].protocol is AccessProtocol.TABLE_FILE
+
+
+def test_fetch_bulk_resolves_default_department_template() -> None:
+    download = FakeDownload()
+    reg = ProtocolRegistry()
+    reg.register(FakeWFS())
+    reg.register(FakeTableFile())
+    reg.register(download)
+    src = _source_class()(registry=reg)
+
+    result = src.fetch("iris_bulk")
+
+    assert result.payload is Payload.VECTOR
+    assert "{zone}" not in result.data
+    assert "IRIS-GE_3-0__GPKG_LAMB93_D075_2026-01-01.7z" in result.data
+    assert len(download.calls) == 1
+    assert download.calls[0].protocol is AccessProtocol.DOWNLOAD
 
 
 def test_fetch_unknown_entry_raises(source) -> None:
@@ -175,6 +322,23 @@ def test_schema_exposes_raw_iris_fields(source) -> None:
     assert schema["nom_com"] == "str"
     assert schema["type_iris"] == "str"
     assert schema["geometry"] == "geometry"
+
+
+def test_schema_exposes_common_raw_sociodemo_fields(source) -> None:
+    schema = source.schema("iris_population_2022")
+
+    for field in ("IRIS", "COM", "TYP_IRIS", "LAB_IRIS"):
+        assert schema[field] == "str"
+
+
+def test_schema_exposes_theme_headline_fields(source) -> None:
+    assert source.schema("iris_population_2022")["P22_POP"] == "float"
+    assert source.schema("iris_logement_2022")["P22_LOG"] == "float"
+    assert source.schema("iris_menages_2022")["C22_MEN"] == "float"
+    assert source.schema("iris_activite_2022")["P22_ACT1564"] == "float"
+    assert source.schema("iris_diplomes_2022")["P22_NSCOL15P"] == "float"
+    assert source.schema("iris_filosofi_revenus_declares_2021")["DEC_MED21"] == "float"
+    assert source.schema("iris_filosofi_revenus_disponibles_2021")["DISP_MED21"] == "float"
 
 
 def test_schema_validates_entry_id(source) -> None:
@@ -210,9 +374,7 @@ def test_revision_probes_wfs_capabilities_and_uses_etag(
     assert captured and "GetCapabilities" in captured[0]
 
 
-def test_revision_falls_back_to_last_modified(
-    source, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_revision_falls_back_to_last_modified(source, monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_head(url, **_kw):
         return _FakeResponse({"last-modified": "Mon, 01 Jun 2026 00:00:00 GMT"})
 
@@ -220,9 +382,7 @@ def test_revision_falls_back_to_last_modified(
     assert source.revision("iris") == "Mon, 01 Jun 2026 00:00:00 GMT"
 
 
-def test_revision_returns_none_on_network_error(
-    source, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_revision_returns_none_on_network_error(source, monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_head(url, **_kw):
         raise RuntimeError("simulated DNS failure")
 
@@ -237,9 +397,19 @@ def test_revision_returns_none_without_freshness_header(
     assert source.revision("iris") is None
 
 
-def test_revision_validates_entry_id(
-    source, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_revision_returns_static_millesime_for_sociodemo_entry(source) -> None:
+    assert source.revision("iris_population_2022") == "insee-rp-iris-population-2022-geo-2024-01-01"
+    assert (
+        source.revision("iris_filosofi_revenus_disponibles_2021")
+        == "insee-filosofi-iris-revenus-disponibles-2021-geo-2022-01-01"
+    )
+
+
+def test_revision_returns_static_millesime_for_iris_bulk(source) -> None:
+    assert source.revision("iris_bulk") == "ign-iris-ge-gpkg-lamb93-2026-01-01"
+
+
+def test_revision_validates_entry_id(source, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("httpx.head", lambda *_a, **_kw: _FakeResponse({}))
     with pytest.raises(KeyError, match="unknown entry 'ghost'"):
         source.revision("ghost")

@@ -145,6 +145,87 @@ def test_fetch_materialize_streams_file_to_disk(
         assert fh.read() == b"chunk-1chunk-2"
 
 
+def test_fetch_materialize_can_copy_csv_directly_to_s3_uri(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executed: list[str] = []
+
+    class _FakeConn:
+        def execute(self, sql: str) -> None:
+            executed.append(sql)
+
+    class _FakeSession:
+        conn = _FakeConn()
+
+        def __enter__(self) -> "_FakeSession":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    import gispulse.persistence.duckdb_engine as duckdb_engine
+
+    monkeypatch.setattr(duckdb_engine, "DuckDBSession", _FakeSession)
+
+    uri = "s3://gispulse/raw/cadastre/sites.parquet"
+    result = HttpFileFetcher().fetch(
+        _access(
+            "https://host.example.org/sites.csv",
+            lat="lat",
+            lon="lng",
+            s3_uri=uri,
+        ),
+        mode=FetchMode.MATERIALIZE,
+        extent=(0, 0, 1, 1),
+    )
+
+    assert result.mode is FetchMode.MATERIALIZE
+    assert result.data == uri
+    assert result.reference == uri
+    assert result.metadata["s3_uri"] == uri
+    assert f"TO '{uri}' (FORMAT PARQUET)" in executed[0]
+    assert "read_csv_auto('/vsicurl/https://host.example.org/sites.csv')" in executed[0]
+    assert "ST_MakeEnvelope(0.0, 0.0, 1.0, 1.0)" in executed[0]
+
+
+def test_fetch_materialize_builds_s3_uri_from_configured_bucket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executed: list[str] = []
+
+    class _FakeConn:
+        def execute(self, sql: str) -> None:
+            executed.append(sql)
+
+    class _FakeSession:
+        conn = _FakeConn()
+
+        def __enter__(self) -> "_FakeSession":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    import gispulse.persistence.duckdb_engine as duckdb_engine
+
+    monkeypatch.setenv("GISPULSE_S3_BUCKET", "gispulse-beta")
+    monkeypatch.setattr(duckdb_engine, "DuckDBSession", _FakeSession)
+
+    result = HttpFileFetcher().fetch(
+        _access(
+            "https://host.example.org/cities.geojson",
+            s3_key="raw/cadastre/cities.parquet",
+        ),
+        mode=FetchMode.MATERIALIZE,
+    )
+
+    uri = "s3://gispulse-beta/raw/cadastre/cities.parquet"
+    assert result.data == uri
+    assert result.metadata["s3_uri"] == uri
+    assert f"TO '{uri}' (FORMAT PARQUET)" in executed[0]
+    assert "ST_Read('/vsicurl/https://host.example.org/cities.geojson')" in executed[0]
+
+
 # -- SSRF guard -------------------------------------------------------------
 
 
