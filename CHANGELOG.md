@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0]
+
+Feature release consolidating everything that landed on `main` since `2.0.0`:
+a wave of new declarative source plugins, the ELT push-down / manifest-v3
+pipeline, S3 bulk materialisation for tabular sources, and an env-driven
+Garage object store. Fully backwards-compatible — the `_compat` meta-path
+shim and the `PluginHub = ExtensionHub` alias stay in place.
+
+### Added
+
+- **TABLE_FILE bulk materialisation to S3 (#358).** The `AccessProtocol.TABLE_FILE`
+  fetcher can write a parsed DuckDB table scan to S3/Garage as Parquet
+  (`s3_uri` / `s3_key` → `COPY … TO 's3://…' (FORMAT PARQUET)`, `MATERIALIZE`
+  mode), enabling national-scale tabular ingestion.
+- **RestTableFetcher / `REST_TABLE` (#337).** Paginated tabular-JSON REST
+  adapter for declarative sources.
+- **New declarative source plugins:** Géorisques over REST_TABLE (#338),
+  protected areas — Natura 2000 + ZNIEFF (#341), SUP servitudes incl. ABF /
+  PPR over WFS (#342), INSEE IRIS statistical units over WFS (#343), Cadastre
+  Etalab bulk per *département* (#353), BDNB (#360), BODACC (#361), RNB (#362),
+  loyers (#363), BAN (#364). **Belgium:** business parks (#367), Statbel
+  statistical sectors + demographics (#368), GIPOD planned works / public
+  domain — Flanders (#369).
+- **`milou` client (#366).** S3/R2-backed DuckDB client with KMZ/XLSX ingestion
+  in Lambert-72.
+- **ELT push-down pipeline.** SQL push-down for the 12 attribute capabilities
+  (#264), aggregating / two-layer / CRS geometry caps (#296), dissolve +
+  spatial_join (#297), nearest_neighbor + overlay (#298), temporal_filter +
+  temporal_join (#299); manifest-v3 schema + loader + compiler + `gispulse
+  migrate` (#300), load-time cycle / ref validation (#301), manifest runner +
+  view/table materialisation (#302), `gispulse explain` DAG inspection (#303),
+  per-model data-quality asserts (#304).
+- **Garage object store (#348).** Env-driven S3 landing-zone service in compose.
+- **Changelog coverage gate (#335).** CI guards that a version bump ships a
+  matching changelog entry.
+
+### Fixed
+
+- **`_compat` class identity (#334).** The legacy meta-path finder now prepends
+  to `sys.meta_path` and aliases legacy modules to the same object, so
+  `isinstance` / `pytest.raises` hold across the `persistence.*` ↔
+  `gispulse.persistence.*` boundary (#333).
+- **WfsFetcher registration (#355).** `AccessProtocol.WFS` now resolves from the
+  core roster.
+- **src-dvf (#354).** Re-sourced from the live geo-DVF CSV after the upstream
+  parquet mirror was removed.
+
+### Changed
+
+- Dependency bumps: starlette 1.0.1 (#365), redis `>=5.0,<9.0` (#357),
+  actions/checkout 6 (#351), actions/setup-python 6 (#350),
+  actions/github-script 9 (#352).
+- Docs: Phase 2 feature pages (#323), changelog backfill + 2.0 migration guide
+  (#322), manifest-v3 migration guide (#305), absolute repo links (#325).
+
 ## [2.0.0]
 
 The first **major** release. Numerically it's a jump from `1.6.2`, but in

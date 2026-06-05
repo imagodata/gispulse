@@ -13,6 +13,33 @@ La source de vérité de ce fichier est [`CHANGELOG.md`](https://github.com/imag
 
 ---
 
+## [2.1.0] — 2026-06-05
+
+Release de fonctionnalités consolidant tout ce qui a atterri sur `main` depuis `2.0.0` : une vague de nouveaux plugins sources déclaratifs, le pipeline ELT push-down / manifest-v3, la matérialisation S3 en masse des sources tabulaires, et un object store Garage piloté par l'environnement. Entièrement rétro-compatible — le shim meta-path `_compat` et l'alias `PluginHub = ExtensionHub` restent en place.
+
+### Ajouts
+
+- **Matérialisation TABLE_FILE en masse vers S3 (#358).** Le fetcher `AccessProtocol.TABLE_FILE` peut écrire un scan de table DuckDB parsé vers S3/Garage en Parquet (`s3_uri` / `s3_key` → `COPY … TO 's3://…' (FORMAT PARQUET)`, mode `MATERIALIZE`), permettant l'ingestion tabulaire à l'échelle nationale.
+- **RestTableFetcher / `REST_TABLE` (#337).** Adaptateur REST JSON tabulaire paginé pour les sources déclaratives.
+- **Nouveaux plugins sources déclaratifs :** Géorisques via REST_TABLE (#338), espaces protégés — Natura 2000 + ZNIEFF (#341), servitudes SUP dont ABF / PPR via WFS (#342), unités statistiques INSEE IRIS via WFS (#343), Cadastre Etalab en masse par *département* (#353), BDNB (#360), BODACC (#361), RNB (#362), loyers (#363), BAN (#364). **Belgique :** parcs d'activité (#367), secteurs statistiques + démographie Statbel (#368), travaux planifiés / domaine public GIPOD — Flandre (#369).
+- **Client `milou` (#366).** Client DuckDB sur S3/R2 avec ingestion KMZ/XLSX en Lambert-72.
+- **Pipeline ELT push-down.** Push-down SQL pour les 12 capacités attributaires (#264), capacités géométriques agrégeantes / deux-couches / CRS (#296), dissolve + spatial_join (#297), nearest_neighbor + overlay (#298), temporal_filter + temporal_join (#299) ; schéma manifest-v3 + loader + compilateur + `gispulse migrate` (#300), validation cycles / refs au chargement (#301), runner de manifest + matérialisation view/table (#302), inspection DAG `gispulse explain` (#303), asserts de qualité de données par modèle (#304).
+- **Object store Garage (#348).** Service S3 de zone d'atterrissage piloté par variables d'environnement dans compose.
+- **Gate de couverture changelog (#335).** La CI garantit qu'un bump de version embarque une entrée de changelog correspondante.
+
+### Corrections
+
+- **Identité de classe `_compat` (#334).** Le finder meta-path legacy se place désormais en tête de `sys.meta_path` et aliase les modules legacy vers le même objet, de sorte que `isinstance` / `pytest.raises` tiennent à travers la frontière `persistence.*` ↔ `gispulse.persistence.*` (#333).
+- **Enregistrement WfsFetcher (#355).** `AccessProtocol.WFS` se résout désormais depuis le roster core.
+- **src-dvf (#354).** Re-sourcé depuis le CSV géo-DVF live après la suppression du miroir parquet en amont.
+
+### Modifications
+
+- Bumps de dépendances : starlette 1.0.1 (#365), redis `>=5.0,<9.0` (#357), actions/checkout 6 (#351), actions/setup-python 6 (#350), actions/github-script 9 (#352).
+- Docs : pages de fonctionnalités Phase 2 (#323), backfill changelog + guide de migration 2.0 (#322), guide de migration manifest-v3 (#305), liens dépôt absolus (#325).
+
+---
+
 ## [2.0.0] — 2026-05-20
 
 Première release **majeure**. Numériquement c'est un saut depuis `1.6.2`, mais en pratique la surface d'API regroupe ce qui était tagué en interne `1.7.0`, `1.8.0` et `1.9.0` — des fonctionnalités accumulées sur `main` sans jamais être publiées sur PyPI. On promeut toute la stack en un seul tag et on aligne la version publique sur l'histoire du produit.
