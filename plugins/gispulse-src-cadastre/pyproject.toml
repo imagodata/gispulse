@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gispulse-src-cadastre"
-version = "0.1.0"
-description = "French cadastre data source for GISPulse (IGN Parcellaire Express)"
+version = "0.2.0"
+description = "French cadastre data source for GISPulse (IGN Parcellaire Express WFS + Etalab bulk)"
 requires-python = ">=3.10"
 license = "AGPL-3.0-or-later"
 authors = [{ name = "GISPulse", email = "dev@gispulse.io" }]
