@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gispulse-src-statbel-be"
+version = "0.1.0"
+description = "Statbel Belgium statistical source for GISPulse (secteurs statistiques + démographie)"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "GISPulse", email = "dev@gispulse.io" }]
+dependencies = [
+    "gispulse>=2.0.0,<3.0.0",
+]
+
+# Discovered as a data source by core.plugin_hub.PluginHub.
+[project.entry-points."gispulse.data_sources"]
+statbel_be = "gispulse_src_statbel_be:register"
+
+[tool.gispulse.plugin]
+kind = "source"
+protocol = ">=1.0,<2.0"
+domain = "statistique"
+jurisdiction = "BE"
+display_name = "Statbel — Belgium open statistical data"
