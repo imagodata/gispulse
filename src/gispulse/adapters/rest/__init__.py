@@ -1,13 +1,15 @@
-"""REST service adapter — generic GeoJSON-over-HTTP fetcher.
+"""REST service adapters — GeoJSON and tabular-JSON over HTTP.
 
-Importing this package self-registers the core REST GeoJSON transport
-adapter in :data:`core.sources.PROTOCOLS` (issue #192), so the ETL fetch
-path has a real ``rest-api`` fetcher to dispatch to.
+Importing this package self-registers the core REST transport adapters in
+:data:`core.sources.PROTOCOLS`, so the ETL fetch path has real fetchers to
+dispatch to: ``rest-api`` (GeoJSON FeatureCollection, #192) and
+``rest-table`` (paginated tabular JSON, #196).
 """
 
 from __future__ import annotations
 
-# Side-effect import: RestGeoJsonFetcher registers itself on import.
+# Side-effect imports: each fetcher registers itself on import.
 from gispulse.adapters.rest import rest_fetcher  # noqa: F401
+from gispulse.adapters.rest import rest_table_fetcher  # noqa: F401
 
-__all__ = ["rest_fetcher"]
+__all__ = ["rest_fetcher", "rest_table_fetcher"]

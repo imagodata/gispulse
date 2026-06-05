@@ -123,6 +123,33 @@ core fetchers shipped with GISPulse:
 | `OGC_FEATURES` | `OgcFeaturesFetcher` | `collection` *(required)*, `crs` |
 | `STAC` | `StacFetcher` | `collection`/`collections` *(required)*, `datetime`, `limit`, `asset` |
 | `REST_API` | `RestGeoJsonFetcher` | `geom_param` *(optional)*; any other key is forwarded verbatim |
+| `REST_TABLE` | `RestTableFetcher` | `query` *(dict, forwarded verbatim)*; `pagination` *(dict, see below)* |
+
+`REST_TABLE` reads a **paginated tabular JSON** API that answers
+`{"data": [...], "next": ...}` (Géorisques, BAN, RNB) — as opposed to
+`REST_API` which expects a GeoJSON `FeatureCollection`. It is
+**materialize-only** (`FetchMode.REFERENCE` raises): a paginated API has no
+zero-copy DuckDB scan. Rows are streamed to a local JSONL file; the
+`SourceResult.metadata` carries `row_count`, `page_count`, `source_url` and
+a `sha256` of the output. The `pagination` block is bounded and same-origin
+guarded:
+
+```python
+params={
+    "query": {"code_insee": "63113", "page_size": 100},
+    "pagination": {
+        "data_key": "data",          # JSON key holding the row list
+        "next_key": "next",          # key holding the next-page URL (abs or relative)
+        "max_pages": 1000,           # hard ceiling (default)
+        "max_rows": 100_000,         # optional row cap (truncates)
+        "max_total_seconds": 120,    # optional wall-clock deadline
+    },
+}
+```
+
+A `next` link is resolved relative to the current page, must stay
+**same-origin** as the declared endpoint, is SSRF-guarded per hop, and a
+loop on an already-seen URL stops the walk.
 
 A plugin of `kind = "protocol"` can register additional fetchers for
 other protocols — but most source authors only declare an `AccessSpec`

@@ -3,12 +3,21 @@ name: Deploy docs to GitHub Pages
 on:
   push:
     branches: [main]
+    # Phase 4 of EPIC #309 (closes #321) — also redeploy when the changelog,
+    # migration guides, or pyproject.toml version change, so the published
+    # site never lags the latest tag.
     paths:
       - "docs-site/**"
       - "templates/**"
+      - "CHANGELOG.md"
+      - "MIGRATION-*.md"
+      - "pyproject.toml"
       - "scripts/build_playground_data.py"
       - "scripts/build_templates_index.py"
+      - "scripts/smoke_test_docs.py"
       - ".github/workflows/docs.yml"
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -60,6 +69,10 @@ jobs:
         run: npm run build
 
       - name: Smoke-test dist artifacts
+        # When triggered by a tag push, inject the tag explicitly — the
+        # default checkout is shallow and ``git describe`` would fail.
+        env:
+          DOCS_SMOKE_LATEST_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: python scripts/smoke_test_docs.py
 
       - name: Upload artifact

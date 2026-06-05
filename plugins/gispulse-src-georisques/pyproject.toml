@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gispulse-src-georisques"
+version = "0.1.0"
+description = "French Géorisques data source for GISPulse (natural/technological risk signals)"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "GISPulse", email = "dev@gispulse.io" }]
+dependencies = [
+    "gispulse>=2.0.0,<3.0.0",
+]
+
+# Registered as a data source — discovered by core.plugin_hub.PluginHub.
+[project.entry-points."gispulse.data_sources"]
+georisques = "gispulse_src_georisques:register"
+
+[tool.gispulse.plugin]
+kind = "source"
+protocol = ">=1.0,<2.0"
+domain = "environnement"
+jurisdiction = "FR"
+display_name = "Géorisques — risques naturels et technologiques (France)"

@@ -30,12 +30,20 @@ try:
     from gispulse.persistence.duckdb_engine import DuckDBSession
     # Lot 3: change-log adapter wrapping DuckDBSession for live-sync.
     from gispulse.persistence.duckdb_engine_adapter import DuckDBSpatialEngine
+    from gispulse.persistence.duckdb_relations import (
+        materialize_remote_gpkg,
+        parquet_scan,
+        st_dwithin_join_sql,
+    )
 
     _DUCKDB_AVAILABLE = True
 except ImportError:
     _DUCKDB_AVAILABLE = False
     DuckDBSession = None  # type: ignore[assignment,misc]
     DuckDBSpatialEngine = None  # type: ignore[assignment,misc]
+    materialize_remote_gpkg = None  # type: ignore[assignment,misc]
+    parquet_scan = None  # type: ignore[assignment,misc]
+    st_dwithin_join_sql = None  # type: ignore[assignment,misc]
 
 # DuckDB-PostGIS hybrid bridge (Phase 4).
 try:
@@ -147,6 +155,9 @@ __all__ = [
     # DuckDB (Phase 1)
     "DuckDBSession",
     "DuckDBSpatialEngine",
+    "parquet_scan",
+    "materialize_remote_gpkg",
+    "st_dwithin_join_sql",
     "_DUCKDB_AVAILABLE",
     # Hybrid bridge (Phase 4)
     "DuckDBPostGISBridge",
