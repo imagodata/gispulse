@@ -75,6 +75,13 @@ def test_via_legacy_top_level_shim() -> None:
     is redirected by the ``_compat`` meta-path finder; the symbol must resolve.
     """
     import gispulse  # noqa: F401 - ensures _compat.install() has run
+    from gispulse import _compat
+
+    # The shim warns only once per root package (session-global ``_warned``
+    # set); another test may already have imported the ``core`` root. Discard
+    # it so the DeprecationWarning fires deterministically here, regardless of
+    # test execution order.
+    _compat._warned.discard("core")
 
     with pytest.warns(DeprecationWarning):
         legacy = importlib.import_module("core.plugin_contracts")
