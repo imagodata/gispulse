@@ -82,6 +82,7 @@ def test_pyproject_declares_statbel_be_entrypoint_and_manifest() -> None:
     assert manifest["kind"] == "source"
     assert manifest["domain"] == "statistique"
     assert manifest["jurisdiction"] == "BE"
+    assert manifest["urls_verified"] is False
 
 
 def test_register_adds_statbel_be_source_to_global_registry() -> None:
@@ -155,6 +156,9 @@ def test_sectors_contours_metadata_has_crs_and_join_key(source) -> None:
     assert meta["join_key"] == "cd_sector"
     assert meta["provider"].startswith("Statbel")
     assert meta["license"] == "Creative Commons Zero (CC0 1.0)"
+    assert meta["landing_page_url"] == (
+        "https://statbel.fgov.be/fr/open-data/secteurs-statistiques"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +185,13 @@ def test_indicator_entry_is_table_download_keyed_by_cd_sector(
     assert entry.payload is Payload.TABLE
     assert entry.metadata["join_key"] == "cd_sector"
     assert entry.metadata["license"] == "Creative Commons Zero (CC0 1.0)"
+    assert entry.metadata["fetch_mode"] == "materialize_only"
+    assert "downstream pipeline" in entry.metadata["fetch_doc"]
+    assert "Payload.TABLE" in entry.metadata["payload_note"]
+    assert "Payload.VECTOR" in entry.metadata["payload_note"]
+    assert entry.metadata["landing_page_url"].startswith(
+        "https://statbel.fgov.be/fr/open-data/"
+    )
 
 
 def test_building_permits_is_table_keyed_by_nis5(source) -> None:
@@ -193,6 +204,35 @@ def test_building_permits_is_table_keyed_by_nis5(source) -> None:
     # Permits are at municipality level, join key differs
     assert entry.metadata["join_key"] == "cd_nis5"
     assert entry.metadata["granularity"] == "municipality"
+    assert entry.metadata["fetch_mode"] == "materialize_only"
+    assert "downstream pipeline" in entry.metadata["fetch_doc"]
+    assert "Payload.TABLE" in entry.metadata["payload_note"]
+    assert "Payload.VECTOR" in entry.metadata["payload_note"]
+    assert entry.metadata["landing_page_url"] == (
+        "https://statbel.fgov.be/fr/open-data/permis-de-batir"
+    )
+
+
+def test_table_entries_are_materialize_only_but_contours_remain_scannable(
+    source,
+) -> None:
+    entries = {entry.id: entry for entry in source.catalog()}
+    table_ids = {
+        "indicators-population",
+        "indicators-households",
+        "indicators-income",
+        "indicators-cars",
+        "indicators-building-permits",
+    }
+
+    for entry_id in table_ids:
+        assert entries[entry_id].metadata["fetch_mode"] == "materialize_only"
+
+    assert "fetch_mode" not in entries["sectors-contours"].metadata
+
+
+def test_sectors_contours_schema_does_not_include_metadata_crs(source) -> None:
+    assert "crs" not in source.schema("sectors-contours")
 
 
 # ---------------------------------------------------------------------------
@@ -224,12 +264,12 @@ def test_fetch_unknown_entry_raises(source) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_schema_sectors_contours_has_geometry_and_crs(source) -> None:
+def test_schema_sectors_contours_has_geometry_without_metadata_crs(source) -> None:
     schema = source.schema("sectors-contours")
 
     assert schema["cd_sector"] == "str"
     assert schema["geometry"] == "geometry"
-    assert schema["crs"] == "EPSG:31370"
+    assert "crs" not in schema
     assert schema["cd_nis5"] == "str"
     assert schema["tx_sector_descr_fr"] == "str"
 
