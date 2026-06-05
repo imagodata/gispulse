@@ -27,7 +27,9 @@ shim and the `PluginHub = ExtensionHub` alias stay in place.
   protected areas — Natura 2000 + ZNIEFF (#341), SUP servitudes incl. ABF /
   PPR over WFS (#342), INSEE IRIS statistical units over WFS (#343), Cadastre
   Etalab bulk per *département* (#353), BDNB (#360), BODACC (#361), RNB (#362),
-  loyers (#363), BAN (#364).
+  loyers (#363), BAN (#364). **Belgium:** business parks (#367), Statbel
+  statistical sectors + demographics (#368), GIPOD planned works / public
+  domain — Flanders (#369).
 - **`milou` client (#366).** S3/R2-backed DuckDB client with KMZ/XLSX ingestion
   in Lambert-72.
 - **ELT push-down pipeline.** SQL push-down for the 12 attribute capabilities
