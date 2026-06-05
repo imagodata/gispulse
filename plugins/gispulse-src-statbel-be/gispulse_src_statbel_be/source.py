@@ -7,7 +7,10 @@ has (``schema()``). Core fetchers own the network code.
 
 Geometry entries use ``AccessProtocol.DOWNLOAD`` (``HttpFileFetcher``).
 Indicator entries also use ``DOWNLOAD`` — the upstream files are
-delimited-text (TXT/CSV) or XLSX joined to the sector code.
+ZIP-wrapped delimited text or XLSX joined to the sector code. They are
+declared ``Payload.TABLE``, but the current ``HttpFileFetcher`` materializes
+DOWNLOAD entries as ``Payload.VECTOR`` and cannot scan ZIP/XLSX tabular
+members. Downstream pipelines must decompress/parse these table files.
 
 CRS note
 --------
@@ -20,9 +23,9 @@ URL status
 All URLs are the canonical Statbel open-data landing pages or their
 direct-download variants as of June 2026.  Some direct-download URLs may
 change between Statbel publication cycles.  Where the exact file URL was
-uncertain, the dataset landing-page URL is used together with a comment
-``# URL directe à vérifier``.  Maintainers should validate these URLs
-against https://statbel.fgov.be/fr/open-data before each release.
+uncertain, entry metadata carries the official dataset landing page as a
+fallback. Maintainers should validate these URLs against
+https://statbel.fgov.be/fr/open-data before each release.
 """
 
 from __future__ import annotations
@@ -45,6 +48,7 @@ from gispulse.plugins.api import (
 # NOTE: Statbel publishes a new millésime each year; the URL below points to
 # the 2023 release.  Check https://statbel.fgov.be/fr/open-data/secteurs-statistiques
 # for the latest vintage.
+_SECTORS_LANDING_URL = "https://statbel.fgov.be/fr/open-data/secteurs-statistiques"
 _SECTORS_GEOJSON_URL = (
     "https://statbel.fgov.be/sites/default/files/files/opendata/statbel/"
     "secteurs-statistiques/sh_statbel_statistical_sectors_20230101.geojson"
@@ -54,6 +58,9 @@ _SECTORS_GEOJSON_URL = (
 
 # Population by statistical sector (TXT, delimiter "|")
 # Landing: https://statbel.fgov.be/fr/open-data/population-par-secteur-statistique
+_POPULATION_LANDING_URL = (
+    "https://statbel.fgov.be/fr/open-data/population-par-secteur-statistique"
+)
 _POPULATION_URL = (
     "https://statbel.fgov.be/sites/default/files/files/opendata/pop/"
     "TF_SOC_POP_STRUCT_2022.zip"
@@ -63,6 +70,9 @@ _POPULATION_URL = (
 
 # Households by statistical sector (TXT, delimiter "|")
 # Landing: https://statbel.fgov.be/fr/open-data/menages-par-secteur-statistique
+_HOUSEHOLDS_LANDING_URL = (
+    "https://statbel.fgov.be/fr/open-data/menages-par-secteur-statistique"
+)
 _HOUSEHOLDS_URL = (
     "https://statbel.fgov.be/sites/default/files/files/opendata/menages/"
     "TF_SOC_MENAGES_2022.zip"
@@ -72,6 +82,9 @@ _HOUSEHOLDS_URL = (
 
 # Average income by statistical sector (TXT, delimiter "|")
 # Landing: https://statbel.fgov.be/fr/open-data/revenus-par-secteur-statistique
+_INCOME_LANDING_URL = (
+    "https://statbel.fgov.be/fr/open-data/revenus-fiscaux-par-secteur-statistique"
+)
 _INCOME_URL = (
     "https://statbel.fgov.be/sites/default/files/files/opendata/revenu/"
     "TF_INCOME_2021_SS.zip"
@@ -81,6 +94,9 @@ _INCOME_URL = (
 
 # Car fleet by statistical sector (TXT, delimiter "|")
 # Landing: https://statbel.fgov.be/fr/open-data/parc-automobile-par-secteur-statistique
+_CARS_LANDING_URL = (
+    "https://statbel.fgov.be/fr/open-data/parc-automobile-par-secteur-statistique"
+)
 _CARS_URL = (
     "https://statbel.fgov.be/sites/default/files/files/opendata/vehicles/"
     "TF_VEHICLES_SS_2023.zip"
@@ -91,6 +107,7 @@ _CARS_URL = (
 # Building permits by municipality (XLSX) — Statbel does not publish permits
 # at sector level; the finest grain is municipality (NIS code).
 # Landing: https://statbel.fgov.be/fr/open-data/permis-de-batir
+_PERMITS_LANDING_URL = "https://statbel.fgov.be/fr/open-data/permis-de-batir"
 _PERMITS_URL = (
     "https://statbel.fgov.be/sites/default/files/files/opendata/permits/"
     "TF_PERM_BUILDING.xlsx"
@@ -104,6 +121,24 @@ _PROVIDER_META = {
     "jurisdiction": "BE",
     "join_key": "cd_sector",
     "crs": "EPSG:31370",  # Belgian Lambert 72 — for geometry entries
+}
+
+# Current core limitation: HttpFileFetcher scans vector-like file formats only
+# and returns Payload.VECTOR even when a plugin entry is declared Payload.TABLE.
+# TODO(core): teach DOWNLOAD table materialization to return Payload.TABLE for
+# ZIP/XLSX tabular inputs, including ZIP member selection. A related ZIP harden
+# branch exists at codex/harden-table-file-zip-members; this plugin does not
+# depend on it.
+_TABLE_DOWNLOAD_CORE_LIMIT_META = {
+    "fetch_mode": "materialize_only",
+    "fetch_doc": (
+        "Direct ZIP/XLSX table downloads are materialized only; decompression "
+        "and parsing are the responsibility of the downstream pipeline."
+    ),
+    "payload_note": (
+        "Declared as Payload.TABLE for the plugin contract, but the current "
+        "core HttpFileFetcher returns Payload.VECTOR for DOWNLOAD results."
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -128,9 +163,11 @@ _ENTRIES: dict[str, dict] = {
             "dataset": "secteurs-statistiques",
             "geometry_key": "geometry",
             "sector_code_key": "cd_sector",
+            "landing_page_url": _SECTORS_LANDING_URL,
+            "fallback_url": _SECTORS_LANDING_URL,
             "note": (
                 "Annual vintage — check landing page for latest release: "
-                "https://statbel.fgov.be/fr/open-data/secteurs-statistiques"
+                f"{_SECTORS_LANDING_URL}"
             ),
         },
     },
@@ -148,8 +185,11 @@ _ENTRIES: dict[str, dict] = {
         ),
         "metadata": {
             **_PROVIDER_META,
+            **_TABLE_DOWNLOAD_CORE_LIMIT_META,
             "dataset": "population-par-secteur-statistique",
             "key_fields": ("cd_sector", "cd_sex", "cd_naty", "ms_pop"),
+            "landing_page_url": _POPULATION_LANDING_URL,
+            "fallback_url": _POPULATION_LANDING_URL,
         },
     },
     "indicators-households": {
@@ -163,8 +203,11 @@ _ENTRIES: dict[str, dict] = {
         ),
         "metadata": {
             **_PROVIDER_META,
+            **_TABLE_DOWNLOAD_CORE_LIMIT_META,
             "dataset": "menages-par-secteur-statistique",
             "key_fields": ("cd_sector", "cd_type_menage", "ms_menages"),
+            "landing_page_url": _HOUSEHOLDS_LANDING_URL,
+            "fallback_url": _HOUSEHOLDS_LANDING_URL,
         },
     },
     "indicators-income": {
@@ -178,8 +221,11 @@ _ENTRIES: dict[str, dict] = {
         ),
         "metadata": {
             **_PROVIDER_META,
+            **_TABLE_DOWNLOAD_CORE_LIMIT_META,
             "dataset": "revenus-par-secteur-statistique",
             "key_fields": ("cd_sector", "ms_mean_total_net_taxable_income", "ms_nb"),
+            "landing_page_url": _INCOME_LANDING_URL,
+            "fallback_url": _INCOME_LANDING_URL,
         },
     },
     "indicators-cars": {
@@ -193,8 +239,11 @@ _ENTRIES: dict[str, dict] = {
         ),
         "metadata": {
             **_PROVIDER_META,
+            **_TABLE_DOWNLOAD_CORE_LIMIT_META,
             "dataset": "parc-automobile-par-secteur-statistique",
             "key_fields": ("cd_sector", "cd_type_fuel", "ms_nb_vehicles"),
+            "landing_page_url": _CARS_LANDING_URL,
+            "fallback_url": _CARS_LANDING_URL,
         },
     },
     "indicators-building-permits": {
@@ -208,12 +257,15 @@ _ENTRIES: dict[str, dict] = {
         ),
         "metadata": {
             **_PROVIDER_META,
+            **_TABLE_DOWNLOAD_CORE_LIMIT_META,
             "dataset": "permis-de-batir",
             # Building permits are published at municipality (NIS) granularity,
             # not at statistical-sector level.
             "join_key": "cd_nis5",
             "key_fields": ("cd_nis5", "tx_adm_dstr_descr_fr", "ms_nb_permits"),
             "granularity": "municipality",
+            "landing_page_url": _PERMITS_LANDING_URL,
+            "fallback_url": _PERMITS_LANDING_URL,
         },
     },
 }
@@ -234,7 +286,6 @@ _SCHEMAS: dict[str, dict[str, str]] = {
         "cd_prov": "str",
         "cd_rgn_refnis": "str",
         "geometry": "geometry",
-        "crs": "EPSG:31370",
     },
     "indicators-population": {
         "cd_sector": "str",
