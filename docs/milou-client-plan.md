@@ -17,9 +17,9 @@
 - Pattern de référence (NE PAS importer en bloc) : cube DuckDB de `gispulse-foncier` — scan Parquet paramétré, `read_parquet(..., union_by_name=true)`, géométrie normalisée.
 
 ## 2. À durcir / ajouter côté gispulse
-- [ ] **KMZ réel** dans `persistence.io` : `.kmz` → unzip → `doc.kml` (fallback 1er `.kml`) → GeoDataFrame WGS84. Aujourd'hui `.kmz` n'est qu'inféré côté engine CDC, pas lu par `read_vector`.
-- [ ] **XLSX projeté CRS-explicite** : ajouter `x_col` / `y_col` / `source_crs` / `target_crs` ; **refuser l'inférence naïve `X/Y → EPSG:4326`** (les fichiers Orange ont des **X/Y en Lambert 72 / EPSG:31370**).
-- [ ] **Déclarer `openpyxl`** (extra `xlsx` ou dépendance directe) — `pandas.read_excel` est utilisé mais la dépendance n'est pas déclarée.
+- [x] **KMZ réel** dans `persistence.io` : `.kmz` → unzip → `doc.kml` (fallback 1er `.kml`) → GeoDataFrame WGS84. Aujourd'hui `.kmz` n'est qu'inféré côté engine CDC, pas lu par `read_vector`.
+- [x] **XLSX projeté CRS-explicite** : ajouter `x_col` / `y_col` / `source_crs` / `target_crs` ; **refuser l'inférence naïve `X/Y → EPSG:4326`** (les fichiers Orange ont des **X/Y en Lambert 72 / EPSG:31370**).
+- [x] **Déclarer `openpyxl`** (extra `xlsx` ou dépendance directe) — `pandas.read_excel` est utilisé mais la dépendance n'est pas déclarée.
 - [ ] **Helpers DuckDB/R2** : builders sûrs `read_parquet('s3://…')` (+ `union_by_name`), matérialisation GPKG distante en cache local, helper `ST_DWithin` métrique.
 - [ ] **Conventions GPKG de pipeline** : helper de noms de couches + manifest (`feature_count`, `source`, `crs`, `params_hash`).
 - [ ] **Doc API cliente minimale** (exemples sans règles métier MILOU).

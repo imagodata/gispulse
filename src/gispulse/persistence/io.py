@@ -58,6 +58,9 @@ VECTOR_DRIVERS: dict[str, str] = {
 #: Formats that support multiple layers.
 MULTI_LAYER_FORMATS = {".gpkg", ".gdb", ".sqlite"}
 
+#: Maximum uncompressed KML member size accepted from a KMZ archive.
+KMZ_KML_MAX_BYTES = 50 * 1024 * 1024
+
 #: Formats that are write-capable via GeoPandas/Fiona.
 WRITABLE_FORMATS = {
     ".gpkg", ".geojson", ".json", ".shp", ".fgb",
@@ -223,8 +226,14 @@ def _read_kmz_geo(
 
             preferred = next(
                 (name for name in kml_names if Path(name).name.lower() == "doc.kml"),
-                sorted(kml_names)[0],
+                kml_names[0],
             )
+            kml_info = archive.getinfo(preferred)
+            if kml_info.file_size > KMZ_KML_MAX_BYTES:
+                raise ValueError(
+                    f"KMZ KML member '{preferred}' exceeds maximum size "
+                    f"({kml_info.file_size} bytes > {KMZ_KML_MAX_BYTES} bytes)."
+                )
             kml_bytes = archive.read(preferred)
     except zipfile.BadZipFile as exc:
         raise ValueError(f"Invalid KMZ file '{path}': not a valid zip archive.") from exc

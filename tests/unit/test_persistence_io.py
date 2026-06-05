@@ -13,6 +13,7 @@ import pytest
 from pyproj import Transformer
 from shapely.geometry import Point
 
+from gispulse.persistence import io as io_mod
 from gispulse.persistence.io import (
     dataset_from_file,
     detect_format,
@@ -139,6 +140,43 @@ class TestReadKmz:
         assert result.geometry.iloc[0].x == pytest.approx(4)
         assert result.geometry.iloc[0].y == pytest.approx(50)
 
+    def test_read_kmz_falls_back_to_first_kml_in_archive_order(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        path = tmp_path / "network.kmz"
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr(
+                "z-first.kml",
+                """<kml xmlns="http://www.opengis.net/kml/2.2">
+<Placemark><name>Archive first</name><Point><coordinates>1,49,0</coordinates></Point></Placemark>
+</kml>""",
+            )
+            archive.writestr(
+                "a-second.kml",
+                """<kml xmlns="http://www.opengis.net/kml/2.2">
+<Placemark><name>Sorted first</name><Point><coordinates>2,50,0</coordinates></Point></Placemark>
+</kml>""",
+            )
+
+        result = read_vector(str(path))
+
+        assert result.geometry.iloc[0].x == pytest.approx(1)
+        assert result.geometry.iloc[0].y == pytest.approx(49)
+
+    def test_read_kmz_rejects_oversized_kml_member(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = tmp_path / "oversized.kmz"
+        monkeypatch.setattr(io_mod, "KMZ_KML_MAX_BYTES", 64, raising=False)
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("doc.kml", "x" * 65)
+
+        with pytest.raises(ValueError, match="KMZ KML member .* exceeds maximum size"):
+            read_vector(str(path))
+
     def test_read_kmz_raises_clear_error_for_invalid_zip(self, tmp_path: Path) -> None:
         path = tmp_path / "broken.kmz"
         path.write_text("not a zip")
@@ -182,6 +220,22 @@ class TestReadXlsxGeo:
         )
 
         with pytest.raises(ValueError, match="source_crs"):
+            read_vector(str(path))
+
+    def test_read_xlsx_reports_missing_openpyxl_clearly(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = tmp_path / "orange-sites.xlsx"
+        path.write_bytes(b"not used")
+
+        def raise_missing_openpyxl(*args: object, **kwargs: object) -> pd.DataFrame:
+            raise ImportError("Missing optional dependency 'openpyxl'")
+
+        monkeypatch.setattr(pd, "read_excel", raise_missing_openpyxl)
+
+        with pytest.raises(ImportError, match="requires openpyxl.*declared"):
             read_vector(str(path))
 
 
