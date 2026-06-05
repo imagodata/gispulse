@@ -34,7 +34,9 @@ def _normalise_s3_endpoint(endpoint: str) -> tuple[str, bool]:
     """Return DuckDB's ENDPOINT value and whether it should use TLS."""
     endpoint = endpoint.strip().rstrip("/")
     parsed = urlparse(endpoint if "://" in endpoint else f"https://{endpoint}")
-    host = parsed.netloc or parsed.path
+    host = parsed.hostname or parsed.path
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
     return host, parsed.scheme != "http"
 
 

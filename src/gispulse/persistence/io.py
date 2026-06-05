@@ -20,6 +20,8 @@ Usage::
 
 from __future__ import annotations
 
+import tempfile
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Optional
@@ -43,6 +45,7 @@ VECTOR_DRIVERS: dict[str, str] = {
     ".fgb": "FlatGeobuf",
     ".gml": "GML",
     ".kml": "KML",
+    ".kmz": "KML",
     ".dxf": "DXF",
     ".sqlite": "SQLite",
     ".gdb": "OpenFileGDB",
@@ -54,6 +57,9 @@ VECTOR_DRIVERS: dict[str, str] = {
 
 #: Formats that support multiple layers.
 MULTI_LAYER_FORMATS = {".gpkg", ".gdb", ".sqlite"}
+
+#: Maximum uncompressed KML member size accepted from a KMZ archive.
+KMZ_KML_MAX_BYTES = 50 * 1024 * 1024
 
 #: Formats that are write-capable via GeoPandas/Fiona.
 WRITABLE_FORMATS = {
@@ -101,6 +107,10 @@ def read_vector(
     crs: Optional[str] = None,
     bbox: Optional[tuple[float, float, float, float]] = None,
     rows: Optional[int] = None,
+    x_col: str | None = None,
+    y_col: str | None = None,
+    source_crs: str | None = None,
+    target_crs: str = "EPSG:4326",
     **kwargs: Any,
 ) -> gpd.GeoDataFrame:
     """Read a vector/tabular-geo file into a GeoDataFrame.
@@ -111,6 +121,10 @@ def read_vector(
         crs:   Force a CRS if the file has none (e.g. CSV without .prj).
         bbox:  Spatial filter (minx, miny, maxx, maxy).
         rows:  Read only the first N rows.
+        x_col: X/easting column for tabular-geo XLSX inputs.
+        y_col: Y/northing column for tabular-geo XLSX inputs.
+        source_crs: Source CRS for projected XLSX coordinates.
+        target_crs: Target CRS when reprojecting from ``source_crs``.
         **kwargs: Extra arguments passed to geopandas.read_file / read_parquet.
 
     Returns:
@@ -150,7 +164,26 @@ def read_vector(
 
     # --- XLSX: pandas then geopandas ---
     if ext == ".xlsx":
-        return _read_xlsx_geo(path, crs=crs, rows=rows, **kwargs)
+        return _read_xlsx_geo(
+            path,
+            crs=crs,
+            rows=rows,
+            x_col=x_col,
+            y_col=y_col,
+            source_crs=source_crs,
+            target_crs=target_crs,
+            **kwargs,
+        )
+
+    if ext == ".kmz":
+        return _read_kmz_geo(
+            path,
+            layer=layer,
+            crs=crs,
+            bbox=bbox,
+            rows=rows,
+            **kwargs,
+        )
 
     # --- Standard Fiona-based formats ---
     read_kwargs: dict[str, Any] = {}
@@ -170,6 +203,60 @@ def read_vector(
         gdf = gdf.set_crs(crs)
 
     return gdf
+
+
+def _read_kmz_geo(
+    path: str,
+    layer: Optional[str] = None,
+    crs: Optional[str] = None,
+    bbox: Optional[tuple[float, float, float, float]] = None,
+    rows: Optional[int] = None,
+    **kwargs: Any,
+) -> gpd.GeoDataFrame:
+    """Read a KMZ archive by loading ``doc.kml`` or the first KML member."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            kml_names = [
+                name
+                for name in archive.namelist()
+                if not name.endswith("/") and name.lower().endswith(".kml")
+            ]
+            if not kml_names:
+                raise ValueError(f"KMZ file '{path}' does not contain a KML file.")
+
+            preferred = next(
+                (name for name in kml_names if Path(name).name.lower() == "doc.kml"),
+                kml_names[0],
+            )
+            kml_info = archive.getinfo(preferred)
+            if kml_info.file_size > KMZ_KML_MAX_BYTES:
+                raise ValueError(
+                    f"KMZ KML member '{preferred}' exceeds maximum size "
+                    f"({kml_info.file_size} bytes > {KMZ_KML_MAX_BYTES} bytes)."
+                )
+            kml_bytes = archive.read(preferred)
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"Invalid KMZ file '{path}': not a valid zip archive.") from exc
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        kml_path = Path(tmp_dir) / "doc.kml"
+        kml_path.write_bytes(kml_bytes)
+
+        read_kwargs: dict[str, Any] = {"driver": "KML"}
+        if layer:
+            read_kwargs["layer"] = layer
+        if bbox:
+            read_kwargs["bbox"] = bbox
+        if rows:
+            read_kwargs["rows"] = rows
+        read_kwargs.update(kwargs)
+
+        gdf = gpd.read_file(kml_path, **read_kwargs)
+
+    if gdf.crs is None:
+        gdf = gdf.set_crs(crs or "EPSG:4326")
+
+    return gdf.to_crs("EPSG:4326")
 
 
 def read_vector_chunked(
@@ -314,6 +401,10 @@ def _read_xlsx_geo(
     rows: Optional[int] = None,
     lat_col: str | None = None,
     lon_col: str | None = None,
+    x_col: str | None = None,
+    y_col: str | None = None,
+    source_crs: str | None = None,
+    target_crs: str = "EPSG:4326",
     sheet_name: int | str = 0,
     **kwargs: Any,
 ) -> gpd.GeoDataFrame:
@@ -321,36 +412,75 @@ def _read_xlsx_geo(
     import pandas as pd
 
     nrows = rows if rows else None
-    df = pd.read_excel(path, sheet_name=sheet_name, nrows=nrows, **kwargs)
+    try:
+        df = pd.read_excel(path, sheet_name=sheet_name, nrows=nrows, **kwargs)
+    except ImportError as exc:
+        raise ImportError(
+            "Reading XLSX files requires openpyxl. Install gispulse with its declared "
+            "dependencies, or install openpyxl>=3.1,<4.0."
+        ) from exc
 
     # Reuse the CSV geo logic on the dataframe
     # Auto-detect lat/lon
     lat_candidates = ("lat", "latitude", "y", "LAT", "Latitude")
     lon_candidates = ("lon", "lng", "longitude", "x", "LON", "Longitude")
+    projected_candidates = (("X", "Y"),)
 
-    if lat_col is None:
+    coord_x_col = x_col or lon_col
+    coord_y_col = y_col or lat_col
+
+    if coord_y_col is None:
         for c in lat_candidates:
             if c in df.columns:
-                lat_col = c
+                coord_y_col = c
                 break
-    if lon_col is None:
+    if coord_x_col is None:
         for c in lon_candidates:
             if c in df.columns:
-                lon_col = c
+                coord_x_col = c
+                break
+    if coord_x_col is None or coord_y_col is None:
+        for candidate_x, candidate_y in projected_candidates:
+            if candidate_x in df.columns and candidate_y in df.columns:
+                coord_x_col = candidate_x
+                coord_y_col = candidate_y
                 break
 
-    if lat_col is None or lon_col is None:
+    if coord_y_col is None or coord_x_col is None:
         raise ValueError(
             f"Cannot detect lat/lon columns in XLSX. "
-            f"Columns found: {list(df.columns)}. Provide lat_col/lon_col."
+            f"Columns found: {list(df.columns)}. Provide lat_col/lon_col or x_col/y_col."
         )
 
+    if source_crs is None and _looks_like_projected_xy(df, coord_x_col, coord_y_col):
+        raise ValueError(
+            f"XLSX columns '{coord_x_col}'/'{coord_y_col}' look like projected coordinates. "
+            "Provide source_crs, for example source_crs='EPSG:31370', instead of assuming "
+            "EPSG:4326."
+        )
+
+    input_crs = source_crs or crs or target_crs
     gdf = gpd.GeoDataFrame(
         df,
-        geometry=gpd.points_from_xy(df[lon_col], df[lat_col]),
-        crs=crs or "EPSG:4326",
+        geometry=gpd.points_from_xy(df[coord_x_col], df[coord_y_col]),
+        crs=input_crs,
     )
+    if source_crs:
+        gdf = gdf.to_crs(target_crs)
     return gdf
+
+
+def _looks_like_projected_xy(df: Any, x_col: str, y_col: str) -> bool:
+    if x_col == "X" and y_col == "Y":
+        return True
+
+    import pandas as pd
+
+    x_values = pd.to_numeric(df[x_col], errors="coerce").dropna()
+    y_values = pd.to_numeric(df[y_col], errors="coerce").dropna()
+    if x_values.empty or y_values.empty:
+        return False
+    return bool((x_values.abs() > 180).any() or (y_values.abs() > 90).any())
 
 
 # ---------------------------------------------------------------------------

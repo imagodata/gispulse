@@ -94,6 +94,26 @@ class TestDuckDBSession:
         assert "ENDPOINT 'garage:3900'" in sql
         assert "USE_SSL false" in sql
 
+    def test_configure_s3_secret_strips_endpoint_userinfo_before_sql_and_logs(self, caplog):
+        conn = MagicMock()
+        conn.execute.side_effect = RuntimeError("boom")
+        s3 = SimpleNamespace(
+            endpoint="https://user:pass@garage.casys.ai",
+            bucket="gispulse",
+            access_key="dev-key",
+            secret_key="dev-secret",
+            region="garage",
+        )
+
+        _configure_s3_secret(conn, s3)
+
+        sql = conn.execute.call_args.args[0]
+        assert "ENDPOINT 'garage.casys.ai'" in sql
+        assert "user" not in sql
+        assert "pass" not in sql
+        assert "user" not in caplog.text
+        assert "pass" not in caplog.text
+
     def test_configure_s3_secret_escapes_sql_literals(self):
         conn = MagicMock()
         s3 = SimpleNamespace(
