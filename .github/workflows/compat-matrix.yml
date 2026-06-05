@@ -67,7 +67,7 @@ jobs:
           pytest --collect-only ${{ inputs.pytest-target }} 2>&1 | tail -20
       - name: Open issue on failure
         if: failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             github.rest.issues.create({
