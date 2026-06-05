@@ -40,6 +40,21 @@ class StorageError(Exception):
     """Raised when a storage operation fails."""
 
 
+def _make_s3_boto_config(BotoConfig):
+    base = {
+        "signature_version": "s3v4",
+        "retries": {"max_attempts": 3, "mode": "standard"},
+    }
+    checksum_compat = {
+        "request_checksum_calculation": "when_required",
+        "response_checksum_validation": "when_required",
+    }
+    try:
+        return BotoConfig(**base, **checksum_compat)
+    except TypeError:
+        return BotoConfig(**base)
+
+
 def validate_storage_key(key: str) -> str:
     """Validate and normalize a storage key, rejecting traversal attempts.
 
@@ -235,10 +250,7 @@ class S3Storage(DatasetStorage):
             aws_access_key_id=access_key or None,
             aws_secret_access_key=secret_key or None,
             region_name=region,
-            config=BotoConfig(
-                signature_version="s3v4",
-                retries={"max_attempts": 3, "mode": "standard"},
-            ),
+            config=_make_s3_boto_config(BotoConfig),
         )
 
         # Ensure bucket exists (MinIO-friendly)
