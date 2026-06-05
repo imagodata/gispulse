@@ -4,10 +4,13 @@ Unit tests for persistence.io — format detection, read/write vector, dataset_f
 
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
 import geopandas as gpd
+import pandas as pd
 import pytest
+from pyproj import Transformer
 from shapely.geometry import Point
 
 from gispulse.persistence.io import (
@@ -48,6 +51,10 @@ class TestFormatDetection:
         assert ".geojson" in exts
         assert ".shp" in exts
 
+    def test_detect_kmz_as_kml(self) -> None:
+        assert detect_format("data/sites.kmz") == "KML"
+        assert ".kmz" in supported_extensions()
+
 
 class TestReadWriteVector:
     @pytest.fixture()
@@ -81,6 +88,101 @@ class TestReadWriteVector:
     def test_read_nonexistent_raises(self) -> None:
         with pytest.raises(Exception):
             read_vector("/nonexistent/file.gpkg")
+
+
+class TestReadKmz:
+    def test_read_kmz_doc_kml_as_epsg_4326(self, tmp_path: Path) -> None:
+        path = tmp_path / "site.kmz"
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr(
+                "doc.kml",
+                """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <Placemark>
+      <name>Orange site</name>
+      <Point><coordinates>4.3517,50.8503,0</coordinates></Point>
+    </Placemark>
+  </Document>
+</kml>
+""",
+            )
+
+        result = read_vector(str(path))
+
+        assert len(result) == 1
+        assert result.crs.to_epsg() == 4326
+        assert result.geometry.iloc[0].x == pytest.approx(4.3517)
+        assert result.geometry.iloc[0].y == pytest.approx(50.8503)
+
+    def test_read_kmz_uses_doc_kml_when_multiple_kml_files_exist(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        path = tmp_path / "network.kmz"
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr(
+                "other.kml",
+                """<kml xmlns="http://www.opengis.net/kml/2.2">
+<Placemark><name>Other</name><Point><coordinates>5,51,0</coordinates></Point></Placemark>
+</kml>""",
+            )
+            archive.writestr(
+                "doc.kml",
+                """<kml xmlns="http://www.opengis.net/kml/2.2">
+<Placemark><name>Doc</name><Point><coordinates>4,50,0</coordinates></Point></Placemark>
+</kml>""",
+            )
+
+        result = read_vector(str(path))
+
+        assert result.geometry.iloc[0].x == pytest.approx(4)
+        assert result.geometry.iloc[0].y == pytest.approx(50)
+
+    def test_read_kmz_raises_clear_error_for_invalid_zip(self, tmp_path: Path) -> None:
+        path = tmp_path / "broken.kmz"
+        path.write_text("not a zip")
+
+        with pytest.raises(ValueError, match="Invalid KMZ"):
+            read_vector(str(path))
+
+    def test_read_kmz_raises_clear_error_when_no_kml_exists(self, tmp_path: Path) -> None:
+        path = tmp_path / "empty.kmz"
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("readme.txt", "no kml here")
+
+        with pytest.raises(ValueError, match="does not contain a KML"):
+            read_vector(str(path))
+
+
+class TestReadXlsxGeo:
+    def test_read_xlsx_lambert_72_reprojects_to_epsg_4326(self, tmp_path: Path) -> None:
+        path = tmp_path / "orange-sites.xlsx"
+        lon, lat = 4.3517, 50.8503
+        x, y = Transformer.from_crs("EPSG:4326", "EPSG:31370", always_xy=True).transform(lon, lat)
+        pd.DataFrame({"name": ["Orange site"], "X": [x], "Y": [y]}).to_excel(path, index=False)
+
+        result = read_vector(
+            str(path),
+            x_col="X",
+            y_col="Y",
+            source_crs="EPSG:31370",
+        )
+
+        assert len(result) == 1
+        assert result.crs.to_epsg() == 4326
+        assert result.geometry.iloc[0].x == pytest.approx(lon, abs=1e-6)
+        assert result.geometry.iloc[0].y == pytest.approx(lat, abs=1e-6)
+
+    def test_read_xlsx_rejects_projected_xy_without_source_crs(self, tmp_path: Path) -> None:
+        path = tmp_path / "orange-sites.xlsx"
+        pd.DataFrame({"name": ["Orange site"], "X": [149_000], "Y": [171_000]}).to_excel(
+            path,
+            index=False,
+        )
+
+        with pytest.raises(ValueError, match="source_crs"):
+            read_vector(str(path))
 
 
 class TestDatasetFromFile:
