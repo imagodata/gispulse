@@ -38,20 +38,33 @@ def test_reference_scan_plain_csv_uses_duckdb_read_csv() -> None:
     )
 
 
-def test_reference_scan_zip_csv_uses_duckdb_read_csv() -> None:
-    result = TableFileFetcher().virtual_table(
-        _access(
-            "https://host.example.org/iris_csv.zip",
-            archive_format="zip",
-            table_format="csv",
+def test_reference_scan_zip_csv_requires_explicit_archive_member() -> None:
+    with pytest.raises(
+        ValueError,
+        match="TABLE_FILE zip archives require access.params.archive_member",
+    ):
+        TableFileFetcher().virtual_table(
+            _access(
+                "https://host.example.org/iris_csv.zip",
+                archive_format="zip",
+                table_format="csv",
+            )
         )
-    )
 
-    assert result.payload is Payload.TABLE
-    assert result.mode is FetchMode.REFERENCE
-    assert result.metadata[DUCKDB_SCAN_KEY] == (
-        "read_csv_auto('/vsizip//vsicurl/https://host.example.org/iris_csv.zip/*.csv')"
-    )
+
+def test_reference_scan_zip_csv_rejects_wildcard_archive_member() -> None:
+    with pytest.raises(
+        ValueError,
+        match="TABLE_FILE zip archive_member must name one concrete member",
+    ):
+        TableFileFetcher().virtual_table(
+            _access(
+                "https://host.example.org/iris_csv.zip",
+                archive_format="zip",
+                table_format="csv",
+                archive_member="*.csv",
+            )
+        )
 
 
 def test_reference_scan_zip_csv_can_target_archive_member() -> None:
@@ -67,6 +80,22 @@ def test_reference_scan_zip_csv_can_target_archive_member() -> None:
     assert result.metadata[DUCKDB_SCAN_KEY] == (
         "read_csv_auto("
         "'/vsizip//vsicurl/https://host.example.org/iris_csv.zip/tables/iris.csv')"
+    )
+
+
+def test_reference_scan_zip_csv_escapes_archive_member_sql_literal() -> None:
+    result = TableFileFetcher().virtual_table(
+        _access(
+            "https://host.example.org/iris_csv.zip",
+            archive_format="zip",
+            table_format="csv",
+            archive_member="tables/l'iris.csv",
+        )
+    )
+
+    assert result.metadata[DUCKDB_SCAN_KEY] == (
+        "read_csv_auto("
+        "'/vsizip//vsicurl/https://host.example.org/iris_csv.zip/tables/l''iris.csv')"
     )
 
 

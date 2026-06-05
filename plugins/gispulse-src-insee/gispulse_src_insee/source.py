@@ -55,6 +55,7 @@ _ENTRIES: dict[str, tuple[str, str]] = {
 class _TableEntrySpec:
     label: str
     endpoint: str
+    archive_member: str
     revision: str
     source_page: str
     millesime: str
@@ -79,6 +80,7 @@ _TABLE_ENTRIES: dict[str, _TableEntrySpec] = {
     "iris_population_2022": _TableEntrySpec(
         label="IRIS — population 2022",
         endpoint=f"{_INSEE_FILE_BASE}/8647014/base-ic-evol-struct-pop-2022_csv.zip",
+        archive_member="base-ic-evol-struct-pop-2022.CSV",
         revision="insee-rp-iris-population-2022-geo-2024-01-01",
         source_page="https://www.insee.fr/fr/statistiques/8647014",
         millesime="2022",
@@ -97,6 +99,7 @@ _TABLE_ENTRIES: dict[str, _TableEntrySpec] = {
     "iris_logement_2022": _TableEntrySpec(
         label="IRIS — logement 2022",
         endpoint=f"{_INSEE_FILE_BASE}/8647012/base-ic-logement-2022_csv.zip",
+        archive_member="base-ic-logement-2022.CSV",
         revision="insee-rp-iris-logement-2022-geo-2024-01-01",
         source_page="https://www.insee.fr/fr/statistiques/8647012",
         millesime="2022",
@@ -116,6 +119,7 @@ _TABLE_ENTRIES: dict[str, _TableEntrySpec] = {
             f"{_INSEE_FILE_BASE}/8647008/"
             "base-ic-couples-familles-menages-2022_csv.zip"
         ),
+        archive_member="base-ic-couples-familles-menages-2022.CSV",
         revision="insee-rp-iris-menages-2022-geo-2024-01-01",
         source_page="https://www.insee.fr/fr/statistiques/8647008",
         millesime="2022",
@@ -131,6 +135,7 @@ _TABLE_ENTRIES: dict[str, _TableEntrySpec] = {
     "iris_activite_2022": _TableEntrySpec(
         label="IRIS — activite des residents 2022",
         endpoint=f"{_INSEE_FILE_BASE}/8647006/base-ic-activite-residents-2022_csv.zip",
+        archive_member="base-ic-activite-residents-2022.CSV",
         revision="insee-rp-iris-activite-2022-geo-2024-01-01",
         source_page="https://www.insee.fr/fr/statistiques/8647006",
         millesime="2022",
@@ -145,6 +150,7 @@ _TABLE_ENTRIES: dict[str, _TableEntrySpec] = {
     "iris_diplomes_2022": _TableEntrySpec(
         label="IRIS — diplomes et formation 2022",
         endpoint=f"{_INSEE_FILE_BASE}/8647010/base-ic-diplomes-formation-2022_csv.zip",
+        archive_member="base-ic-diplomes-formation-2022.CSV",
         revision="insee-rp-iris-diplomes-2022-geo-2024-01-01",
         source_page="https://www.insee.fr/fr/statistiques/8647010",
         millesime="2022",
@@ -159,6 +165,7 @@ _TABLE_ENTRIES: dict[str, _TableEntrySpec] = {
     "iris_filosofi_revenus_declares_2021": _TableEntrySpec(
         label="IRIS — Filosofi revenus declares 2021",
         endpoint=f"{_INSEE_FILE_BASE}/8229323/BASE_TD_FILO_IRIS_2021_DEC_CSV.zip",
+        archive_member="BASE_TD_FILO_IRIS_2021_DEC.csv",
         revision="insee-filosofi-iris-revenus-declares-2021-geo-2022-01-01",
         source_page="https://www.insee.fr/fr/statistiques/8229323",
         millesime="2021",
@@ -173,6 +180,7 @@ _TABLE_ENTRIES: dict[str, _TableEntrySpec] = {
     "iris_filosofi_revenus_disponibles_2021": _TableEntrySpec(
         label="IRIS — Filosofi revenus disponibles 2021",
         endpoint=f"{_INSEE_FILE_BASE}/8229323/BASE_TD_FILO_IRIS_2021_DISP_CSV.zip",
+        archive_member="BASE_TD_FILO_IRIS_2021_DISP.csv",
         revision="insee-filosofi-iris-revenus-disponibles-2021-geo-2022-01-01",
         source_page="https://www.insee.fr/fr/statistiques/8229323",
         millesime="2021",
@@ -279,7 +287,11 @@ class InseeSource(DeclarativeSource):
                 access=AccessSpec(
                     protocol=AccessProtocol.TABLE_FILE,
                     endpoint=spec.endpoint,
-                    params={"archive_format": "zip", "table_format": "csv"},
+                    params={
+                        "archive_format": "zip",
+                        "table_format": "csv",
+                        "archive_member": spec.archive_member,
+                    },
                     format="application/zip",
                 ),
                 revision_token=spec.revision,
@@ -295,6 +307,7 @@ class InseeSource(DeclarativeSource):
                     "geography_date": spec.geography_date,
                     "source_page": spec.source_page,
                     "archive_format": "zip",
+                    "archive_member": spec.archive_member,
                     "table_format": "csv",
                 },
             )

@@ -1045,7 +1045,16 @@ def _table_file_scan(table_path: Path, access: AccessSpec) -> str:
         )
     uri = str(table_path)
     if _is_table_zip(access):
-        member = str(access.params.get("archive_member", "*.csv")).lstrip("/")
+        raw_member = access.params.get("archive_member")
+        if not raw_member:
+            raise ValueError(
+                "TABLE_FILE zip archives require access.params.archive_member"
+            )
+        member = str(raw_member).lstrip("/")
+        if not member or "*" in member:
+            raise ValueError(
+                "TABLE_FILE zip archive_member must name one concrete member"
+            )
         uri = f"/vsizip/{uri}/{member}"
     return f"read_csv_auto({_sql_literal(uri)})"
 

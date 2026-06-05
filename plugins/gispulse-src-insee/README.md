@@ -104,7 +104,11 @@ from gispulse.plugins.api import get_catalog_entry
 entry = get_catalog_entry("insee", "iris_population_2022")
 # entry.access.protocol -> AccessProtocol.TABLE_FILE
 # entry.payload          -> Payload.TABLE
-# entry.access.params    -> {"archive_format": "zip", "table_format": "csv"}
+# entry.access.params    -> {
+#     "archive_format": "zip",
+#     "table_format": "csv",
+#     "archive_member": "base-ic-evol-struct-pop-2022.CSV",
+# }
 
 bulk = get_catalog_entry("insee", "iris_bulk")
 # bulk.access.protocol -> AccessProtocol.DOWNLOAD

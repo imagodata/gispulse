@@ -134,6 +134,7 @@ def test_table_bulk_entries_use_table_file_and_keep_georisques_metadata(
     assert by_id["gaspar-bulk"].access.params == {
         "archive_format": "zip",
         "table_format": "csv",
+        "archive_member": "risq_gaspar.csv",
     }
     assert by_id["gaspar-bulk"].payload is Payload.TABLE
     assert by_id["gaspar-bulk"].metadata["base_key"] == "gaspar"

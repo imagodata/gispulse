@@ -208,6 +208,8 @@ def test_iris_sociodemo_entries_are_table_files(source) -> None:
         )
         assert entry.access.params["archive_format"] == "zip"
         assert entry.access.params["table_format"] == "csv"
+        assert entry.access.params["archive_member"].lower().endswith(".csv")
+        assert entry.metadata["archive_member"] == entry.access.params["archive_member"]
 
 
 def test_iris_sociodemo_entries_keep_official_download_urls(source) -> None:

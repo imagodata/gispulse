@@ -32,8 +32,26 @@ def _vsicurl(endpoint: str) -> str:
 
 
 def _metadata(access: AccessSpec) -> dict[str, str]:
-    keys = ("archive_format", "table_format")
+    keys = ("archive_format", "archive_member", "table_format")
     return {key: str(access.params[key]) for key in keys if key in access.params}
+
+
+def _sql_literal(value: object) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _archive_member(access: AccessSpec) -> str:
+    raw_member = access.params.get("archive_member")
+    if not raw_member:
+        raise ValueError(
+            "TABLE_FILE zip archives require access.params.archive_member"
+        )
+    member = str(raw_member).lstrip("/")
+    if not member or "*" in member:
+        raise ValueError(
+            "TABLE_FILE zip archive_member must name one concrete member"
+        )
+    return member
 
 
 class TableFileFetcher(LazyFetcher):
@@ -63,24 +81,24 @@ class TableFileFetcher(LazyFetcher):
 
     @staticmethod
     def _table_uri(access: AccessSpec) -> str:
-        uri = _vsicurl(access.endpoint).replace("'", "''")
+        uri = _vsicurl(access.endpoint)
         if TableFileFetcher._is_zip(access):
-            member = str(access.params.get("archive_member", "*.csv")).lstrip("/")
+            member = _archive_member(access)
             return f"/vsizip/{uri}/{member}"
         return uri
 
     def _reference_scan(self, access: AccessSpec, extent: Any | None) -> str:
         """Lazy scan for CSV tables.
 
-        ZIP archives use GDAL's ``/vsizip/`` virtual path and default to all
-        CSV members. Callers can narrow the member path via ``archive_member``.
+        ZIP archives use GDAL's ``/vsizip/`` virtual path and require
+        ``archive_member`` so multiple CSV members are never read silently.
         """
         if not self._is_csv(access):
             raise NotImplementedError(
                 "TABLE_FILE reference mode currently supports plain CSV files only"
             )
         uri = self._table_uri(access)
-        return f"read_csv_auto('{uri}')"
+        return f"read_csv_auto({_sql_literal(uri)})"
 
     def _materialize(self, access: AccessSpec, extent: Any | None) -> SourceResult:
         """Return a table file path, or write a parsed Parquet copy to S3."""
