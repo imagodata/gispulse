@@ -129,9 +129,11 @@ def test_invalid_signature_rejected(
     priv, pub = keypair
     payload = LicencePayload(org="ACME", tier="pro")
     key = encode_payload(payload, priv)
-    # flip the last char of the signature half
+    # flip the first char of the signature half — pick a value guaranteed to
+    # differ from the current one so the tamper is never a no-op (the signature
+    # is random per run, so a fixed replacement char could coincide with it).
     head, sig = key.rsplit(".", 1)
-    tampered = head + "." + ("A" if sig[-1] != "A" else "B") + sig[1:]
+    tampered = head + "." + ("B" if sig[0] == "A" else "A") + sig[1:]
     with pytest.raises(LicenceVerificationError, match="invalid licence signature"):
         decode_payload(tampered, pub)
 
