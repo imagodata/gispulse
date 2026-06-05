@@ -1,10 +1,12 @@
 """Géorisques DataSource — natural/technological risk signals (#196).
 
-A :class:`DeclarativeSource` over :attr:`AccessProtocol.REST_TABLE`. Each of
-the six Géorisques endpoints is one declarative entry; the endpoint and its
-static query (page size, radius) are fixed here, but the **runtime spatial
-key** — ``code_insee`` for the communal endpoints, ``latlon`` for the point
-endpoints — is supplied per call by the ingestion orchestrator through
+A :class:`DeclarativeSource` over :attr:`AccessProtocol.REST_TABLE` for the
+runtime APIs plus :attr:`AccessProtocol.DOWNLOAD` / ``TABLE_FILE`` for
+confirmed bulk datasets.
+Each API endpoint remains one declarative entry; the endpoint and its static
+query (page size, radius) are fixed here, but the **runtime spatial key** —
+``code_insee`` for the communal endpoints, ``latlon`` for the point endpoints
+— is supplied per call by the ingestion orchestrator through
 :meth:`GeorisquesSource.access_for`.
 
 The plugin is intentionally *raw*: ``schema`` describes the upstream fields,
@@ -28,6 +30,10 @@ from gispulse.plugins.api import (
 )
 
 GEORISQUES_BASE_URL = "https://www.georisques.gouv.fr"
+GEORISQUES_DOWNLOAD_SERVICE = (
+    "https://www.georisques.gouv.fr/webappReport/ws/telechargements"
+)
+_REVISION_TIMEOUT_S = 8.0
 
 # entry_id -> declarative spec. ``query_key`` names the runtime spatial
 # parameter; ``scope`` is the granularity it filters at. ``static_query``
@@ -86,6 +92,77 @@ _ENTRIES: dict[str, dict[str, Any]] = {
     },
 }
 
+_BULK_ENTRIES: dict[str, dict[str, Any]] = {
+    "rga-bulk": {
+        "label": "Retrait-gonflement des argiles 2026 (bulk, département)",
+        "endpoint": (
+            "https://files.georisques.fr/argiles/2025/"
+            "AleaRG_2025_{departement}_L93.zip"
+        ),
+        "payload": Payload.VECTOR,
+        "protocol": AccessProtocol.DOWNLOAD,
+        "base_key": "alearg_25",
+        "format": "zip",
+        "archive_format": "zip",
+        "data_format": "shapefile",
+        "join_strategy": "spatial",
+        "geometry_key": "geometry",
+        "echelle": "departementale",
+        "department_param": "codeDepartement",
+        "params": {"departement": "69"},
+    },
+    "tri-bulk": {
+        "label": "TRI rapportage 2020 (bulk, département)",
+        "endpoint": (
+            "https://files.georisques.fr/di_2020/"
+            "tri_2020_sig_di_{departement}.zip"
+        ),
+        "payload": Payload.VECTOR,
+        "protocol": AccessProtocol.DOWNLOAD,
+        "base_key": "tri_2020",
+        "format": "zip",
+        "archive_format": "zip",
+        "data_format": "shapefile",
+        "join_strategy": "spatial",
+        "geometry_key": "geometry",
+        "echelle": "departementale",
+        "department_param": "codeDepartement",
+        "params": {"departement": "69"},
+    },
+    "sis-bulk": {
+        "label": "Secteurs d'informations sur les sols (bulk CSV)",
+        "endpoint": (
+            "https://mapsref.brgm.fr/wxs/georisques/georisques_dl?"
+            "&service=wfs&version=2.0.0&request=getfeature"
+            "&typename=classification&outputformat=CSVTEXT"
+        ),
+        "payload": Payload.TABLE,
+        "protocol": AccessProtocol.TABLE_FILE,
+        "base_key": "sis",
+        "format": "csv",
+        "archive_format": None,
+        "data_format": "csv",
+        "join_keys": ("code_insee",),
+        "echelle": "nationale",
+        "department_param": None,
+        "params": {"table_format": "csv"},
+    },
+    "gaspar-bulk": {
+        "label": "Procédures administratives GASPAR (bulk ZIP)",
+        "endpoint": "https://files.georisques.fr/GASPAR/gaspar.zip",
+        "payload": Payload.TABLE,
+        "protocol": AccessProtocol.TABLE_FILE,
+        "base_key": "gaspar",
+        "format": "zip",
+        "archive_format": "zip",
+        "data_format": "csv",
+        "join_keys": ("code_insee",),
+        "echelle": "nationale",
+        "department_param": None,
+        "params": {"archive_format": "zip", "table_format": "csv"},
+    },
+}
+
 _METADATA_COMMON = {
     "provider": "Géorisques / BRGM-MTE",
     "platform": "georisques.gouv.fr API v1",
@@ -125,7 +202,53 @@ _SCHEMAS: dict[str, dict[str, str]] = {
         "conclusions_sis": "json",
         "conclusions_sup": "json",
     },
+    "rga-bulk": {
+        "codeExposition": "str",
+        "exposition": "str",
+        "alea": "str",
+        "geometry": "geometry",
+    },
+    "tri-bulk": {
+        "code_national_tri": "str",
+        "libelle_tri": "str",
+        "geometry": "geometry",
+    },
+    "sis-bulk": {
+        "classification": "str",
+        "identifiant": "str",
+        "code_insee": "str",
+    },
+    "gaspar-bulk": {
+        "code_insee": "str",
+        "risques_detail": "json",
+    },
 }
+
+
+def _resolve_endpoint(access: AccessSpec) -> str:
+    """Resolve owned ``{key}`` endpoint templates for cheap probes."""
+    if "{" not in access.endpoint:
+        return access.endpoint
+    return access.endpoint.format_map(access.params)
+
+
+def _probe_revision_head(url: str) -> str | None:
+    """Return ETag / Last-Modified from a cheap HTTP HEAD probe."""
+    import httpx
+
+    try:
+        resp = httpx.head(
+            url, timeout=_REVISION_TIMEOUT_S, follow_redirects=True
+        )
+    except Exception:  # noqa: BLE001 - unreachable source means unknown freshness
+        return None
+    etag = resp.headers.get("etag")
+    if etag:
+        return etag.strip('"')
+    last_modified = resp.headers.get("last-modified")
+    if last_modified:
+        return last_modified
+    return None
 
 
 class GeorisquesSource(DeclarativeSource):
@@ -137,7 +260,10 @@ class GeorisquesSource(DeclarativeSource):
     jurisdiction = "FR"
 
     def entries(self) -> list[SourceEntryRef]:
-        return [self._entry_ref(entry_id) for entry_id in _ENTRIES]
+        return [
+            *(self._entry_ref(entry_id) for entry_id in _ENTRIES),
+            *(self._bulk_entry_ref(entry_id) for entry_id in _BULK_ENTRIES),
+        ]
 
     def _entry_ref(self, entry_id: str) -> SourceEntryRef:
         spec = _ENTRIES[entry_id]
@@ -163,6 +289,56 @@ class GeorisquesSource(DeclarativeSource):
                 **_METADATA_COMMON,
                 "query_key": spec["query_key"],
                 "query_scope": spec["scope"],
+            },
+        )
+
+    def _bulk_entry_ref(self, entry_id: str) -> SourceEntryRef:
+        spec = _BULK_ENTRIES[entry_id]
+        base_key = spec["base_key"]
+        fmt = spec["format"]
+        echelle = spec["echelle"]
+        department_param = spec["department_param"]
+        catalog_endpoint = (
+            f"{GEORISQUES_DOWNLOAD_SERVICE}/formats/{fmt}/{base_key}"
+            f"?echelle={echelle}"
+        )
+        if department_param:
+            default_dept = spec["params"]["departement"]
+            catalog_endpoint = (
+                f"{catalog_endpoint}&{department_param}={default_dept}"
+            )
+        return SourceEntryRef(
+            id=entry_id,
+            name=spec["label"],
+            access=AccessSpec(
+                protocol=spec["protocol"],
+                endpoint=spec["endpoint"],
+                params=dict(spec["params"]),
+                format="application/zip" if fmt == "zip" else "text/csv",
+            ),
+            revision_token=None,
+            domain=self.domain,
+            payload=spec["payload"],
+            jurisdiction=self.jurisdiction,
+            metadata={
+                "provider": "Géorisques / BRGM-MTE",
+                "platform": "Géorisques téléchargement",
+                "download_service": GEORISQUES_DOWNLOAD_SERVICE,
+                "download_index_endpoint": catalog_endpoint,
+                "base_key": base_key,
+                "format": fmt,
+                "archive_format": spec["archive_format"],
+                "data_format": spec["data_format"],
+                "echelle": echelle,
+                "department_param": department_param,
+                **(
+                    {"join_keys": spec["join_keys"]}
+                    if "join_keys" in spec
+                    else {
+                        "join_strategy": spec["join_strategy"],
+                        "geometry_key": spec["geometry_key"],
+                    }
+                ),
             },
         )
 
@@ -212,13 +388,14 @@ class GeorisquesSource(DeclarativeSource):
         return dict(_SCHEMAS[entry_id])
 
     def revision(self, entry_id: str) -> str | None:
-        """No cheap source-wide freshness token.
+        """Cheap freshness token when the entry exposes one.
 
-        Géorisques has no dataset-level ``last_modified`` and the data is
-        keyed on a runtime spatial parameter, so there is nothing to probe
-        without a full per-unit fetch. The guide says ``revision()`` must
-        stay cheap, so it returns ``None`` (= freshness unknown) and the
-        source watcher skips it.
+        Runtime API entries are keyed on a spatial parameter, so there is
+        nothing source-wide to probe. Bulk files expose HTTP headers, so
+        those entries use one HEAD request and return ETag / Last-Modified
+        when available.
         """
-        self._entry(entry_id)  # validates the id
+        entry = self._entry(entry_id)  # validates the id
+        if entry_id in _BULK_ENTRIES:
+            return _probe_revision_head(_resolve_endpoint(entry.access))
         return None

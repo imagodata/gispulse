@@ -36,13 +36,13 @@ de filtrage** du catalogue (issue
 | `domain`         | `SourceDomain` (`base`, `observation`, `elevation`, …)                |
 | `payload`        | `Payload` (`vector`, `raster`, `pointcloud`, `tiles`, `table`)        |
 | `jurisdiction`   | ISO 3166-1 / `world` / `eu`                                           |
-| `access.protocol`| `AccessProtocol` (`remote-table`, `ogc-features`, `stac`, `http-file`) |
+| `access.protocol`| `AccessProtocol` (`remote-table`, `ogc-features`, `stac`, `http-file`, `table-file`) |
 
 Plus un groupage `family` (en `metadata`) pour la galerie portail.
 
-## Les quatre fetchers
+## Les cinq fetchers
 
-Quatre familles d'adapters, un par `AccessProtocol`, tous héritant de
+Ces familles d'adapters, une par `AccessProtocol`, héritent de
 `LazyFetcher`. Le moteur DuckDB ne télécharge **rien** à l'instanciation
 — la scan est paresseuse, le push-down `bbox` est généré côté SQL.
 
@@ -52,6 +52,7 @@ Quatre familles d'adapters, un par `AccessProtocol`, tous héritant de
 | `ogc-features`    | `OGCFeaturesFetcher`   | [#230](https://github.com/imagodata/gispulse/issues/230) (A4)         | OGC API Features / WFS. `ST_Read(...)` lazy + COPY via le client WFS pour matérialiser.                            |
 | `stac`            | `STACFetcher`          | [#231](https://github.com/imagodata/gispulse/issues/231) (A5)         | Recherche STAC + `download_asset` du COG ; lecture raster à la demande.                                            |
 | `http-file`       | `HttpFileFetcher`      | [#232](https://github.com/imagodata/gispulse/issues/232) (A6)         | Fichier vectoriel/raster public exposé via `/vsicurl/` GDAL ; téléchargement streamé.                              |
+| `table-file`      | `TableFileFetcher`     | n/a                                                                   | Fichier tabulaire non spatial. CSV simple en `read_csv_auto`, ZIP/XLSX matérialisés sans géométrie inventée.       |
 
 ### Push-down `bbox`
 

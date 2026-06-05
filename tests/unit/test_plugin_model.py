@@ -51,7 +51,7 @@ def test_protocol_version_is_shared_with_contracts() -> None:
         (Tier, 4),
         (SourceDomain, 9),
         (Payload, 5),
-        (AccessProtocol, 16),
+        (AccessProtocol, 17),
         (FetchMode, 2),
         (WriteMode, 3),
     ],
@@ -65,6 +65,7 @@ def test_enums_are_str_serializable() -> None:
     assert PluginKind.SOURCE == "source"
     assert SourceDomain.REGLEMENTAIRE.value == "reglementaire"
     assert AccessProtocol.OGC_FEATURES.value == "ogc-features"
+    assert AccessProtocol.TABLE_FILE.value == "table-file"
 
 
 def test_entrypoint_groups_cover_single_group_kinds() -> None:

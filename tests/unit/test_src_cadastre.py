@@ -149,6 +149,11 @@ def test_bulk_entry_declares_download_with_template(
     # ``layer`` slot is self-describing (introspection); ``departement``
     # carries a default that callers override at fetch time.
     assert access.params == {"departement": "75", "layer": layer}
+    # N3 bulk ingest uses these hints to keep the raw `.json.gz` archive
+    # and the stage parquet filename aligned with the Etalab layer.
+    assert entry.metadata["base_key"] == layer
+    assert entry.metadata["archive_format"] == "json.gz"
+    assert entry.metadata["data_format"] == "geojson"
 
 
 def test_bulk_entry_metadata_advertises_etalab(source: CadastreSource) -> None:

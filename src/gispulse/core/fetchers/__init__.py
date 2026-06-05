@@ -9,6 +9,7 @@ adapters registered by the core roster are:
 * ``ogc_features``   (A4 #230) — ``AccessProtocol.OGC_FEATURES``
 * ``stac``           (A5 #231) — ``AccessProtocol.STAC``
 * ``http_file``      (A6 #232) — ``AccessProtocol.DOWNLOAD``
+* ``table_file``     — ``AccessProtocol.TABLE_FILE``
 
 Calling :func:`register_core_fetchers` is always safe: adapters are built
 only when the roster function runs, not at module import time.
@@ -37,9 +38,10 @@ def _core_fetchers() -> list[Fetcher]:
     from gispulse.adapters.ogc.wfs_fetcher import WfsFetcher  # #192 — WFS
 
     from .geoparquet_s3 import GeoParquetS3Fetcher  # A3 #229 — REMOTE_TABLE
-    from .http_file import HttpFileFetcher          # A6 #232 — DOWNLOAD
-    from .ogc_features import OGCFeaturesFetcher    # A4 #230 — OGC_FEATURES
-    from .stac import STACFetcher                   # A5 #231 — STAC
+    from .http_file import HttpFileFetcher  # A6 #232 — DOWNLOAD
+    from .ogc_features import OGCFeaturesFetcher  # A4 #230 — OGC_FEATURES
+    from .stac import STACFetcher  # A5 #231 — STAC
+    from .table_file import TableFileFetcher
 
     return [
         GeoParquetS3Fetcher(),
@@ -47,6 +49,7 @@ def _core_fetchers() -> list[Fetcher]:
         OGCFeaturesFetcher(),
         STACFetcher(),
         HttpFileFetcher(),
+        TableFileFetcher(),
     ]
 
 
