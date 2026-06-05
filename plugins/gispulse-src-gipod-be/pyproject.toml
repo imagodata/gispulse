@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gispulse-src-gipod-be"
+version = "0.1.0"
+description = "GIPOD (Flandre/BE) public domain works and occupancies source for GISPulse"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "GISPulse", email = "dev@gispulse.io" }]
+dependencies = [
+    "gispulse>=2.0.0,<3.0.0",
+]
+
+# Registered as a data source — discovered by core.plugin_hub.PluginHub.
+[project.entry-points."gispulse.data_sources"]
+gipod_be = "gispulse_src_gipod_be:register"
+
+[tool.gispulse.plugin]
+kind = "source"
+protocol = ">=1.0,<2.0"
+domain = "reglementaire"
+jurisdiction = "BE"
+display_name = "GIPOD - Travaux planifiés et occupations du domaine public (Flandre)"
