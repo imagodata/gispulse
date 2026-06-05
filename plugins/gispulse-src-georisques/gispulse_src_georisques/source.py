@@ -159,7 +159,11 @@ _BULK_ENTRIES: dict[str, dict[str, Any]] = {
         "join_keys": ("code_insee",),
         "echelle": "nationale",
         "department_param": None,
-        "params": {"archive_format": "zip", "table_format": "csv"},
+        "params": {
+            "archive_format": "zip",
+            "table_format": "csv",
+            "archive_member": "risq_gaspar.csv",
+        },
     },
 }
 

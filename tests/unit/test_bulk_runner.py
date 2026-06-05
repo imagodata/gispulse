@@ -199,6 +199,41 @@ def test_runner_materializes_table_file_entry_to_stage_s3_key(
     assert result.fetch_result.reference == result.manifest["stage_s3_uri"]
 
 
+def test_runner_rejects_zip_table_file_without_archive_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from gispulse.core.bulk_runner import BulkIngestRunner
+
+    _patch_duckdb(monkeypatch)
+    fetcher = _FakeTableFetcher()
+    registry = ProtocolRegistry()
+    registry.register(fetcher)
+    source = _StaticSource(
+        SourceEntryRef(
+            id="gaspar-bulk",
+            name="GASPAR bulk",
+            access=AccessSpec(
+                protocol=AccessProtocol.TABLE_FILE,
+                endpoint="https://host.example.org/gaspar.zip",
+                params={"archive_format": "zip", "table_format": "csv"},
+            ),
+            payload=Payload.TABLE,
+            metadata={"base_key": "gaspar", "data_format": "csv"},
+        ),
+        registry=registry,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="TABLE_FILE zip archives require access.params.archive_member",
+    ):
+        BulkIngestRunner(registry=registry).run_entry(
+            source,
+            "gaspar-bulk",
+            revision="gaspar-2026",
+        )
+
+
 def test_runner_can_prefix_and_upload_raw_table_file_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
