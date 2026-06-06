@@ -48,6 +48,7 @@ from gispulse.core.plugin_model import (
 )
 from gispulse.core.sources import PROTOCOLS, ProtocolRegistry
 from gispulse.persistence.datamart import DATAMART_SCHEME
+from gispulse.persistence.geonode import GEONODE_SCHEME
 
 log = get_logger(__name__)
 
@@ -167,6 +168,13 @@ def resolve_source(source: "str | Path | AccessSpec | dict[str, Any]") -> "Path 
 
         mart, table = parse_datamart_uri(raw)
         return resolve_source(DATAMARTS.resolve(mart, table))
+
+    # GeoNode: geonode://<instance>/<dataset> reads via the instance's
+    # GeoServer WFS endpoint (reuses the OGC fetcher).
+    if scheme == GEONODE_SCHEME:
+        from gispulse.persistence.geonode import read_access
+
+        return read_access(raw)
 
     # "<proto>+<transport>://…" — explicit transport override.
     proto_name, _, _ = scheme.partition("+")

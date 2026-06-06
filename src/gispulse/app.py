@@ -188,6 +188,40 @@ class GISPulseApp:
 
         return _load(source, bbox=bbox, layer=layer, lazy=lazy, crs=crs, **opts)
 
+    def publish(
+        self,
+        gdf: "gpd.GeoDataFrame",
+        target: str,
+        *,
+        auth: str | None = None,
+        overwrite: bool = True,
+        **opts: Any,
+    ) -> dict:
+        """Publish a GeoDataFrame to a writable destination.
+
+        Currently supports GeoNode (``geonode://<instance>/<dataset>``),
+        the write counterpart of :meth:`load`. The frame is packaged and
+        uploaded through the destination's native publish API.
+
+        Args:
+            gdf:       The GeoDataFrame to publish.
+            target:    Destination URI (``geonode://…``).
+            auth:      Credential/token; falls back to the instance config.
+            overwrite: Replace an existing dataset of the same name.
+            **opts:    Extra options forwarded to the writer.
+
+        Returns:
+            The writer's response payload.
+        """
+        from gispulse.persistence.geonode import GEONODE_SCHEME, publish as _publish
+
+        if str(target).partition("://")[0].lower() == GEONODE_SCHEME:
+            return _publish(gdf, target, auth=auth, overwrite=overwrite, **opts)
+        raise ValueError(
+            f"unsupported publish target {target!r}; "
+            "supported schemes: geonode://"
+        )
+
     def load_dataset(
         self, path: "str | Path", layer: str | None = None
     ) -> "gpd.GeoDataFrame":
@@ -588,4 +622,18 @@ def load(
     )
 
 
-__all__ = ["GISPulseApp", "get_app", "apply", "load", "run"]
+def publish(
+    gdf: "gpd.GeoDataFrame",
+    target: str,
+    *,
+    auth: str | None = None,
+    overwrite: bool = True,
+    **opts: Any,
+) -> dict:
+    """Publish a GeoDataFrame — shortcut for ``get_app().publish``."""
+    return get_app().publish(
+        gdf, target, auth=auth, overwrite=overwrite, **opts
+    )
+
+
+__all__ = ["GISPulseApp", "get_app", "apply", "load", "publish", "run"]
