@@ -146,6 +146,18 @@ def test_materialize_kmz_has_geometry_column(kmz_file: Path) -> None:
     assert result.data.geometry.notna().all()
 
 
+def test_materialize_kmz_sets_source_result_crs(kmz_file: Path) -> None:
+    # KMZ/KML are normalised to EPSG:4326 by read_vector; SourceResult.crs
+    # must reflect the GeoDataFrame CRS (not stay None).
+    result = VectorFileFetcher().fetch(
+        _access(str(kmz_file)),
+        mode=FetchMode.MATERIALIZE,
+    )
+    assert result.crs is not None
+    assert result.crs == result.data.crs.to_string()
+    assert result.data.crs.to_epsg() == 4326
+
+
 # ---------------------------------------------------------------------------
 # Erreurs — fast-fail
 # ---------------------------------------------------------------------------

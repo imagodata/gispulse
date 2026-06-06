@@ -11,8 +11,10 @@ raises :class:`NotImplementedError` with a clear message.
 ``access.params`` recognised keys:
 
 * ``layer`` — layer name for multi-layer formats (GPKG, GDB, SQLite).
-* ``bbox``  — spatial filter as ``(minx, miny, maxx, maxy)``.
 * ``rows``  — maximum number of rows to read.
+
+The spatial ``bbox`` filter ``(minx, miny, maxx, maxy)`` is taken from the
+``extent`` argument, not from ``access.params``.
 """
 
 from __future__ import annotations
@@ -99,4 +101,5 @@ class VectorFileFetcher(LazyFetcher):
             payload=self.payload,
             mode=FetchMode.MATERIALIZE,
             data=gdf,
+            crs=gdf.crs.to_string() if gdf.crs is not None else None,
         )
