@@ -490,3 +490,317 @@ class RemoveDuplicateEdgesCapability(Capability):
                 },
             },
         }
+
+
+# ---------------------------------------------------------------------------
+# PlanarizeCapability
+# ---------------------------------------------------------------------------
+
+
+class _UnionFind:
+    """Minimal union-find for clustering coincident endpoints."""
+
+    def __init__(self, n: int) -> None:
+        self._parent = list(range(n))
+
+    def find(self, x: int) -> int:
+        root = x
+        while self._parent[root] != root:
+            root = self._parent[root]
+        while self._parent[x] != root:
+            self._parent[x], x = root, self._parent[x]
+        return root
+
+    def union(self, a: int, b: int) -> None:
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            self._parent[max(ra, rb)] = min(ra, rb)
+
+
+@register
+class PlanarizeCapability(Capability):
+    """Planar noding of a line network, preserving attributes and parentage.
+
+    Unlike :class:`NodeLinesCapability` (a bare ``unary_union`` that drops
+    every attribute), this splits *each* line at its intersections with the
+    others while keeping the source attributes on every resulting segment
+    and recording the originating feature in ``parent_edge_id``. It also
+    emits the planar graph's nodes.
+
+    Output is a single GeoDataFrame tagged ``feature_type`` (the standing
+    multi-output contract):
+
+    * segment rows: ``feature_type="segment"``, ``parent_edge_id``, the
+      source attributes, a LineString ``geometry``;
+    * node rows: ``feature_type="node"``, ``node_id``, ``degree``, a Point.
+
+    Quasi-intersections (lines that pass within ``snap_tolerance_m`` without
+    truly crossing) are also split, and segment endpoints within that
+    distance are fused into a single node — so a slightly mis-digitised
+    network still planarises cleanly. Use ``split_planar_graph`` to recover
+    ``(nodes_gdf, segments_gdf)``.
+    """
+
+    name = "planarize"
+    description = (
+        "Planar noding of a line network: splits each line at every "
+        "intersection (and near-intersection within snap_tolerance_m), "
+        "preserving attributes + parent_edge_id and emitting graph nodes. "
+        "Returns a GeoDataFrame tagged feature_type=node/segment."
+    )
+
+    def execute(
+        self,
+        gdf: gpd.GeoDataFrame,
+        id_col: str | None = None,
+        snap_tolerance_m: float = 0.0,
+        crs_meters: str | None = "EPSG:3857",
+        **_,
+    ) -> gpd.GeoDataFrame:
+        """
+        Args:
+            gdf:              Line network (LineString / MultiLineString).
+            id_col:           Column seeding ``parent_edge_id``. Defaults to
+                              the row position; multi-part rows get a
+                              ``<id>#<part>`` suffix.
+            snap_tolerance_m: Split lines that pass within this metric
+                              distance of each other, and fuse segment
+                              endpoints within it into one node. ``0`` uses
+                              exact intersections only.
+            crs_meters:       Metric CRS for splitting / tolerance. Result
+                              is reprojected to the input CRS.
+
+        Returns:
+            One GeoDataFrame tagged ``feature_type`` (node|segment).
+        """
+        from shapely.geometry import LineString, MultiLineString, Point
+        from shapely.ops import nearest_points, substring
+
+        if gdf.empty:
+            return self._empty(gdf.crs)
+
+        work, original_crs = _work_in_metric(gdf, crs_meters)
+
+        # Explode to (row_pos, part_idx, LineString) keeping the source row.
+        parts: list[tuple[int, int, "LineString"]] = []
+        part_counts: dict[int, int] = {}
+        for row_pos, geom in enumerate(work.geometry):
+            if geom is None or geom.is_empty:
+                continue
+            members = geom.geoms if isinstance(geom, MultiLineString) else [geom]
+            pc = 0
+            for line in members:
+                if isinstance(line, LineString) and len(line.coords) >= 2:
+                    parts.append((row_pos, pc, line))
+                    pc += 1
+            if pc:
+                part_counts[row_pos] = pc
+
+        if not parts:
+            return self._empty(original_crs)
+
+        part_geoms = [p[2] for p in parts]
+        from shapely import STRtree
+
+        tree = STRtree(part_geoms)
+        tol = max(snap_tolerance_m, 0.0)
+
+        attr_cols = [
+            c
+            for c in work.columns
+            if c != work.geometry.name
+            and c not in {"feature_type", "node_id", "degree",
+                          "parent_edge_id"}
+        ]
+
+        segment_rows: list[dict[str, Any]] = []
+        for pi, (row_pos, part_idx, line) in enumerate(parts):
+            query_geom = line.buffer(tol) if tol > 0 else line
+            measures: set[float] = set()
+            for qj in tree.query(query_geom):
+                pj = int(qj)
+                if pj == pi:
+                    continue
+                other = part_geoms[pj]
+                inter = line.intersection(other)
+                self._collect_measures(line, inter, measures)
+                if tol > 0 and (inter.is_empty):
+                    if line.distance(other) <= tol:
+                        on_line, _ = nearest_points(line, other)
+                        measures.add(line.project(on_line))
+
+            base_id = work.iloc[row_pos][id_col] if (
+                id_col is not None and id_col in work.columns
+            ) else row_pos
+            parent_id: Any = base_id
+            if part_counts.get(row_pos, 1) > 1:
+                parent_id = f"{base_id}#{part_idx}"
+
+            for seg in self._cut(line, measures, substring):
+                row: dict[str, Any] = {
+                    "feature_type": "segment",
+                    "parent_edge_id": parent_id,
+                    "geometry": seg,
+                }
+                for c in attr_cols:
+                    row[c] = work.iloc[row_pos][c]
+                segment_rows.append(row)
+
+        node_rows = self._build_nodes(segment_rows, tol, Point)
+
+        out = gpd.GeoDataFrame(
+            node_rows + segment_rows, geometry="geometry", crs=work.crs
+        )
+        return _restore_crs(out, original_crs).reset_index(drop=True)
+
+    @classmethod
+    def _collect_measures(cls, line, inter, measures: set[float]) -> None:
+        """Add the along-*line* measures of every point implied by *inter*.
+
+        Point/MultiPoint crossings contribute their projection; overlapping
+        line parts contribute the projections of their boundary endpoints
+        (so a shared run still produces clean break points).
+        """
+        if inter.is_empty:
+            return
+        gt = inter.geom_type
+        if gt == "Point":
+            measures.add(line.project(inter))
+        elif gt == "MultiPoint":
+            for p in inter.geoms:
+                measures.add(line.project(p))
+        elif gt == "LineString":
+            for p in inter.boundary.geoms:
+                measures.add(line.project(p))
+        elif gt in ("MultiLineString", "GeometryCollection"):
+            for g in inter.geoms:
+                cls._collect_measures(line, g, measures)
+
+    @staticmethod
+    def _cut(line, measures: set[float], substring) -> list:
+        """Cut *line* at the given along-line *measures*, return sub-segments."""
+        length = line.length
+        eps = 1e-9
+        cuts = sorted(m for m in measures if eps < m < length - eps)
+        if not cuts:
+            return [line]
+        bounds = [0.0, *cuts, length]
+        out = []
+        for a, b in zip(bounds[:-1], bounds[1:]):
+            if b - a > eps:
+                seg = substring(line, a, b)
+                if seg is not None and not seg.is_empty and seg.length > eps:
+                    out.append(seg)
+        return out or [line]
+
+    def _build_nodes(self, segment_rows, tol: float, Point) -> list[dict[str, Any]]:
+        """Build fused node rows from segment endpoints."""
+        endpoints: list[tuple[float, float]] = []
+        seg_ends: list[tuple[int, int]] = []
+        for seg in segment_rows:
+            coords = list(seg["geometry"].coords)
+            s = len(endpoints)
+            endpoints.append((coords[0][0], coords[0][1]))
+            e = len(endpoints)
+            endpoints.append((coords[-1][0], coords[-1][1]))
+            seg_ends.append((s, e))
+
+        node_key = self._fuse(endpoints, tol)
+        members: dict[int, list[int]] = {}
+        for ep_idx, key in enumerate(node_key):
+            members.setdefault(key, []).append(ep_idx)
+
+        node_id_of_key: dict[int, int] = {}
+        degree: dict[int, int] = {}
+        for new_id, key in enumerate(sorted(members)):
+            node_id_of_key[key] = new_id
+        for s, e in seg_ends:
+            for ep in (s, e):
+                nid = node_id_of_key[node_key[ep]]
+                degree[nid] = degree.get(nid, 0) + 1
+
+        rows: list[dict[str, Any]] = []
+        for key in sorted(members):
+            nid = node_id_of_key[key]
+            xs = [endpoints[ep][0] for ep in members[key]]
+            ys = [endpoints[ep][1] for ep in members[key]]
+            rows.append(
+                {
+                    "feature_type": "node",
+                    "node_id": nid,
+                    "degree": degree.get(nid, 0),
+                    "geometry": Point(sum(xs) / len(xs), sum(ys) / len(ys)),
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _fuse(endpoints: list[tuple[float, float]], tol: float) -> list[int]:
+        if tol <= 0:
+            key_of: dict[tuple[float, float], int] = {}
+            out = []
+            for x, y in endpoints:
+                key = (round(x, 6), round(y, 6))
+                if key not in key_of:
+                    key_of[key] = len(key_of)
+                out.append(key_of[key])
+            return out
+
+        from shapely import STRtree
+        from shapely.geometry import Point as _P
+
+        pts = [_P(x, y) for x, y in endpoints]
+        tree = STRtree(pts)
+        uf = _UnionFind(len(pts))
+        for i, p in enumerate(pts):
+            for j in tree.query(p.buffer(tol)):
+                jj = int(j)
+                if jj != i and pts[jj].distance(p) <= tol:
+                    uf.union(i, jj)
+        return [uf.find(i) for i in range(len(pts))]
+
+    def _empty(self, crs: Any) -> gpd.GeoDataFrame:
+        return gpd.GeoDataFrame(
+            {
+                "feature_type": [],
+                "node_id": [],
+                "degree": [],
+                "parent_edge_id": [],
+                "geometry": [],
+            },
+            geometry="geometry",
+            crs=crs,
+        )
+
+    def get_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "id_col": {
+                    "type": ["string", "null"],
+                    "description": "Column seeding parent_edge_id; defaults to row position.",
+                },
+                "snap_tolerance_m": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 0.0,
+                    "description": "Split near-intersections and fuse nodes within this metric distance.",
+                },
+                "crs_meters": {
+                    "type": ["string", "null"],
+                    "default": "EPSG:3857",
+                    "description": "Metric CRS for splitting/tolerance.",
+                },
+            },
+        }
+
+
+def split_planar_graph(
+    graph_gdf: gpd.GeoDataFrame,
+) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    """Split a ``planarize`` result into ``(nodes_gdf, segments_gdf)``."""
+    nodes = graph_gdf[graph_gdf["feature_type"] == "node"].dropna(axis=1, how="all")
+    segments = graph_gdf[graph_gdf["feature_type"] == "segment"].dropna(
+        axis=1, how="all"
+    )
+    return nodes.reset_index(drop=True), segments.reset_index(drop=True)
