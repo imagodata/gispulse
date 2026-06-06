@@ -142,6 +142,9 @@ from gispulse.capabilities.vector.line_ops import (  # noqa: F401
     LineLocatePointCapability,
     LineSubstringCapability,
 )
+from gispulse.capabilities.vector.snap_points import (  # noqa: F401
+    SnapPointsToLinesCapability,
+)
 from gispulse.capabilities.vector.diff import (  # noqa: F401
     SymmetricDifferenceCapability,
     VectorDiffCapability,
