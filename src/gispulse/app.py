@@ -150,6 +150,44 @@ class GISPulseApp:
     # ------------------------------------------------------------------
     # Datasets
     # ------------------------------------------------------------------
+    def load(
+        self,
+        source: "str | Path | Any",
+        *,
+        bbox: "tuple[float, float, float, float] | None" = None,
+        layer: str | None = None,
+        lazy: bool = False,
+        crs: str | None = None,
+        **opts: Any,
+    ) -> "gpd.GeoDataFrame | Any":
+        """Load any supported source into a GeoDataFrame.
+
+        The unified entry point over every reader GISPulse owns — local
+        files (GeoPackage, GeoJSON, GeoParquet, Shapefile, …) and remote
+        protocol sources (GeoParquet on S3/HTTP, OGC API Features, WFS,
+        STAC, …). The result is a plain GeoDataFrame, so any capability
+        runs on it directly: ``app.apply(verb, app.load(src), ...)``.
+
+        Args:
+            source: A path, a ``s3://`` / ``https://`` / named-protocol
+                URI, an :class:`~gispulse.core.plugin_model.AccessSpec`,
+                or an access-descriptor ``dict``.
+            bbox:   Spatial filter ``(minx, miny, maxx, maxy)`` pushed
+                    down to the reader/fetcher when supported.
+            layer:  Layer name for multi-layer file formats.
+            lazy:   Return a :class:`~gispulse.persistence.loader.LazyDataset`
+                    handle for remote sources instead of materialising.
+            crs:    Force this CRS when the source declares none.
+            **opts: Extra options forwarded to the underlying reader.
+
+        Returns:
+            A GeoDataFrame, or a ``LazyDataset`` when ``lazy=True`` on a
+            remote source.
+        """
+        from gispulse.persistence.loader import load as _load
+
+        return _load(source, bbox=bbox, layer=layer, lazy=lazy, crs=crs, **opts)
+
     def load_dataset(
         self, path: "str | Path", layer: str | None = None
     ) -> "gpd.GeoDataFrame":
@@ -535,4 +573,19 @@ def run(
     return get_app().run_pipeline(spec, inputs, params)
 
 
-__all__ = ["GISPulseApp", "get_app", "apply", "run"]
+def load(
+    source: "str | Path | Any",
+    *,
+    bbox: "tuple[float, float, float, float] | None" = None,
+    layer: str | None = None,
+    lazy: bool = False,
+    crs: str | None = None,
+    **opts: Any,
+) -> "gpd.GeoDataFrame | Any":
+    """Load any supported source — shortcut for ``get_app().load``."""
+    return get_app().load(
+        source, bbox=bbox, layer=layer, lazy=lazy, crs=crs, **opts
+    )
+
+
+__all__ = ["GISPulseApp", "get_app", "apply", "load", "run"]
