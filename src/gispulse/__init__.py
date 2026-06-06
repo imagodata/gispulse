@@ -31,10 +31,18 @@ from gispulse import _compat as _compat
 
 _compat.install()
 
-__all__ = ["__version__", "GISPulseApp", "get_app", "apply", "run"]
+__all__ = [
+    "__version__",
+    "GISPulseApp",
+    "get_app",
+    "apply",
+    "load",
+    "publish",
+    "run",
+]
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from gispulse.app import GISPulseApp, apply, get_app, run
+    from gispulse.app import GISPulseApp, apply, get_app, load, publish, run
 
 
 def __getattr__(name: str):
@@ -43,7 +51,7 @@ def __getattr__(name: str):
     Keeps ``import gispulse`` free of heavy imports — ``gispulse.app`` and
     its subsystems are pulled only when the façade is first accessed.
     """
-    if name in {"GISPulseApp", "get_app", "apply", "run"}:
+    if name in {"GISPulseApp", "get_app", "apply", "load", "publish", "run"}:
         from gispulse import app as _app
 
         return getattr(_app, name)
