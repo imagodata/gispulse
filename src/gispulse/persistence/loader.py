@@ -47,6 +47,7 @@ from gispulse.core.plugin_model import (
     SourceResult,
 )
 from gispulse.core.sources import PROTOCOLS, ProtocolRegistry
+from gispulse.persistence.datamart import DATAMART_SCHEME
 
 log = get_logger(__name__)
 
@@ -158,6 +159,14 @@ def resolve_source(source: "str | Path | AccessSpec | dict[str, Any]") -> "Path 
     if not sep:
         return Path(raw)
     scheme = head.lower()
+
+    # Datamart indirection: resolve datamart://<mart>/<table> to its
+    # concrete source URI, then resolve that recursively.
+    if scheme == DATAMART_SCHEME:
+        from gispulse.persistence.datamart import DATAMARTS, parse_datamart_uri
+
+        mart, table = parse_datamart_uri(raw)
+        return resolve_source(DATAMARTS.resolve(mart, table))
 
     # "<proto>+<transport>://…" — explicit transport override.
     proto_name, _, _ = scheme.partition("+")
