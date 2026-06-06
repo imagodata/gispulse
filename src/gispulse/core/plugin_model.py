@@ -138,6 +138,7 @@ class AccessProtocol(str, Enum):
     # files
     DOWNLOAD = "download"          # remote zip/shp/gpkg/geojson/csv
     TABLE_FILE = "table-file"      # remote/local non-spatial tabular file
+    LOCAL_FILE = "local-file"      # local vector file (KML/KMZ/GPKG/GeoJSON…)
     COG = "cog"                    # Cloud-Optimized GeoTIFF (raster reference)
     PMTILES = "pmtiles"            # single-file vector/raster tiles
     # databases / lakehouse
