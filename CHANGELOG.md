@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.1]
+
+### Added
+
+- **DuckDB-file datamarts (DP2b).** A datamart can now be backed by a single
+  DuckDB database file (`kind="duckdb"`) instead of one Parquet file per
+  table: `datamart://<mart>/<table>` attaches the `.duckdb` file read-only
+  and selects the table, with bbox push-down via `ST_Intersects`.
+  `GISPULSE_DATAMARTS` accepts `"kind": "duckdb"`.
+
 ## [2.2.0]
 
 Feature release adding a coherent set of **generic GIS capabilities** for
