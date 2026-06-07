@@ -180,6 +180,12 @@ def test_register_core_fetchers_registers_the_full_roster() -> None:
     assert isinstance(reg.get_fetcher(AccessProtocol.WFS), WfsFetcher)
 
 
+def test_register_core_fetchers_override_false_is_idempotent() -> None:
+    reg = ProtocolRegistry()
+    assert register_core_fetchers(reg, override=False) == 7
+    assert register_core_fetchers(reg, override=False) == 0
+
+
 def test_register_core_fetchers_resolves_wfs_for_declarative_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

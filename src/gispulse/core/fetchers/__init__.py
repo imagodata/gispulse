@@ -20,7 +20,12 @@ from __future__ import annotations
 
 from gispulse.core.fetchers.base import DUCKDB_SCAN_KEY, LazyFetcher
 from gispulse.core.logging import get_logger
-from gispulse.core.sources import PROTOCOLS, Fetcher, ProtocolRegistry
+from gispulse.core.sources import (
+    PROTOCOLS,
+    Fetcher,
+    ProtocolNotSupported,
+    ProtocolRegistry,
+)
 
 log = get_logger(__name__)
 
@@ -74,6 +79,12 @@ def register_core_fetchers(
     target = registry if registry is not None else PROTOCOLS
     count = 0
     for fetcher in _core_fetchers():
+        if not override:
+            try:
+                target.get_fetcher(fetcher.protocol)
+                continue
+            except ProtocolNotSupported:
+                pass
         target.register(fetcher, override=override)
         count += 1
     log.info("core_fetchers_registered", count=count)
