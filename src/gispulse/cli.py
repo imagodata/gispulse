@@ -1549,6 +1549,15 @@ app.command(name="mcp")(cmd_mcp)
 
 
 # ---------------------------------------------------------------------------
+# source — unified source catalog / ingest / artifact management
+# ---------------------------------------------------------------------------
+
+from gispulse.cli_source import source_app  # noqa: E402
+
+app.add_typer(source_app, name="source")
+
+
+# ---------------------------------------------------------------------------
 # migrate — rewrite a v1/v2 pipeline file as a v3 manifest (ADR 0005)
 # ---------------------------------------------------------------------------
 
