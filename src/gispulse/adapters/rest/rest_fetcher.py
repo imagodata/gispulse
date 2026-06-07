@@ -21,6 +21,7 @@ import json
 from typing import Any
 from urllib.parse import urlencode
 
+from gispulse.adapters.rest.retry import RetrySpec, get_json_with_retry, sleep as _sleep
 from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
     AccessProtocol,
@@ -37,7 +38,7 @@ _GEOJSON_CRS = "EPSG:4326"
 _DEFAULT_TIMEOUT_S = 20.0
 #: AccessSpec.params keys the fetcher consumes itself — every *other* key
 #: is forwarded verbatim as an HTTP query parameter.
-_RESERVED_PARAMS = frozenset({"geom_param", "timeout"})
+_RESERVED_PARAMS = frozenset({"geom_param", "timeout", "retry"})
 
 
 def _bbox_from_extent(extent: Any) -> tuple[float, float, float, float] | None:
@@ -84,6 +85,21 @@ def _get_geojson(url: str, timeout: float) -> dict[str, Any]:
     return resp.json()
 
 
+def _get_geojson_with_retry(
+    url: str,
+    timeout: float,
+    retry: RetrySpec,
+) -> dict[str, Any]:
+    return get_json_with_retry(
+        _get_geojson,
+        url,
+        timeout,
+        retry,
+        retry_event="rest_geojson_fetch_retry",
+        sleep_fn=_sleep,
+    )
+
+
 class RestGeoJsonFetcher:
     """:class:`~core.sources.Fetcher` for ``AccessProtocol.REST_API``.
 
@@ -93,6 +109,7 @@ class RestGeoJsonFetcher:
     - ``geom_param`` — *(optional)* name of the query field that receives
       the fetch ``extent`` as a GeoJSON polygon (API Carto uses ``geom``)
     - ``timeout`` — HTTP timeout in seconds *(default: 20)*
+    - ``retry`` — retry/backoff policy for transient HTTP/transport errors
     - every other key — forwarded verbatim as an HTTP query parameter
     """
 
@@ -109,21 +126,18 @@ class RestGeoJsonFetcher:
 
         params = dict(access.params or {})
         timeout = float(params.get("timeout", _DEFAULT_TIMEOUT_S))
+        retry = RetrySpec.from_params(params)
         geom_param = params.get("geom_param")
-        query: dict[str, Any] = {
-            k: v for k, v in params.items() if k not in _RESERVED_PARAMS
-        }
+        query: dict[str, Any] = {k: v for k, v in params.items() if k not in _RESERVED_PARAMS}
         bbox = _bbox_from_extent(extent)
         if geom_param and bbox is not None:
-            query[str(geom_param)] = json.dumps(
-                _bbox_polygon(bbox), separators=(",", ":")
-            )
+            query[str(geom_param)] = json.dumps(_bbox_polygon(bbox), separators=(",", ":"))
         url = access.endpoint
         if query:
             sep = "&" if "?" in url else "?"
             url = f"{url}{sep}{urlencode(query)}"
 
-        payload = _get_geojson(url, timeout)
+        payload = _get_geojson_with_retry(url, timeout, retry)
         if payload.get("type") != "FeatureCollection":
             raise ValueError(
                 f"REST endpoint did not return a GeoJSON FeatureCollection "

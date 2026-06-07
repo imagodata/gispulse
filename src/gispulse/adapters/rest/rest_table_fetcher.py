@@ -27,6 +27,7 @@ import time
 from typing import Any, BinaryIO
 from urllib.parse import urlencode, urljoin, urlsplit
 
+from gispulse.adapters.rest.retry import RetrySpec, get_json_with_retry, sleep as _sleep
 from gispulse.core.config import settings
 from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
@@ -108,10 +109,26 @@ class PaginationSpec:
             empty_body_is_empty=bool(pagination.get("empty_body_is_empty", False)),
             max_pages=int(pagination.get("max_pages", _DEFAULT_MAX_PAGES)),
             max_rows=int(max_rows) if max_rows is not None else None,
-            max_total_seconds=(
-                float(max_total_seconds) if max_total_seconds is not None else None
-            ),
+            max_total_seconds=(float(max_total_seconds) if max_total_seconds is not None else None),
         )
+
+
+def _get_json_with_retry(
+    url: str,
+    timeout: float,
+    retry: RetrySpec,
+    *,
+    empty_statuses: frozenset[Any],
+) -> dict[str, Any]:
+    return get_json_with_retry(
+        _get_json,
+        url,
+        timeout,
+        retry,
+        empty_statuses=empty_statuses,
+        retry_event="rest_table_fetch_retry",
+        sleep_fn=_sleep,
+    )
 
 
 def _rows_from_body(body: dict[str, Any], spec: PaginationSpec) -> list[Any]:
@@ -247,6 +264,7 @@ class RestTableFetcher:
         params = dict(access.params or {})
         timeout = float(params.get("timeout", _DEFAULT_TIMEOUT_S))
         pagination = PaginationSpec.from_params(params)
+        retry = RetrySpec.from_params(params)
         deadline = (
             time.monotonic() + pagination.max_total_seconds
             if pagination.max_total_seconds is not None
@@ -286,7 +304,12 @@ class RestTableFetcher:
                 guard_outbound_url(url)
                 seen.add(url)
                 try:
-                    body = _get_json(url, timeout)
+                    body = _get_json_with_retry(
+                        url,
+                        timeout,
+                        retry,
+                        empty_statuses=pagination.empty_statuses,
+                    )
                 except httpx.HTTPStatusError as exc:
                     if exc.response.status_code in pagination.empty_statuses:
                         break  # "no data here" — leave the result empty
@@ -297,16 +320,10 @@ class RestTableFetcher:
                     raise
                 page_count += 1
                 for row in _rows_from_body(body, pagination):
-                    if (
-                        pagination.max_rows is not None
-                        and row_count >= pagination.max_rows
-                    ):
+                    if pagination.max_rows is not None and row_count >= pagination.max_rows:
                         break
                     row_count += _write_jsonl_row(row, fh, digest)
-                if (
-                    pagination.max_rows is not None
-                    and row_count >= pagination.max_rows
-                ):
+                if pagination.max_rows is not None and row_count >= pagination.max_rows:
                     break
                 if page_count >= pagination.max_pages:
                     break
