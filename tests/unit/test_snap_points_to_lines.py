@@ -12,6 +12,7 @@ import time
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import pytest
 from shapely.geometry import LineString, Point
 
@@ -144,7 +145,9 @@ def test_empty_point_geometry(lines):
     pts = gpd.GeoDataFrame(geometry=[None, Point(30, 5)], crs="EPSG:3857")
     out = _run(pts, lines)
     assert not out.iloc[0]["snapped"]
-    assert out.iloc[0]["edge_id"] is None  # no nearest line for a null geometry
+    # no nearest line for a null geometry: edge_id is null (None or NaN
+    # depending on the pandas version's column upcasting).
+    assert pd.isna(out.iloc[0]["edge_id"])
     assert out.iloc[1]["snapped"]
 
 
