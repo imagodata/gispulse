@@ -6,16 +6,36 @@ to a routable edge:
 
 * ``edge_id``         — the matched line's id (from ``ref_id_col``), stable
   across runs (not a row position);
-* ``measure``         — distance along the matched line, in meters;
-* ``offset_distance`` — perpendicular distance from the point to the line;
-* ``snapped``         — False when no line lies within ``max_distance_m``;
-* ``geometry``        — replaced by the **projected** point on the line
-  (the original point is kept for unsnapped rows).
+* ``measure``         — distance along the matched line, in meters, from its
+  start (in ``[0, line_length]``); null when unsnapped;
+* ``offset_distance`` — perpendicular distance from the point to its nearest
+  line (always reported, snapped or not);
+* ``snapped``         — ``True`` when ``offset_distance <= max_distance_m``
+  (or ``max_distance_m is None``), ``False`` otherwise;
+* ``geometry``        — for snapped rows, the **projected** point on the
+  nearest line; for unsnapped rows the original point is kept.
+
+A point beyond ``max_distance_m`` is reported with ``snapped=False``,
+``edge_id``/``measure`` null and its original geometry — only
+``offset_distance`` records how far its nearest line lies, so the consumer
+can decide what to do. A null/empty input geometry has no nearest line and
+stays ``edge_id=None``, ``snapped=False`` with its geometry untouched.
 
 Candidate lines are found through a :class:`~gispulse.core.spatial_index.SpatialIndex`
-(no O(n·m) scan). Processing happens in a metric CRS so ``measure`` /
-``offset_distance`` / ``max_distance_m`` are in meters; the result is
-reprojected to the input CRS.
+(STRtree, no O(n·m) scan); each point projects directly onto its segment.
+Ties — several lines exactly equidistant from one point — break
+deterministically on the smallest ``edge_id`` so the same inputs always
+produce the same outputs.
+
+All metric quantities (``measure``, ``offset_distance``, ``max_distance_m``)
+are computed in ``crs_meters`` (a projected CRS); inputs in another CRS are
+reprojected in and the result is reprojected back to the points' original
+CRS. ``crs_meters`` must be a metric/projected CRS — never feed it degrees.
+
+This capability is deliberately **generic**: it carries no business notion
+(site, fibre edge, river reach…). Accidents on a road network, meters on a
+utility line and discharges on a watercourse are all the same operation —
+project points onto identified lines — and none is special-cased here.
 """
 
 from __future__ import annotations
@@ -27,6 +47,31 @@ from gispulse.capabilities.base import Capability
 from gispulse.capabilities.registry import register
 from gispulse.core.spatial_index import SpatialIndex
 
+# How many nearest lines to inspect per point when breaking ties. Genuine
+# geometric ties (several lines exactly equidistant from one point) are rare;
+# 8 candidates is ample headroom while keeping each lookup O(k·log n) — far
+# cheaper (and bounded) than a radius query whose buffer could match the whole
+# network for a far-off point.
+_TIE_CANDIDATES = 8
+# Distances within this many CRS units (meters) are treated as equal for the
+# purpose of tie-breaking on edge_id.
+_TIE_TOL_M = 1e-9
+
+
+def _id_sort_key(value: object) -> "tuple[int, object]":
+    """Deterministic, total ordering key for tie-breaking on edge ids.
+
+    Real ids in a single ``ref_id_col`` are homogeneous (all ints or all
+    strings), where this reduces to natural order. The two-level key only
+    guards the pathological mixed-type column so ``min`` never raises and the
+    outcome stays reproducible.
+    """
+    if isinstance(value, bool):  # bool is an int subclass — keep it on the str side
+        return (1, str(value))
+    if isinstance(value, (int, float)):
+        return (0, value)
+    return (1, str(value))
+
 
 @register
 class SnapPointsToLinesCapability(Capability):
@@ -34,9 +79,9 @@ class SnapPointsToLinesCapability(Capability):
 
     name = "snap_points_to_lines"
     description = (
-        "Snaps each point to the nearest line within max_distance_m, adding "
-        "edge_id (from ref_id_col), measure, offset_distance and a snapped "
-        "flag; geometry becomes the projected point."
+        "Snaps each point to the nearest line, adding edge_id (from "
+        "ref_id_col), measure, offset_distance and a snapped flag; geometry "
+        "becomes the projected point on the nearest line."
     )
 
     def execute(
@@ -45,47 +90,69 @@ class SnapPointsToLinesCapability(Capability):
         ref_gdf: gpd.GeoDataFrame | None = None,
         ref_id_col: str | None = None,
         max_distance_m: float | None = None,
+        crs_meters: str = "EPSG:3857",
         edge_id_col: str = "edge_id",
         measure_col: str = "measure",
         offset_col: str = "offset_distance",
         snapped_col: str = "snapped",
-        crs_meters: str = "EPSG:3857",
         **_,
     ) -> gpd.GeoDataFrame:
-        """
+        """Project each point onto its nearest reference line.
+
         Args:
-            gdf:            Input points (non-points use their centroid).
+            gdf:            Input points (non-points use their centroid). All
+                            input columns are preserved on the output.
             ref_gdf:        Reference line layer (injected via ``ref_layer``).
-            ref_id_col:     Column on ``ref_gdf`` providing ``edge_id``.
-                            Defaults to the line's row position.
-            max_distance_m: Max snap distance in meters. Points with no line
-                            within it are left unsnapped (``snapped=False``,
-                            original geometry kept). ``None`` always snaps to
-                            the nearest line.
+            ref_id_col:     Column on ``ref_gdf`` providing the stable
+                            ``edge_id``. **Required** — its absence raises a
+                            clear ``ValueError`` rather than silently falling
+                            back to a positional index.
+            max_distance_m: Snap threshold in meters. A point whose nearest
+                            line is farther than this is left unsnapped:
+                            ``snapped=False``, ``edge_id``/``measure`` null
+                            and the original geometry kept, with only
+                            ``offset_distance`` reporting the true nearest
+                            distance. ``None`` snaps every point to its
+                            nearest line.
+            crs_meters:     Metric (projected) CRS used for all distances.
             edge_id_col:    Output column for the matched edge id.
             measure_col:    Output column for the along-line measure (m).
             offset_col:     Output column for the perpendicular offset (m).
             snapped_col:    Output boolean column.
-            crs_meters:     Metric CRS used for all distances.
 
         Returns:
-            Copy of ``gdf`` with the four columns added and ``geometry``
-            replaced by the projected point (snapped rows), in the input CRS.
+            Copy of ``gdf`` (input columns intact) with the four columns added
+            and ``geometry`` replaced by the projected point, in the input CRS.
+
+        Raises:
+            ValueError: if ``ref_gdf`` is missing/empty, or if ``ref_id_col``
+                is not a column of ``ref_gdf``.
         """
         if ref_gdf is None or ref_gdf.empty:
-            raise ValueError("snap_points_to_lines requires a reference line layer.")
+            raise ValueError(
+                "snap_points_to_lines requires a non-empty reference line layer "
+                "(ref_gdf). Pass the lines to project the points onto."
+            )
+        if ref_id_col is None or ref_id_col not in ref_gdf.columns:
+            raise ValueError(
+                "snap_points_to_lines: ref_id_col="
+                f"{ref_id_col!r} is not a column of ref_gdf "
+                f"(available columns: {list(ref_gdf.columns)}). "
+                "Pass ref_id_col=<the stable id column on your lines> so every "
+                "snapped point can carry a durable edge_id."
+            )
 
         original_crs = gdf.crs
         left = gdf.to_crs(crs_meters) if original_crs is not None else gdf.copy()
         right = (
             ref_gdf.to_crs(crs_meters)
-            if ref_gdf.crs is not None and str(ref_gdf.crs) != crs_meters
+            if ref_gdf.crs is not None and str(ref_gdf.crs) != str(crs_meters)
             else ref_gdf.copy()
         )
         right = right.reset_index(drop=True)
 
-        has_id = ref_id_col is not None and ref_id_col in right.columns
         line_geoms = list(right.geometry)
+        ref_ids = list(right[ref_id_col])
         index = SpatialIndex(line_geoms)
 
         n = len(left)
@@ -100,22 +167,21 @@ class SnapPointsToLinesCapability(Capability):
                 continue
             pt = geom if geom.geom_type == "Point" else geom.centroid
 
-            best = self._best_line(index, line_geoms, pt, max_distance_m)
-            if best is None:
-                # Record how far the truly nearest line is (informative).
-                near = index.nearest(pt)
-                if near:
-                    offsets[row_i] = float(line_geoms[near[0]].distance(pt))
+            pos = self._nearest_line(index, line_geoms, ref_ids, pt)
+            if pos is None:  # ref layer had no usable geometry
                 continue
-
-            pos, dist = best
             line = line_geoms[pos]
+            offset = line.distance(pt)
+            offsets[row_i] = float(offset)  # nearest distance is always reported
+            if max_distance_m is not None and offset > max_distance_m:
+                # Beyond the threshold: leave edge_id/measure null and the
+                # original geometry in place (snapped stays False).
+                continue
             measure = line.project(pt)
             measures[row_i] = float(measure)
-            offsets[row_i] = float(dist)
-            snapped[row_i] = True
-            edge_ids[row_i] = right.iloc[pos][ref_id_col] if has_id else pos
+            edge_ids[row_i] = ref_ids[pos]
             new_geoms[row_i] = line.interpolate(measure)
+            snapped[row_i] = True
 
         out = left.copy()
         out[edge_id_col] = edge_ids
@@ -130,29 +196,25 @@ class SnapPointsToLinesCapability(Capability):
         return out.reset_index(drop=True)
 
     @staticmethod
-    def _best_line(
+    def _nearest_line(
         index: SpatialIndex,
         line_geoms: list,
+        ref_ids: list,
         pt,
-        max_distance_m: float | None,
-    ) -> "tuple[int, float] | None":
-        """Return (line position, distance) of the best match, or None."""
-        if max_distance_m is None:
-            near = index.nearest(pt)
-            if not near:
-                return None
-            pos = near[0]
-            return pos, float(line_geoms[pos].distance(pt))
+    ) -> "int | None":
+        """Position of the nearest line to ``pt``, ties broken by smallest id.
 
-        candidates = index.query_radius(pt, max_distance_m)
-        best_pos, best_dist = -1, float("inf")
-        for pos in candidates:
-            d = line_geoms[pos].distance(pt)
-            if d < best_dist:
-                best_pos, best_dist = pos, d
-        if best_pos < 0 or best_dist > max_distance_m:
+        Inspects the ``_TIE_CANDIDATES`` nearest lines (O(k·log n)), keeps
+        those within ``_TIE_TOL_M`` of the minimum distance, and returns the
+        one with the smallest ``edge_id`` — a stable, deterministic choice.
+        """
+        near = index.nearest(pt, k=min(_TIE_CANDIDATES, len(line_geoms)))
+        if not near:
             return None
-        return best_pos, best_dist
+        dists = {pos: line_geoms[pos].distance(pt) for pos in near}
+        best_dist = min(dists.values())
+        tied = [pos for pos, d in dists.items() if d <= best_dist + _TIE_TOL_M]
+        return min(tied, key=lambda pos: _id_sort_key(ref_ids[pos]))
 
     def get_schema(self) -> dict:
         return {
@@ -160,25 +222,37 @@ class SnapPointsToLinesCapability(Capability):
             "properties": {
                 "ref_layer": {
                     "type": "string",
-                    "description": "Reference line layer.",
+                    "description": "Reference line layer to snap onto.",
                 },
                 "ref_id_col": {
-                    "type": ["string", "null"],
-                    "description": "Column on the lines providing edge_id.",
+                    "type": "string",
+                    "description": (
+                        "Required. Column on the lines providing the stable "
+                        "edge_id; its absence raises a ValueError."
+                    ),
                 },
                 "max_distance_m": {
                     "type": ["number", "null"],
-                    "description": "Max snap distance (m). None = nearest line always.",
+                    "description": (
+                        "Snap threshold (m). Beyond it, snapped=False with "
+                        "edge_id/measure null and the original geometry kept "
+                        "(only offset_distance reported). None snaps every "
+                        "point to its nearest line."
+                    ),
                 },
+                "crs_meters": {"type": "string", "default": "EPSG:3857"},
                 "edge_id_col": {"type": "string", "default": "edge_id"},
                 "measure_col": {"type": "string", "default": "measure"},
                 "offset_col": {"type": "string", "default": "offset_distance"},
                 "snapped_col": {"type": "string", "default": "snapped"},
-                "crs_meters": {"type": "string", "default": "EPSG:3857"},
             },
-            # ``ref_layer`` is pipeline plumbing (stripped before validation)
-            # so it cannot be in ``required``; the runtime raises a clear
-            # ValueError when ``ref_gdf`` is None.
+            # ``ref_id_col`` is genuinely required and is not plumbing, so it
+            # can validate early. ``ref_layer`` must NOT appear in ``required``:
+            # it is pipeline plumbing (resolved to ``ref_gdf`` and stripped
+            # before schema validation), so requiring it would fail every v2
+            # call before the capability runs. The runtime still raises a clear
+            # ValueError when ``ref_gdf`` itself is missing.
+            "required": ["ref_id_col"],
         }
 
 
