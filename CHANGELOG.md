@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0]
+
+Feature release adding a coherent set of **generic GIS capabilities** for
+network analysis, linear referencing and clustering (the "A–K" plan), plus a
+unified multi-source data provider. Fully backwards-compatible.
+
+### Added
+
+- **Unified data loader & providers (#374).** `gispulse.load(source, …)` /
+  `app.load()` resolve files (incl. GeoParquet), remote URIs (s3/http),
+  `wfs://` / `stac://` / `ogc-features://`, datamarts (`datamart://`, curated
+  Parquet) and GeoNode instances (`geonode://`, read + `publish()` write) to a
+  GeoDataFrame or a lazy DuckDB scan.
+- **`SpatialIndex` (K) & `NetworkGraph` (F).** Reusable core infrastructure: a
+  thin STRtree wrapper (build once / query many) and a persistent routing
+  handle that builds the NetworkX graph once and snaps points to nodes in
+  O(log n). All network capabilities (`shortest_path`, `isochrone`,
+  `od_matrix`, `mst`, `network_allocation`, `connectivity_check`) now reuse the
+  handle instead of rebuilding the graph and scanning nodes linearly.
+- **`build_network_graph` (A).** Turns a line layer into a tagged node/edge
+  GeoDataFrame with stable ids, degrees and metric lengths.
+- **`snap_points_to_lines` (B)** and **`split_lines_at_points` (C).** Snap a
+  point layer onto a line network; cut lines at a reference point layer.
+- **`planarize` (D)** and **`connected_components` (E).** Attribute-preserving
+  planar noding; label network islands.
+- **`steiner_tree` (G).** Approximate minimum Steiner tree connecting a subset
+  of terminal points at near-minimum total cost.
+- **`cluster_network_dbscan` (H).** DBSCAN using shortest-path distance along a
+  network instead of straight-line distance.
+- **`community_detection` (I).** Partition a network into communities (Louvain
+  / greedy modularity / label propagation); tags each edge with a
+  `community_id`.
+- **`cluster_st_dbscan` (J).** Spatio-temporal DBSCAN combining a spatial
+  (`eps_m`) and a temporal (`eps_time`) threshold.
+
 ## [2.1.0]
 
 Feature release consolidating everything that landed on `main` since `2.0.0`:
