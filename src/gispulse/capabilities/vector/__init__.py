@@ -145,6 +145,9 @@ from gispulse.capabilities.vector.line_ops import (  # noqa: F401
 from gispulse.capabilities.vector.snap_points import (  # noqa: F401
     SnapPointsToLinesCapability,
 )
+from gispulse.capabilities.vector.split_lines import (  # noqa: F401
+    SplitLinesAtPointsCapability,
+)
 from gispulse.capabilities.vector.diff import (  # noqa: F401
     SymmetricDifferenceCapability,
     VectorDiffCapability,

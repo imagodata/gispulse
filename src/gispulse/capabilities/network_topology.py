@@ -52,6 +52,47 @@ def _restore_crs(gdf: gpd.GeoDataFrame, original_crs: Any) -> gpd.GeoDataFrame:
     return gdf
 
 
+def _collect_measures(line, inter, measures: set[float]) -> None:
+    """Add the along-*line* measures of every point implied by *inter*.
+
+    Point/MultiPoint crossings contribute their projection; overlapping
+    line parts contribute the projections of their boundary endpoints
+    (so a shared run still produces clean break points). Shared by
+    :class:`PlanarizeCapability` and ``split_lines_at_points``.
+    """
+    if inter.is_empty:
+        return
+    gt = inter.geom_type
+    if gt == "Point":
+        measures.add(line.project(inter))
+    elif gt == "MultiPoint":
+        for p in inter.geoms:
+            measures.add(line.project(p))
+    elif gt == "LineString":
+        for p in inter.boundary.geoms:
+            measures.add(line.project(p))
+    elif gt in ("MultiLineString", "GeometryCollection"):
+        for g in inter.geoms:
+            _collect_measures(line, g, measures)
+
+
+def _cut(line, measures: set[float], substring) -> list:
+    """Cut *line* at the given along-line *measures*, return sub-segments."""
+    length = line.length
+    eps = 1e-9
+    cuts = sorted(m for m in measures if eps < m < length - eps)
+    if not cuts:
+        return [line]
+    bounds = [0.0, *cuts, length]
+    out = []
+    for a, b in zip(bounds[:-1], bounds[1:]):
+        if b - a > eps:
+            seg = substring(line, a, b)
+            if seg is not None and not seg.is_empty and seg.length > eps:
+                out.append(seg)
+    return out or [line]
+
+
 # ---------------------------------------------------------------------------
 # SnapEndpointsCapability
 # ---------------------------------------------------------------------------
@@ -623,7 +664,7 @@ class PlanarizeCapability(Capability):
                     continue
                 other = part_geoms[pj]
                 inter = line.intersection(other)
-                self._collect_measures(line, inter, measures)
+                _collect_measures(line, inter, measures)
                 if tol > 0 and (inter.is_empty):
                     if line.distance(other) <= tol:
                         on_line, _ = nearest_points(line, other)
@@ -636,7 +677,7 @@ class PlanarizeCapability(Capability):
             if part_counts.get(row_pos, 1) > 1:
                 parent_id = f"{base_id}#{part_idx}"
 
-            for seg in self._cut(line, measures, substring):
+            for seg in _cut(line, measures, substring):
                 row: dict[str, Any] = {
                     "feature_type": "segment",
                     "parent_edge_id": parent_id,
@@ -652,46 +693,6 @@ class PlanarizeCapability(Capability):
             node_rows + segment_rows, geometry="geometry", crs=work.crs
         )
         return _restore_crs(out, original_crs).reset_index(drop=True)
-
-    @classmethod
-    def _collect_measures(cls, line, inter, measures: set[float]) -> None:
-        """Add the along-*line* measures of every point implied by *inter*.
-
-        Point/MultiPoint crossings contribute their projection; overlapping
-        line parts contribute the projections of their boundary endpoints
-        (so a shared run still produces clean break points).
-        """
-        if inter.is_empty:
-            return
-        gt = inter.geom_type
-        if gt == "Point":
-            measures.add(line.project(inter))
-        elif gt == "MultiPoint":
-            for p in inter.geoms:
-                measures.add(line.project(p))
-        elif gt == "LineString":
-            for p in inter.boundary.geoms:
-                measures.add(line.project(p))
-        elif gt in ("MultiLineString", "GeometryCollection"):
-            for g in inter.geoms:
-                cls._collect_measures(line, g, measures)
-
-    @staticmethod
-    def _cut(line, measures: set[float], substring) -> list:
-        """Cut *line* at the given along-line *measures*, return sub-segments."""
-        length = line.length
-        eps = 1e-9
-        cuts = sorted(m for m in measures if eps < m < length - eps)
-        if not cuts:
-            return [line]
-        bounds = [0.0, *cuts, length]
-        out = []
-        for a, b in zip(bounds[:-1], bounds[1:]):
-            if b - a > eps:
-                seg = substring(line, a, b)
-                if seg is not None and not seg.is_empty and seg.length > eps:
-                    out.append(seg)
-        return out or [line]
 
     def _build_nodes(self, segment_rows, tol: float, Point) -> list[dict[str, Any]]:
         """Build fused node rows from segment endpoints."""
