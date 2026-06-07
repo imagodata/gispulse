@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 import geopandas as gpd
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString, MultiLineString, Point
 
 from gispulse.capabilities.base import Capability
 from gispulse.capabilities.registry import register
@@ -1045,6 +1045,143 @@ class SteinerTreeCapability(Capability):
                 "weight_col": {
                     "type": ["string", "null"],
                     "description": "Arc weight column; defaults to geometric length.",
+                },
+                "crs_meters": {
+                    "type": ["string", "null"],
+                    "default": None,
+                    "description": "Metric CRS for an angular network. Use EPSG:2154 in France.",
+                },
+            },
+        }
+
+
+def _line_endpoint_keys(geom: Any, snap_decimals: int = 6):
+    """Yield the rounded ``(x, y)`` endpoint keys of a (Multi)LineString."""
+    if geom is None or geom.is_empty:
+        return
+    parts = geom.geoms if isinstance(geom, MultiLineString) else [geom]
+    for part in parts:
+        if not isinstance(part, LineString) or len(part.coords) < 2:
+            continue
+        coords = list(part.coords)
+        for x, y in (coords[0], coords[-1]):
+            yield (round(x, snap_decimals), round(y, snap_decimals))
+
+
+@register
+class CommunityDetectionCapability(Capability):
+    """Detects communities in a line network and tags edges (I)."""
+
+    name = "community_detection"
+    description = (
+        "Partitions a line network into communities (densely-connected "
+        "clusters of nodes) using NetworkX — Louvain, greedy modularity or "
+        "label propagation. Tags each input edge with a 'community_id' (-1 "
+        "for edges that span two communities)."
+    )
+
+    _METHODS = {"louvain", "greedy_modularity", "label_propagation"}
+
+    def execute(
+        self,
+        gdf: gpd.GeoDataFrame,
+        method: str = "louvain",
+        weight_col: str | None = None,
+        community_col: str = "community_id",
+        crs_meters: str | None = None,
+        **_,
+    ) -> gpd.GeoDataFrame:
+        """
+        Args:
+            gdf:           Line network (LineStrings).
+            method:        ``"louvain"`` (default), ``"greedy_modularity"`` or
+                           ``"label_propagation"``.
+            weight_col:    Edge-weight column used by modularity-based methods;
+                           defaults to geometric length after metric reprojection.
+            community_col: Output column name.
+            crs_meters:    Metric CRS used when the network is angular so edge
+                           weights are in meters. Default EPSG:3857.
+
+        Returns:
+            Copy of *gdf* (original CRS) with an added integer *community_col*.
+            An edge whose endpoints fall in two different communities gets
+            ``-1`` (community boundary).
+        """
+        check_tier("pro")
+
+        try:
+            from networkx.algorithms import community as nx_comm
+        except ImportError as exc:
+            raise ImportError(
+                "CommunityDetectionCapability requires 'networkx'."
+            ) from exc
+
+        if method not in self._METHODS:
+            raise ValueError(
+                f"community_detection: unknown method {method!r}; "
+                f"expected one of {sorted(self._METHODS)}."
+            )
+
+        if gdf.empty:
+            out = gdf.copy()
+            out[community_col] = []
+            return out
+
+        reproject = is_angular(gdf)
+        effective_crs = crs_meters or "EPSG:3857"
+        network_m = gdf.to_crs(effective_crs) if reproject else gdf
+
+        graph = NetworkGraph.from_lines(network_m, weight_col)
+        G = graph.graph
+        if len(graph) == 0:
+            out = gdf.copy()
+            out[community_col] = [-1] * len(gdf)
+            return out
+
+        if method == "louvain":
+            communities = nx_comm.louvain_communities(G, weight="weight", seed=42)
+        elif method == "greedy_modularity":
+            communities = nx_comm.greedy_modularity_communities(G, weight="weight")
+        else:  # label_propagation (unweighted)
+            communities = list(nx_comm.label_propagation_communities(G))
+
+        node_community: dict[int, int] = {}
+        for cid, members in enumerate(communities):
+            for node in members:
+                node_community[node] = cid
+
+        node_index = graph.node_index
+        labels: list[int] = []
+        for geom in network_m.geometry:
+            comms = {
+                node_community.get(node_index[key], -1)
+                for key in _line_endpoint_keys(geom)
+                if key in node_index
+            }
+            labels.append(comms.pop() if len(comms) == 1 else -1)
+
+        out = gdf.copy()
+        out[community_col] = labels
+        return out
+
+    def get_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "method": {
+                    "type": "string",
+                    "enum": ["louvain", "greedy_modularity", "label_propagation"],
+                    "default": "louvain",
+                    "description": "Community-detection algorithm.",
+                },
+                "weight_col": {
+                    "type": ["string", "null"],
+                    "description": "Edge-weight column; defaults to geometric length.",
+                },
+                "community_col": {
+                    "type": "string",
+                    "default": "community_id",
+                    "description": "Output column name.",
                 },
                 "crs_meters": {
                     "type": ["string", "null"],
