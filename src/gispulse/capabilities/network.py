@@ -922,3 +922,134 @@ class MinimumSpanningTreeCapability(Capability):
                 },
             },
         }
+
+
+@register
+class SteinerTreeCapability(Capability):
+    """Approximate minimum Steiner tree connecting a set of terminals (G)."""
+
+    name = "steiner_tree"
+    description = (
+        "Connects a subset of terminal points through a line network at "
+        "near-minimum total cost (NetworkX Steiner-tree approximation). "
+        "Unlike 'mst' it spans only the terminals (plus optional intermediate "
+        "nodes), not every node. Terminals passed as ref_layer; returns the "
+        "tree edges."
+    )
+
+    def execute(
+        self,
+        gdf: gpd.GeoDataFrame,
+        ref_gdf: gpd.GeoDataFrame | None = None,
+        weight_col: str | None = None,
+        crs_meters: str | None = None,
+        **_,
+    ) -> gpd.GeoDataFrame:
+        """
+        Args:
+            gdf:        Line network (LineStrings).
+            ref_gdf:    Terminal points to connect, injected via ``ref_layer``.
+                        Each is snapped to its nearest network node.
+            weight_col: Arc weight column; defaults to geometric length after
+                        metric reprojection.
+            crs_meters: Metric CRS used when the network is angular (lat/lon)
+                        so weights are in meters. Default EPSG:3857.
+
+        Returns:
+            GeoDataFrame of the Steiner-tree edges (``u``, ``v``, ``weight``,
+            ``geometry``), reprojected to the network's original CRS. Empty
+            when fewer than two distinct terminals snap onto the graph.
+        """
+        check_tier("pro")
+
+        try:
+            import networkx as nx
+            from networkx.algorithms.approximation import steiner_tree
+        except ImportError as exc:
+            raise ImportError("SteinerTreeCapability requires 'networkx'.") from exc
+
+        if ref_gdf is None or ref_gdf.empty:
+            raise ValueError("steiner_tree requires a terminals layer (ref_layer).")
+        if gdf.empty:
+            return gpd.GeoDataFrame(geometry=[], crs=gdf.crs)
+
+        original_crs = gdf.crs
+        reproject = is_angular(gdf)
+        effective_crs = crs_meters or "EPSG:3857"
+        network_m = gdf.to_crs(effective_crs) if reproject else gdf
+        terminals_m = (
+            ref_gdf.to_crs(effective_crs)
+            if reproject and ref_gdf.crs is not None
+            else ref_gdf
+        )
+
+        graph = NetworkGraph.from_lines(network_m, weight_col)
+        G = graph.graph
+        if len(graph) == 0:
+            return gpd.GeoDataFrame(geometry=[], crs=original_crs)
+
+        terminal_nodes: list[int] = []
+        for geom in terminals_m.geometry:
+            if geom is None or geom.is_empty:
+                continue
+            pt = geom if geom.geom_type == "Point" else geom.centroid
+            nid = graph.nearest_node(pt)
+            if nid >= 0 and nid not in terminal_nodes:
+                terminal_nodes.append(nid)
+
+        if len(terminal_nodes) < 2:
+            return gpd.GeoDataFrame(geometry=[], crs=original_crs)
+
+        # All terminals must share one connected component, otherwise the
+        # metric closure has no path between them and the Steiner tree is
+        # undefined. networkx does not raise in that case, so check upfront.
+        reachable = nx.node_connected_component(G, terminal_nodes[0])
+        if not all(t in reachable for t in terminal_nodes[1:]):
+            raise ValueError(
+                "steiner_tree: terminals are not all connected through the "
+                "network (no path between some of them)."
+            )
+
+        tree = steiner_tree(G, terminal_nodes, weight="weight")
+
+        rows: list[dict[str, Any]] = []
+        for u, v, data in tree.edges(data=True):
+            geom = data.get("geometry")
+            if geom is None:
+                geom = LineString([_node_coords(G, u), _node_coords(G, v)])
+            rows.append(
+                {
+                    "u": int(u),
+                    "v": int(v),
+                    "weight": float(data.get("weight", geom.length)),
+                    "geometry": geom,
+                }
+            )
+
+        if not rows:
+            return gpd.GeoDataFrame(geometry=[], crs=original_crs)
+
+        result = gpd.GeoDataFrame(rows, geometry="geometry", crs=network_m.crs)
+        if reproject and original_crs is not None:
+            result = result.to_crs(original_crs)
+        return result.reset_index(drop=True)
+
+    def get_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "ref_layer": {
+                    "type": ["string", "null"],
+                    "description": "Terminal points layer to connect.",
+                },
+                "weight_col": {
+                    "type": ["string", "null"],
+                    "description": "Arc weight column; defaults to geometric length.",
+                },
+                "crs_meters": {
+                    "type": ["string", "null"],
+                    "default": None,
+                    "description": "Metric CRS for an angular network. Use EPSG:2154 in France.",
+                },
+            },
+        }
