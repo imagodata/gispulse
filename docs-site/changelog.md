@@ -13,6 +13,14 @@ La source de vérité de ce fichier est [`CHANGELOG.md`](https://github.com/imag
 
 ---
 
+## [2.2.1] — 2026-06-07
+
+### Ajouts
+
+- **Datamarts sur fichier DuckDB (DP2b).** Un datamart peut désormais être adossé à un **fichier base DuckDB unique** (`kind="duckdb"`) au lieu d'un Parquet par table : `datamart://<mart>/<table>` attache le fichier `.duckdb` en lecture seule et sélectionne la table, avec push-down du bbox via `ST_Intersects`. `GISPULSE_DATAMARTS` accepte `"kind": "duckdb"`.
+
+---
+
 ## [2.2.0] — 2026-06-07
 
 Release de fonctionnalités ajoutant un ensemble cohérent de **capacités SIG génériques** pour l'analyse réseau, le linear referencing et le clustering (le plan « A–K »), ainsi qu'un provider de données multi-sources unifié. Entièrement rétro-compatible.
