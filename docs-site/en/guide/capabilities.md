@@ -239,7 +239,7 @@ Combine multiple layers into one — either geometrically (FME / QGIS-style over
 | `extract_vertices` | Emits one `Point` per vertex with indices. | — |
 | `extract_segments` | Splits each line / polygon boundary into 2-point segments. | — |
 
-`snap_points_to_lines` is the stable-id evolution of `line_locate_point`: it returns the matched line's durable id rather than a positional row index, plus the projected point — everything needed to attach an event (accidents on roads, meters on a utility line, discharges on a watercourse) to an identified edge. The nearest line is always resolved, so a point beyond `max_distance_m` still carries its `edge_id` and projection with `snapped=False` (the consumer filters on the flag). `ref_id_col` is required.
+`snap_points_to_lines` is the stable-id evolution of `line_locate_point`: it returns the matched line's durable id rather than a positional row index, plus the projected point — everything needed to attach an event (accidents on roads, meters on a utility line, discharges on a watercourse) to an identified edge. A point beyond `max_distance_m` is left unsnapped (`snapped=False`, null `edge_id`/`measure`, original geometry kept, only `offset_distance` reported). Ties between equidistant lines break deterministically on the smallest `edge_id`. `ref_id_col` is required.
 
 ```json
 {

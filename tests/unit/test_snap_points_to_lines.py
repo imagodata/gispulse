@@ -85,17 +85,20 @@ def test_equidistant_tie_breaks_on_smallest_edge_id():
     assert _run(pts, lines).iloc[0]["edge_id"] == "A"
 
 
-# --- DoD #2 : beyond max_distance_m -> snapped=False but still resolved ----
+# --- DoD #2 : beyond max_distance_m -> unsnapped (MILOU's consumed contract)
 def test_max_distance_leaves_unsnapped(lines):
+    # Contract consumed by MILOU's build_site_network_candidates: an unsnapped
+    # point keeps its ORIGINAL geometry with null edge_id/measure; only
+    # offset_distance reports how far the nearest line lies (the consumer
+    # filters on the snapped flag).
     pts = gpd.GeoDataFrame(geometry=[Point(30, 20)], crs="EPSG:3857")
     out = _run(pts, lines, max_distance_m=10.0)
     row = out.iloc[0]
     assert not row["snapped"]
-    # nearest edge + projected point are STILL reported (consumer filters)
-    assert row["edge_id"] == "E1"
+    assert pd.isna(row["edge_id"])
+    assert pd.isna(row["measure"])
     assert row["offset_distance"] == pytest.approx(20.0)  # true nearest distance
-    assert row["measure"] == pytest.approx(30.0)
-    assert row.geometry.distance(Point(30, 0)) == pytest.approx(0.0, abs=1e-6)
+    assert row.geometry.equals(Point(30, 20))             # original point kept
 
 
 def test_within_max_distance_snaps(lines):

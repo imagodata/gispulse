@@ -7,20 +7,19 @@ to a routable edge:
 * ``edge_id``         — the matched line's id (from ``ref_id_col``), stable
   across runs (not a row position);
 * ``measure``         — distance along the matched line, in meters, from its
-  start (in ``[0, line_length]``);
-* ``offset_distance`` — perpendicular distance from the point to the line;
+  start (in ``[0, line_length]``); null when unsnapped;
+* ``offset_distance`` — perpendicular distance from the point to its nearest
+  line (always reported, snapped or not);
 * ``snapped``         — ``True`` when ``offset_distance <= max_distance_m``
   (or ``max_distance_m is None``), ``False`` otherwise;
-* ``geometry``        — replaced by the **projected** point on the nearest
-  line.
+* ``geometry``        — for snapped rows, the **projected** point on the
+  nearest line; for unsnapped rows the original point is kept.
 
-The nearest line is *always* resolved, so ``edge_id`` and the projected
-``geometry`` are populated even for unsnapped rows: a point beyond
-``max_distance_m`` still carries its nearest edge and its projection, only
-with ``snapped=False``. Filtering is therefore left to the consumer through
-the ``snapped`` flag — no information is discarded. The single exception is a
-null/empty input geometry, which has no nearest line and stays
-``edge_id=None``, ``snapped=False`` with its (empty) geometry untouched.
+A point beyond ``max_distance_m`` is reported with ``snapped=False``,
+``edge_id``/``measure`` null and its original geometry — only
+``offset_distance`` records how far its nearest line lies, so the consumer
+can decide what to do. A null/empty input geometry has no nearest line and
+stays ``edge_id=None``, ``snapped=False`` with its geometry untouched.
 
 Candidate lines are found through a :class:`~gispulse.core.spatial_index.SpatialIndex`
 (STRtree, no O(n·m) scan); each point projects directly onto its segment.
@@ -109,11 +108,12 @@ class SnapPointsToLinesCapability(Capability):
                             clear ``ValueError`` rather than silently falling
                             back to a positional index.
             max_distance_m: Snap threshold in meters. A point whose nearest
-                            line is farther than this is reported with
-                            ``snapped=False`` but **still** carries that
-                            nearest line's ``edge_id`` and its projected
-                            geometry — filtering is the consumer's call.
-                            ``None`` snaps every point to its nearest line.
+                            line is farther than this is left unsnapped:
+                            ``snapped=False``, ``edge_id``/``measure`` null
+                            and the original geometry kept, with only
+                            ``offset_distance`` reporting the true nearest
+                            distance. ``None`` snaps every point to its
+                            nearest line.
             crs_meters:     Metric (projected) CRS used for all distances.
             edge_id_col:    Output column for the matched edge id.
             measure_col:    Output column for the along-line measure (m).
@@ -171,13 +171,17 @@ class SnapPointsToLinesCapability(Capability):
             if pos is None:  # ref layer had no usable geometry
                 continue
             line = line_geoms[pos]
-            measure = line.project(pt)
             offset = line.distance(pt)
+            offsets[row_i] = float(offset)  # nearest distance is always reported
+            if max_distance_m is not None and offset > max_distance_m:
+                # Beyond the threshold: leave edge_id/measure null and the
+                # original geometry in place (snapped stays False).
+                continue
+            measure = line.project(pt)
             measures[row_i] = float(measure)
-            offsets[row_i] = float(offset)
             edge_ids[row_i] = ref_ids[pos]
             new_geoms[row_i] = line.interpolate(measure)
-            snapped[row_i] = max_distance_m is None or offset <= max_distance_m
+            snapped[row_i] = True
 
         out = left.copy()
         out[edge_id_col] = edge_ids
@@ -230,9 +234,10 @@ class SnapPointsToLinesCapability(Capability):
                 "max_distance_m": {
                     "type": ["number", "null"],
                     "description": (
-                        "Snap threshold (m). Beyond it, snapped=False but the "
-                        "nearest edge_id and projection are still returned. "
-                        "None snaps every point to its nearest line."
+                        "Snap threshold (m). Beyond it, snapped=False with "
+                        "edge_id/measure null and the original geometry kept "
+                        "(only offset_distance reported). None snaps every "
+                        "point to its nearest line."
                     ),
                 },
                 "crs_meters": {"type": "string", "default": "EPSG:3857"},

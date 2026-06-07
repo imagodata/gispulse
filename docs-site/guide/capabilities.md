@@ -239,7 +239,7 @@ Combine plusieurs layers en une, soit géométriquement (overlay façon FME / QG
 | `extract_vertices` | Extrait un `Point` par vertex avec index. | — |
 | `extract_segments` | Découpe chaque ligne/bord en segments 2 points. | — |
 
-`snap_points_to_lines` est l'évolution « identifiant stable » de `line_locate_point` : il restitue l'id durable de la ligne (et non un index positionnel), plus le point projeté — tout ce qu'il faut pour rattacher un événement (accidents sur routes, compteurs sur réseau, rejets sur cours d'eau) à une arête identifiée. La ligne la plus proche est toujours résolue : un point au-delà de `max_distance_m` conserve son `edge_id` et sa projection avec `snapped=False` (le filtrage est laissé au consommateur via le drapeau). `ref_id_col` est requis.
+`snap_points_to_lines` est l'évolution « identifiant stable » de `line_locate_point` : il restitue l'id durable de la ligne (et non un index positionnel), plus le point projeté — tout ce qu'il faut pour rattacher un événement (accidents sur routes, compteurs sur réseau, rejets sur cours d'eau) à une arête identifiée. Un point au-delà de `max_distance_m` reste non-snappé (`snapped=False`, `edge_id`/`measure` nuls, géométrie d'origine conservée, seul `offset_distance` reporté). Les ex æquo sont départagés de façon déterministe sur le plus petit `edge_id`. `ref_id_col` est requis.
 
 ```json
 {
