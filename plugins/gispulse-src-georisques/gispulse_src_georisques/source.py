@@ -30,10 +30,19 @@ from gispulse.plugins.api import (
 )
 
 GEORISQUES_BASE_URL = "https://www.georisques.gouv.fr"
-GEORISQUES_DOWNLOAD_SERVICE = (
-    "https://www.georisques.gouv.fr/webappReport/ws/telechargements"
-)
+GEORISQUES_DOWNLOAD_SERVICE = "https://www.georisques.gouv.fr/webappReport/ws/telechargements"
 _REVISION_TIMEOUT_S = 8.0
+_REST_TIMEOUT_S = 20.0
+_REST_RETRY_ATTEMPTS = 4
+_REST_RETRY_BACKOFF_S = 2.0
+_REST_RETRY_BACKOFF_FACTOR = 2.0
+_REST_RETRY_STATUSES = [429, 500, 502, 503, 504]
+_REST_RETRY = {
+    "max_attempts": _REST_RETRY_ATTEMPTS,
+    "backoff_seconds": _REST_RETRY_BACKOFF_S,
+    "backoff_factor": _REST_RETRY_BACKOFF_FACTOR,
+    "statuses": _REST_RETRY_STATUSES,
+}
 
 # entry_id -> declarative spec. ``query_key`` names the runtime spatial
 # parameter; ``scope`` is the granularity it filters at. ``static_query``
@@ -95,10 +104,7 @@ _ENTRIES: dict[str, dict[str, Any]] = {
 _BULK_ENTRIES: dict[str, dict[str, Any]] = {
     "rga-bulk": {
         "label": "Retrait-gonflement des argiles 2026 (bulk, département)",
-        "endpoint": (
-            "https://files.georisques.fr/argiles/2025/"
-            "AleaRG_2025_{departement}_L93.zip"
-        ),
+        "endpoint": ("https://files.georisques.fr/argiles/2025/AleaRG_2025_{departement}_L93.zip"),
         "payload": Payload.VECTOR,
         "protocol": AccessProtocol.DOWNLOAD,
         "base_key": "alearg_25",
@@ -107,16 +113,15 @@ _BULK_ENTRIES: dict[str, dict[str, Any]] = {
         "data_format": "shapefile",
         "join_strategy": "spatial",
         "geometry_key": "geometry",
+        "scope_stamp_dept": True,
+        "scope_dept_column": "dept",
         "echelle": "departementale",
         "department_param": "codeDepartement",
         "params": {"departement": "69"},
     },
     "tri-bulk": {
         "label": "TRI rapportage 2020 (bulk, département)",
-        "endpoint": (
-            "https://files.georisques.fr/di_2020/"
-            "tri_2020_sig_di_{departement}.zip"
-        ),
+        "endpoint": ("https://files.georisques.fr/di_2020/tri_2020_sig_di_{departement}.zip"),
         "payload": Payload.VECTOR,
         "protocol": AccessProtocol.DOWNLOAD,
         "base_key": "tri_2020",
@@ -125,6 +130,8 @@ _BULK_ENTRIES: dict[str, dict[str, Any]] = {
         "data_format": "shapefile",
         "join_strategy": "spatial",
         "geometry_key": "geometry",
+        "scope_stamp_dept": True,
+        "scope_dept_column": "dept",
         "echelle": "departementale",
         "department_param": "codeDepartement",
         "params": {"departement": "69"},
@@ -210,11 +217,13 @@ _SCHEMAS: dict[str, dict[str, str]] = {
         "codeExposition": "str",
         "exposition": "str",
         "alea": "str",
+        "dept": "str",
         "geometry": "geometry",
     },
     "tri-bulk": {
         "code_national_tri": "str",
         "libelle_tri": "str",
+        "dept": "str",
         "geometry": "geometry",
     },
     "sis-bulk": {
@@ -241,9 +250,7 @@ def _probe_revision_head(url: str) -> str | None:
     import httpx
 
     try:
-        resp = httpx.head(
-            url, timeout=_REVISION_TIMEOUT_S, follow_redirects=True
-        )
+        resp = httpx.head(url, timeout=_REVISION_TIMEOUT_S, follow_redirects=True)
     except Exception:  # noqa: BLE001 - unreachable source means unknown freshness
         return None
     etag = resp.headers.get("etag")
@@ -274,6 +281,8 @@ class GeorisquesSource(DeclarativeSource):
         params: dict[str, Any] = {"pagination": dict(spec["pagination"])}
         if spec["static_query"]:
             params["query"] = dict(spec["static_query"])
+        params["timeout"] = _REST_TIMEOUT_S
+        params["retry"] = dict(_REST_RETRY)
         return SourceEntryRef(
             id=entry_id,
             name=spec["label"],
@@ -303,14 +312,11 @@ class GeorisquesSource(DeclarativeSource):
         echelle = spec["echelle"]
         department_param = spec["department_param"]
         catalog_endpoint = (
-            f"{GEORISQUES_DOWNLOAD_SERVICE}/formats/{fmt}/{base_key}"
-            f"?echelle={echelle}"
+            f"{GEORISQUES_DOWNLOAD_SERVICE}/formats/{fmt}/{base_key}?echelle={echelle}"
         )
         if department_param:
             default_dept = spec["params"]["departement"]
-            catalog_endpoint = (
-                f"{catalog_endpoint}&{department_param}={default_dept}"
-            )
+            catalog_endpoint = f"{catalog_endpoint}&{department_param}={default_dept}"
         return SourceEntryRef(
             id=entry_id,
             name=spec["label"],
@@ -343,6 +349,14 @@ class GeorisquesSource(DeclarativeSource):
                         "geometry_key": spec["geometry_key"],
                     }
                 ),
+                **(
+                    {
+                        "scope_stamp_dept": spec["scope_stamp_dept"],
+                        "scope_dept_column": spec["scope_dept_column"],
+                    }
+                    if spec.get("scope_stamp_dept")
+                    else {}
+                ),
             },
         )
 
@@ -369,12 +383,11 @@ class GeorisquesSource(DeclarativeSource):
         value = code_insee if query_key == "code_insee" else latlon
         if value is None:
             raise ValueError(
-                f"entry {entry_id!r} filters by {query_key!r}; "
-                f"pass {query_key}=<value>"
+                f"entry {entry_id!r} filters by {query_key!r}; pass {query_key}=<value>"
             )
 
         params = dict(entry.access.params)
-        for nested_key in ("query", "pagination"):
+        for nested_key in ("query", "pagination", "retry"):
             nested = params.get(nested_key)
             if isinstance(nested, dict):
                 params[nested_key] = dict(nested)

@@ -22,6 +22,17 @@ _METADATA = {
     "platform": "API Carto Nature",
     "license": "Licence Ouverte 2.0",
 }
+_REST_TIMEOUT_S = 20.0
+_REST_RETRY_ATTEMPTS = 4
+_REST_RETRY_BACKOFF_S = 2.0
+_REST_RETRY_BACKOFF_FACTOR = 2.0
+_REST_RETRY_STATUSES = [429, 500, 502, 503, 504]
+_REST_RETRY = {
+    "max_attempts": _REST_RETRY_ATTEMPTS,
+    "backoff_seconds": _REST_RETRY_BACKOFF_S,
+    "backoff_factor": _REST_RETRY_BACKOFF_FACTOR,
+    "statuses": _REST_RETRY_STATUSES,
+}
 
 # Entry-id -> (display label, API Carto Nature path).
 _ENTRIES: dict[str, tuple[str, str]] = {
@@ -69,7 +80,11 @@ class NatureSource(DeclarativeSource):
                 access=AccessSpec(
                     protocol=AccessProtocol.REST_API,
                     endpoint=f"{_API_CARTO_NATURE}{path}",
-                    params={"geom_param": "geom"},
+                    params={
+                        "geom_param": "geom",
+                        "timeout": _REST_TIMEOUT_S,
+                        "retry": dict(_REST_RETRY),
+                    },
                     format="application/json",
                 ),
                 revision_token=None,

@@ -40,6 +40,16 @@ _LATLON_ENTRIES = {"rga", "tri-zonage", "ssp"}
 _BULK_ENTRIES = {"rga-bulk", "tri-bulk", "sis-bulk", "gaspar-bulk"}
 
 
+def _assert_rest_retry_params(params: dict) -> None:
+    assert params["timeout"] == 20.0
+    assert params["retry"] == {
+        "max_attempts": 4,
+        "backoff_seconds": 2.0,
+        "backoff_factor": 2.0,
+        "statuses": [429, 500, 502, 503, 504],
+    }
+
+
 class FakeDownload:
     """Records resolved Géorisques bulk download AccessSpecs."""
 
@@ -86,6 +96,7 @@ def test_api_entries_use_rest_table(source: GeorisquesSource) -> None:
             continue
         assert entry.access.protocol is AccessProtocol.REST_TABLE
         assert entry.access.endpoint.startswith("https://www.georisques.gouv.fr/")
+        _assert_rest_retry_params(entry.access.params)
 
 
 def test_bulk_entries_use_download_and_keep_georisques_metadata(
@@ -98,6 +109,8 @@ def test_bulk_entries_use_download_and_keep_georisques_metadata(
         "https://files.georisques.fr/argiles/2025/AleaRG_2025_{departement}_L93.zip"
     )
     assert by_id["rga-bulk"].access.params == {"departement": "69"}
+    assert "retry" not in by_id["rga-bulk"].access.params
+    assert "timeout" not in by_id["rga-bulk"].access.params
     assert by_id["rga-bulk"].metadata["base_key"] == "alearg_25"
     assert by_id["rga-bulk"].metadata["department_param"] == "codeDepartement"
     assert by_id["rga-bulk"].metadata["format"] == "zip"
@@ -110,6 +123,8 @@ def test_bulk_entries_use_download_and_keep_georisques_metadata(
     for entry_id in ("rga-bulk", "tri-bulk"):
         assert by_id[entry_id].metadata["join_strategy"] == "spatial"
         assert by_id[entry_id].metadata["geometry_key"] == "geometry"
+        assert by_id[entry_id].metadata["scope_stamp_dept"] is True
+        assert by_id[entry_id].metadata["scope_dept_column"] == "dept"
 
 
 def test_table_bulk_entries_use_table_file_and_keep_georisques_metadata(
@@ -128,9 +143,7 @@ def test_table_bulk_entries_use_table_file_and_keep_georisques_metadata(
     assert by_id["sis-bulk"].metadata["join_keys"] == ("code_insee",)
 
     assert by_id["gaspar-bulk"].access.protocol is AccessProtocol.TABLE_FILE
-    assert by_id["gaspar-bulk"].access.endpoint == (
-        "https://files.georisques.fr/GASPAR/gaspar.zip"
-    )
+    assert by_id["gaspar-bulk"].access.endpoint == ("https://files.georisques.fr/GASPAR/gaspar.zip")
     assert by_id["gaspar-bulk"].access.params == {
         "archive_format": "zip",
         "table_format": "csv",
@@ -274,7 +287,9 @@ def test_schema_ssp_exposes_raw_casias_payload(source: GeorisquesSource) -> None
 
 def test_schema_bulk_entries_expose_raw_join_fields(source: GeorisquesSource) -> None:
     assert source.schema("rga-bulk")["geometry"] == "geometry"
+    assert source.schema("rga-bulk")["dept"] == "str"
     assert source.schema("tri-bulk")["code_national_tri"] == "str"
+    assert source.schema("tri-bulk")["dept"] == "str"
     assert source.schema("sis-bulk")["classification"] == "str"
     assert source.schema("gaspar-bulk")["code_insee"] == "str"
 
@@ -314,9 +329,7 @@ def test_revision_resolves_department_template_before_bulk_head(
     monkeypatch.setattr("httpx.head", fake_head)
 
     assert source.revision("rga-bulk") == "rga-69-2026-05"
-    assert captured == [
-        "https://files.georisques.fr/argiles/2025/AleaRG_2025_69_L93.zip"
-    ]
+    assert captured == ["https://files.georisques.fr/argiles/2025/AleaRG_2025_69_L93.zip"]
 
 
 def test_revision_returns_none_for_bulk_without_headers(

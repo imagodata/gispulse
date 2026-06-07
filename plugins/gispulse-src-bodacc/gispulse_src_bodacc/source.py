@@ -29,6 +29,17 @@ BODACC_RECORDS_ENDPOINT = f"{BODACC_DATASET_ENDPOINT}/records"
 _DEFAULT_LIMIT = 100
 _MAX_LIMIT = 100
 _REVISION_TIMEOUT_S = 8.0
+_REST_TIMEOUT_S = 20.0
+_REST_RETRY_ATTEMPTS = 4
+_REST_RETRY_BACKOFF_S = 2.0
+_REST_RETRY_BACKOFF_FACTOR = 2.0
+_REST_RETRY_STATUSES = [429, 500, 502, 503, 504]
+_REST_RETRY = {
+    "max_attempts": _REST_RETRY_ATTEMPTS,
+    "backoff_seconds": _REST_RETRY_BACKOFF_S,
+    "backoff_factor": _REST_RETRY_BACKOFF_FACTOR,
+    "statuses": _REST_RETRY_STATUSES,
+}
 
 _COMMON_METADATA = {
     "provider": "DILA",
@@ -40,9 +51,7 @@ _COMMON_METADATA = {
     "page_size_parameter": "limit",
     "page_offset_parameter": "offset",
     "total_count_key": "total_count",
-    "core_fetcher_note": (
-        "BODACC REST_TABLE entries intentionally materialize one ODS page."
-    ),
+    "core_fetcher_note": ("BODACC REST_TABLE entries intentionally materialize one ODS page."),
     "orchestration_note": (
         "Loop explicitly by calling access_for(..., offset=offset+limit) "
         "until total_count is reached or the page is empty."
@@ -235,6 +244,8 @@ class BodaccSource(DeclarativeSource):
                         "max_pages": 1,
                         "max_rows": _DEFAULT_LIMIT,
                     },
+                    "timeout": _REST_TIMEOUT_S,
+                    "retry": dict(_REST_RETRY),
                 },
                 format="application/json",
             ),
@@ -280,7 +291,7 @@ class BodaccSource(DeclarativeSource):
 
         entry = self._entry(entry_id)
         params = dict(entry.access.params)
-        for nested_key in ("query", "pagination"):
+        for nested_key in ("query", "pagination", "retry"):
             nested = params.get(nested_key)
             if isinstance(nested, dict):
                 params[nested_key] = dict(nested)
@@ -300,9 +311,7 @@ class BodaccSource(DeclarativeSource):
             if len(siret_digits) != 14:
                 raise ValueError("siret must contain exactly 14 digits")
             siren_prefix = siret_digits[:9]
-            clauses.append(
-                f"(search({_quote(siret_digits)}) OR registre={_quote(siren_prefix)})"
-            )
+            clauses.append(f"(search({_quote(siret_digits)}) OR registre={_quote(siren_prefix)})")
         if commune:
             clauses.append(f"ville={_quote(commune)}")
         if code_postal:

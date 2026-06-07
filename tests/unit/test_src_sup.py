@@ -42,9 +42,7 @@ class FakeWFS:
 
     def fetch(self, access, *, extent=None, mode=FetchMode.MATERIALIZE):
         self.calls.append(access)
-        return SourceResult(
-            payload=Payload.VECTOR, mode=mode, data=access.params["typename"]
-        )
+        return SourceResult(payload=Payload.VECTOR, mode=mode, data=access.params["typename"])
 
 
 class FakeDownload:
@@ -156,9 +154,7 @@ def test_every_entry_targets_wfs_sup_typename(source: SupSource) -> None:
 def test_filtered_views_expose_suptype_filter_metadata(source: SupSource) -> None:
     entries = {e.id: e for e in source.catalog()}
 
-    assert entries["heritage-abf"].metadata["suptype_filter"] == (
-        "suptype IN ('AC1','AC2','AC4')"
-    )
+    assert entries["heritage-abf"].metadata["suptype_filter"] == ("suptype IN ('AC1','AC2','AC4')")
     assert entries["risk-ppr-zoning"].metadata["suptype_filter"] == (
         "suptype IN ('PM1','PM1BIS','PM3')"
     )
@@ -201,8 +197,7 @@ def test_pack_sup_declares_cnig_partition_download(source: SupSource) -> None:
 
     assert access.protocol is AccessProtocol.DOWNLOAD
     assert access.endpoint == (
-        "https://www.geoportail-urbanisme.gouv.fr/api/document/"
-        "download-by-partition/{partition}"
+        "https://www.geoportail-urbanisme.gouv.fr/api/document/download-by-partition/{partition}"
     )
     assert access.params == {
         "partition": "172014607_SUP_69_AC1",
@@ -214,6 +209,8 @@ def test_pack_sup_declares_cnig_partition_download(source: SupSource) -> None:
     assert entry.metadata["partition_pattern"] == "{idGest_}SUP_<codeGeo>_<categorie>"
     assert entry.metadata["code_geo_default"] == "69"
     assert entry.metadata["join_keys"] == ("idsup", "suptype")
+    assert entry.metadata["scope_stamp_dept"] is True
+    assert entry.metadata["scope_dept_column"] == "dept"
 
 
 def test_sup_partition_helper_supports_optional_idgest() -> None:
@@ -271,6 +268,7 @@ def test_pack_sup_schema_exposes_cnig_join_keys(source: SupSource) -> None:
     assert schema["idsup"] == "str"
     assert schema["suptype"] == "str"
     assert schema["partition"] == "str"
+    assert schema["dept"] == "str"
 
 
 # --------------------------------------------------------------------------

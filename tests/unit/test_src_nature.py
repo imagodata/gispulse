@@ -44,6 +44,16 @@ _EXPECTED_ENTRIES = {
 }
 
 
+def _assert_rest_retry_params(params: dict) -> None:
+    assert params["timeout"] == 20.0
+    assert params["retry"] == {
+        "max_attempts": 4,
+        "backoff_seconds": 2.0,
+        "backoff_factor": 2.0,
+        "statuses": [429, 500, 502, 503, 504],
+    }
+
+
 def _nature_source_cls():
     try:
         module = importlib.import_module("gispulse_src_nature.source")
@@ -82,14 +92,13 @@ def test_catalog_lists_four_nature_entries(source) -> None:
         }
         assert entry.access.protocol is AccessProtocol.REST_API
         assert entry.access.endpoint == f"{_API_CARTO_NATURE}{path}"
-        assert entry.access.params == {"geom_param": "geom"}
+        assert entry.access.params["geom_param"] == "geom"
+        _assert_rest_retry_params(entry.access.params)
         assert entry.access.format == "application/json"
 
 
 def test_catalog_search_filters_by_id_or_label(source) -> None:
-    assert [entry.id for entry in source.catalog(search="oiseaux")] == [
-        "natura-oiseaux"
-    ]
+    assert [entry.id for entry in source.catalog(search="oiseaux")] == ["natura-oiseaux"]
     assert [entry.id for entry in source.catalog(search="znieff")] == [
         "znieff1",
         "znieff2",
@@ -133,9 +142,7 @@ def test_fetch_delegates_to_rest_geojson_fetcher_with_geom(
         calls.append({"url": url, "timeout": timeout})
         return {"type": "FeatureCollection", "features": []}
 
-    monkeypatch.setattr(
-        "gispulse.adapters.rest.rest_fetcher._get_geojson", fake_get_geojson
-    )
+    monkeypatch.setattr("gispulse.adapters.rest.rest_fetcher._get_geojson", fake_get_geojson)
     registry = ProtocolRegistry()
     register_rest_geojson_fetcher(registry)
 

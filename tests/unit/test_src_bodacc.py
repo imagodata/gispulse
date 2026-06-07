@@ -31,6 +31,16 @@ from gispulse.core.sources import DataSource  # noqa: E402
 pytestmark = pytest.mark.usefixtures("offline_ssrf")
 
 
+def _assert_rest_retry_params(params: dict) -> None:
+    assert params["timeout"] == 20.0
+    assert params["retry"] == {
+        "max_attempts": 4,
+        "backoff_seconds": 2.0,
+        "backoff_factor": 2.0,
+        "statuses": [429, 500, 502, 503, 504],
+    }
+
+
 class _FakeResponse:
     """Minimal ``httpx.Response`` stand-in for revision() tests."""
 
@@ -95,6 +105,7 @@ def test_entries_use_bodacc_opendatasoft_rest_table(source: BodaccSource) -> Non
         "max_pages": 1,
         "max_rows": 100,
     }
+    _assert_rest_retry_params(entry.access.params)
     assert entry.access.params["query"]["limit"] == 100
     assert entry.access.params["query"]["offset"] == 0
     assert entry.access.params["query"]["where"] == 'familleavis="vente"'
@@ -154,8 +165,7 @@ def test_access_for_accepts_siret_by_searching_siret_and_siren_prefix(
     access = source.access_for("procedures-collectives", siret="51439553200016")
 
     assert access.params["query"]["where"] == (
-        'familleavis="collective" AND '
-        '(search("51439553200016") OR registre="514395532")'
+        'familleavis="collective" AND (search("51439553200016") OR registre="514395532")'
     )
 
 
@@ -259,9 +269,7 @@ def test_revision_falls_back_to_last_modified_header(
         return _FakeResponse(headers={"last-modified": "Mon, 01 Jun 2026 01:13:20 GMT"})
 
     monkeypatch.setattr("httpx.get", fake_get)
-    assert source.revision("procedures-collectives") == (
-        "Mon, 01 Jun 2026 01:13:20 GMT"
-    )
+    assert source.revision("procedures-collectives") == ("Mon, 01 Jun 2026 01:13:20 GMT")
 
 
 def test_register_adds_source_to_registry() -> None:
