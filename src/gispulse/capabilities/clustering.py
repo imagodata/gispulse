@@ -1,6 +1,6 @@
 """Spatial clustering capabilities for GISPulse.
 
-Four algorithms, all building on scikit-learn:
+Five algorithms, all building on scikit-learn:
 
 - :class:`DBSCANClusterCapability`      — density-based, discovers arbitrary
   shapes, tags noise points separately. Best for point clouds with varying
@@ -16,6 +16,9 @@ Four algorithms, all building on scikit-learn:
   (capability H). Points snapped to the nearest network node; ``eps_m`` is a
   distance along edges. Two points close as the crow flies but far along the
   network do **not** end up in the same cluster.
+- :class:`STDBSCANClusterCapability` — spatio-temporal DBSCAN (capability J):
+  clusters points that are close **both** in space (``eps_m``) and in time
+  (``eps_time`` seconds, on a datetime column).
 
 The first three operate on the centroids of input geometries (so they work
 for points, lines and polygons alike). They add a ``cluster`` column to the
@@ -27,6 +30,7 @@ from __future__ import annotations
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 
 from gispulse.capabilities.base import Capability
 from gispulse.capabilities.registry import register
@@ -478,4 +482,131 @@ class NetworkDBSCANClusterCapability(Capability):
                     "description": "Metric CRS for snapping and edge lengths.",
                 },
             },
+        }
+
+
+@register
+class STDBSCANClusterCapability(Capability):
+    """Spatio-temporal DBSCAN (ST-DBSCAN, capability J)."""
+
+    name = "cluster_st_dbscan"
+    description = (
+        "ST-DBSCAN — density-based clustering with a spatial threshold (eps_m) "
+        "AND a temporal threshold (eps_time, seconds) on a datetime column. "
+        "Two points cluster together only when they are close in space and "
+        "in time. Adds a 'cluster' column (-1 = noise)."
+    )
+
+    def execute(
+        self,
+        gdf: gpd.GeoDataFrame,
+        time_col: str = "timestamp",
+        eps_m: float = 100.0,
+        eps_time: float = 3600.0,
+        min_samples: int = 5,
+        cluster_col: str = "cluster",
+        crs_meters: str = "EPSG:3857",
+        **_,
+    ) -> gpd.GeoDataFrame:
+        """
+        Args:
+            gdf:         Point layer (non-point geometries use their centroid).
+            time_col:    Datetime column. Parsed with ``pandas.to_datetime``;
+                         unparseable / missing values become noise.
+            eps_m:       Spatial neighborhood radius in *crs_meters* units.
+            eps_time:    Temporal neighborhood in **seconds**. Two points are
+                         neighbors only when both ``|Δt| <= eps_time`` and the
+                         metric distance ``<= eps_m`` hold.
+            min_samples: Min samples in a neighborhood to form a core point.
+            cluster_col: Output column name.
+            crs_meters:  Metric CRS used for *eps_m*.
+
+        Returns:
+            Copy of *gdf* with an added integer *cluster_col* (``-1`` = noise).
+        """
+        from sklearn.cluster import DBSCAN
+
+        if gdf.empty:
+            out = gdf.copy()
+            out[cluster_col] = np.array([], dtype=np.int64)
+            return out
+        if time_col not in gdf.columns:
+            raise ValueError(f"cluster_st_dbscan: time_col {time_col!r} not in gdf.")
+        if eps_m <= 0:
+            raise ValueError("eps_m must be > 0.")
+        if eps_time <= 0:
+            raise ValueError("eps_time must be > 0.")
+        if min_samples < 1:
+            raise ValueError("min_samples must be >= 1.")
+
+        coords = _coords_from_gdf(gdf, crs_meters)
+
+        t = pd.to_datetime(gdf[time_col], errors="coerce")
+        na = t.isna().to_numpy()
+        # Force a second resolution regardless of the parsed unit (pandas may
+        # yield datetime64[ns] or [us]); NaT is masked out below.
+        secs = t.to_numpy().astype("datetime64[s]").astype("int64").astype(float)
+
+        # Spatial distance matrix (euclidean on projected centroids).
+        diff = coords[:, None, :] - coords[None, :, :]
+        dist_sp = np.sqrt((diff * diff).sum(axis=2))
+
+        # Temporal gate: pairs outside eps_time (or involving a NaT) get a
+        # sentinel distance > eps_m so DBSCAN never treats them as neighbors.
+        dt = np.abs(secs[:, None] - secs[None, :])
+        within_time = dt <= float(eps_time)
+        within_time[na, :] = False
+        within_time[:, na] = False
+
+        big = float(eps_m) * 2.0 + 1.0
+        dist = np.where(within_time, dist_sp, big)
+        np.fill_diagonal(dist, 0.0)
+
+        labels = DBSCAN(
+            eps=float(eps_m), min_samples=min_samples, metric="precomputed"
+        ).fit_predict(dist)
+
+        out = gdf.copy()
+        out[cluster_col] = labels.astype(np.int64)
+        return out
+
+    def get_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "time_col": {
+                    "type": "string",
+                    "default": "timestamp",
+                    "description": "Datetime column for the temporal dimension.",
+                },
+                "eps_m": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 100.0,
+                    "description": "Spatial radius in crs_meters units.",
+                },
+                "eps_time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 3600.0,
+                    "description": "Temporal radius in seconds.",
+                },
+                "min_samples": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 5,
+                    "description": "Minimum samples in a core neighborhood.",
+                },
+                "cluster_col": {
+                    "type": "string",
+                    "default": "cluster",
+                    "description": "Output column name.",
+                },
+                "crs_meters": {
+                    "type": "string",
+                    "default": "EPSG:3857",
+                    "description": "Metric CRS used for eps_m.",
+                },
+            },
+            "required": ["time_col"],
         }
