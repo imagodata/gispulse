@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.2]
+
 ### Changed
 
 - **`snap_points_to_lines` hardening.** `ref_id_col` is now **required**: a

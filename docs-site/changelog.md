@@ -13,6 +13,14 @@ La source de vérité de ce fichier est [`CHANGELOG.md`](https://github.com/imag
 
 ---
 
+## [2.2.2] — 2026-06-07
+
+### Modifié
+
+- **Durcissement de `snap_points_to_lines`.** `ref_id_col` est désormais **requis** : une colonne absente lève un `ValueError` clair au lieu d'un fallback silencieux sur l'index positionnel. Les ex æquo entre lignes équidistantes sont départagés de façon **déterministe** sur le plus petit `edge_id` (mêmes entrées → mêmes sorties). Le contrat des lignes non-snappées est inchangé (au-delà de `max_distance_m` : `snapped=False`, `edge_id`/`measure` nuls, géométrie d'origine conservée, seul `offset_distance` reporté) — les consommateurs aval (ex. `build_site_network_candidates` de MILOU) ne nécessitent aucune modification.
+
+---
+
 ## [2.2.1] — 2026-06-07
 
 ### Ajouts
