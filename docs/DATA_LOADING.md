@@ -60,6 +60,26 @@ Or declare them with `GISPULSE_DATAMARTS` (JSON):
 export GISPULSE_DATAMARTS='{"ref": {"location": "s3://bucket/marts/ref"}}'
 ```
 
+### DuckDB-file marts
+
+A mart with `kind="duckdb"` points its `location` at a single DuckDB
+database file; a table is a relation *inside* that file (no per-table
+files). It is attached **read-only** (so concurrent readers don't contend
+on a write lock) and selected; bbox push-down still applies via an
+`ST_Intersects` predicate on a `geom` column.
+
+```python
+DATAMARTS.register(
+    Datamart(name="warehouse", location="/data/warehouse.duckdb", kind="duckdb")
+)
+gispulse.load("datamart://warehouse/parcels")        # → SELECT * FROM parcels
+gispulse.load("datamart://warehouse/parcels", bbox=(...))  # bbox pushed down
+```
+
+```bash
+export GISPULSE_DATAMARTS='{"warehouse": {"location": "/data/warehouse.duckdb", "kind": "duckdb"}}'
+```
+
 ## GeoNode (read + write)
 
 GeoNode datasets are addressed as `geonode://<instance>/<dataset>`.
