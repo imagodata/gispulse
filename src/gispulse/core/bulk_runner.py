@@ -129,6 +129,14 @@ class BulkIngestRunner:
             partition=partition,
             params=params,
         )
+        access = _source_bulk_access(
+            source,
+            entry,
+            access,
+            departement=departement,
+            partition=partition,
+            params=params,
+        )
         scope_departement = _scope_departement(entry, access, departement)
 
         if access.protocol is AccessProtocol.TABLE_FILE:
@@ -190,8 +198,7 @@ class BulkIngestRunner:
                 runtime_params["departement"] = dept
             department_param = entry.metadata.get("department_param")
             if isinstance(department_param, str) and (
-                department_param in runtime_params
-                or f"{{{department_param}}}" in endpoint
+                department_param in runtime_params or f"{{{department_param}}}" in endpoint
             ):
                 runtime_params[department_param] = dept
             zone_format = entry.metadata.get("zone_format")
@@ -271,7 +278,13 @@ class BulkIngestRunner:
 
             from gispulse.persistence.duckdb_engine import DuckDBSession
 
-            copy_sql = _copy_table_to_s3_sql(table_path, resolved_access, stage_uri)
+            copy_sql = _copy_table_to_s3_sql(
+                table_path,
+                resolved_access,
+                stage_uri,
+                entry=entry,
+                departement=departement,
+            )
             with DuckDBSession() as session:
                 session.conn.execute(copy_sql)
             fetch_metadata = dict(fetched.metadata)
@@ -374,6 +387,7 @@ class BulkIngestRunner:
                     geojson_path,
                     stage_path,
                     schema_hint=source_schema,
+                    column_aliases=_scope_column_aliases(entry),
                     batch_size=_geojson_batch_size(resolved_access),
                 )
                 with stage_path.open("rb") as stage_file:
@@ -421,6 +435,8 @@ class BulkIngestRunner:
                             vector_path,
                             resolved_access,
                             stage_uri,
+                            entry=entry,
+                            departement=departement,
                         )
                         session.conn.execute(copy_sql)
                         copy_sqls.append(copy_sql)
@@ -476,6 +492,39 @@ def _source_name(source: DataSource) -> str:
     return _clean_segment(name, label="source")
 
 
+def _source_bulk_access(
+    source: DataSource,
+    entry: SourceEntryRef,
+    access: AccessSpec,
+    *,
+    departement: object | None,
+    partition: object | None,
+    params: dict[str, Any] | None,
+) -> AccessSpec:
+    if entry.metadata.get("bulk_access_for") != "access_for":
+        return access
+    resolver = getattr(source, "access_for", None)
+    if not callable(resolver):
+        return access
+
+    allowed_params = entry.metadata.get("bulk_access_for_params", ())
+    if not isinstance(allowed_params, (list, tuple, set, frozenset)):
+        allowed_params = ()
+    resolver_kwargs: dict[str, Any] = {}
+    if departement is not None:
+        resolver_kwargs["departement"] = normalize_bulk_department(departement)
+    if params:
+        resolver_kwargs.update(
+            {key: value for key, value in params.items() if key in allowed_params}
+        )
+    resolved = resolver(entry.id, **resolver_kwargs)
+    if partition is not None:
+        resolved_params = dict(resolved.params)
+        resolved_params["partition"] = str(partition)
+        resolved = replace(resolved, params=resolved_params)
+    return resolved
+
+
 def _source_schema(source: DataSource, entry_id: str) -> dict[str, Any] | None:
     schema_fn = getattr(source, "schema", None)
     if not callable(schema_fn):
@@ -500,6 +549,59 @@ def _scope_departement(
         if value:
             return value
     return None
+
+
+def _scope_select_sql(
+    source_sql: str,
+    entry: SourceEntryRef,
+    departement: object | None,
+) -> str:
+    columns = ["*"]
+    dept_column = _scope_dept_column(entry, departement)
+    if dept_column is not None:
+        column_name, dept = dept_column
+        columns.append(f"{_sql_literal(dept)} AS {column_name}")
+    for column_name, source_column in _scope_column_aliases(entry).items():
+        columns.append(f"{source_column} AS {column_name}")
+    return f"SELECT {', '.join(columns)} FROM {source_sql}"
+
+
+def _scope_dept_column(
+    entry: SourceEntryRef,
+    departement: object | None,
+) -> tuple[str, str] | None:
+    if entry.metadata.get("scope_stamp_dept") is not True or departement is None:
+        return None
+    raw_column = entry.metadata.get("scope_dept_column") or "dept"
+    column_name = _scope_column_name(raw_column, label="scope_dept_column")
+    return column_name, normalize_bulk_department(departement)
+
+
+def _scope_column_aliases(entry: SourceEntryRef) -> dict[str, str]:
+    raw = entry.metadata.get("scope_column_aliases")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("scope_column_aliases metadata must be a mapping")
+    aliases: dict[str, str] = {}
+    for column_name, source_column in raw.items():
+        aliases[_scope_column_name(column_name, label="scope_column_alias")] = _scope_column_name(
+            source_column, label="scope_column_alias_source"
+        )
+    return aliases
+
+
+def _scope_column_name(value: object, *, label: str) -> str:
+    name = str(value).strip()
+    if (
+        not name
+        or name[0].isdigit()
+        or not (name[0].isalpha() or name[0] == "_")
+        or not all(ch.isalnum() or ch == "_" for ch in name)
+        or not name.isascii()
+    ):
+        raise ValueError(f"Invalid {label}: {value!r}")
+    return name
 
 
 def _create_s3_storage(bucket: str) -> DatasetStorage:
@@ -585,9 +687,7 @@ def _raw_filename(entry: SourceEntryRef, access: AccessSpec) -> str:
         return f"archive.{_safe_stem(archive_format)}"
 
     base = _metadata_str(entry, "base_key") or entry.id
-    archive_format = access.params.get("archive_format") or entry.metadata.get(
-        "archive_format"
-    )
+    archive_format = access.params.get("archive_format") or entry.metadata.get("archive_format")
     if archive_format:
         ext = str(archive_format).lower().lstrip(".")
     else:
@@ -681,6 +781,7 @@ def _geojson_to_parquet_batches(
     parquet_path: Path,
     *,
     schema_hint: dict[str, Any] | None,
+    column_aliases: dict[str, str] | None = None,
     batch_size: int,
 ) -> int:
     try:
@@ -694,7 +795,12 @@ def _geojson_to_parquet_batches(
 
     writer: pq.ParquetWriter | None = None
     field_types = _arrow_field_types(schema_hint, pa)
+    aliases = column_aliases or {}
     property_columns = [name for name in field_types if name != "geometry"]
+    if property_columns:
+        property_columns = _with_alias_columns(property_columns, aliases)
+    for column_name in aliases:
+        field_types.setdefault(column_name, pa.string())
     rows = 0
     batch: list[dict[str, Any]] = []
     try:
@@ -702,27 +808,51 @@ def _geojson_to_parquet_batches(
             batch.append(feature)
             if len(batch) >= batch_size:
                 if writer is None and not property_columns:
-                    property_columns = _infer_property_columns(batch)
+                    property_columns = _with_alias_columns(
+                        _infer_property_columns(batch),
+                        aliases,
+                    )
                     field_types = _arrow_field_types(
                         {name: "str" for name in property_columns} | {"geometry": "geometry"},
                         pa,
                     )
-                table = _features_to_arrow_table(batch, property_columns, field_types, pa)
+                table = _features_to_arrow_table(
+                    batch,
+                    property_columns,
+                    field_types,
+                    pa,
+                    column_aliases=aliases,
+                )
                 writer = _write_arrow_batch(writer, parquet_path, table, pq)
                 rows += table.num_rows
                 batch = []
         if batch:
             if writer is None and not property_columns:
-                property_columns = _infer_property_columns(batch)
+                property_columns = _with_alias_columns(
+                    _infer_property_columns(batch),
+                    aliases,
+                )
                 field_types = _arrow_field_types(
                     {name: "str" for name in property_columns} | {"geometry": "geometry"},
                     pa,
                 )
-            table = _features_to_arrow_table(batch, property_columns, field_types, pa)
+            table = _features_to_arrow_table(
+                batch,
+                property_columns,
+                field_types,
+                pa,
+                column_aliases=aliases,
+            )
             writer = _write_arrow_batch(writer, parquet_path, table, pq)
             rows += table.num_rows
         if writer is None:
-            table = _features_to_arrow_table([], property_columns, field_types, pa)
+            table = _features_to_arrow_table(
+                [],
+                property_columns,
+                field_types,
+                pa,
+                column_aliases=aliases,
+            )
             writer = _write_arrow_batch(writer, parquet_path, table, pq)
     finally:
         if writer is not None:
@@ -781,11 +911,26 @@ def _infer_property_columns(batch: list[dict[str, Any]]) -> list[str]:
     return columns
 
 
+def _with_alias_columns(
+    property_columns: list[str],
+    column_aliases: dict[str, str],
+) -> list[str]:
+    columns = list(property_columns)
+    seen = set(columns)
+    for column_name in column_aliases:
+        if column_name not in seen:
+            columns.append(column_name)
+            seen.add(column_name)
+    return columns
+
+
 def _features_to_arrow_table(
     features: list[dict[str, Any]],
     property_columns: list[str],
     field_types: dict[str, Any],
     pa: Any,
+    *,
+    column_aliases: dict[str, str],
 ) -> Any:
     arrays: dict[str, list[Any]] = {name: [] for name in property_columns}
     geometries: list[bytes | None] = []
@@ -794,7 +939,10 @@ def _features_to_arrow_table(
         if not isinstance(props, dict):
             props = {}
         for name in property_columns:
-            arrays[name].append(_coerce_arrow_value(props.get(name), field_types[name]))
+            value = props.get(name)
+            if value is None and name in column_aliases:
+                value = props.get(column_aliases[name])
+            arrays[name].append(_coerce_arrow_value(value, field_types[name]))
         geometries.append(_feature_geometry_wkb(feature.get("geometry")))
 
     fields = [(name, arrays[name]) for name in property_columns]
@@ -972,9 +1120,7 @@ def _extract_7z_archive(archive_path: Path, extract_dir: Path) -> None:
         None,
     )
     if binary is None:
-        raise RuntimeError(
-            "7z DOWNLOAD archives require py7zr or a local 7zz/7z/7za binary"
-        )
+        raise RuntimeError("7z DOWNLOAD archives require py7zr or a local 7zz/7z/7za binary")
     subprocess.run(
         [binary, "x", str(archive_path), f"-o{extract_dir}", "-y"],
         check=True,
@@ -1009,10 +1155,14 @@ def _copy_vector_to_s3_sql(
     vector_path: Path,
     access: AccessSpec,
     stage_uri: str,
+    *,
+    entry: SourceEntryRef,
+    departement: object | None,
 ) -> str:
     source = _st_read_scan(vector_path, access)
+    select_sql = _scope_select_sql(source, entry, departement)
     dest = _sql_literal(stage_uri)
-    return f"COPY (SELECT * FROM {source}) TO {dest} (FORMAT PARQUET)"
+    return f"COPY ({select_sql}) TO {dest} (FORMAT PARQUET)"
 
 
 def _copy_gzip_vector_to_s3_sql(
@@ -1029,10 +1179,14 @@ def _copy_table_to_s3_sql(
     table_path: Path,
     access: AccessSpec,
     stage_uri: str,
+    *,
+    entry: SourceEntryRef,
+    departement: object | None,
 ) -> str:
     source = _table_file_scan(table_path, access)
+    select_sql = _scope_select_sql(source, entry, departement)
     dest = _sql_literal(stage_uri)
-    return f"COPY (SELECT * FROM {source}) TO {dest} (FORMAT PARQUET)"
+    return f"COPY ({select_sql}) TO {dest} (FORMAT PARQUET)"
 
 
 def _table_file_scan(table_path: Path, access: AccessSpec) -> str:
@@ -1082,8 +1236,7 @@ def _table_file_path(
         path.write_bytes(bytes(data))
         return path
     raise TypeError(
-        "TABLE_FILE materialization must return a local path or bytes; "
-        f"got {type(data).__name__}"
+        f"TABLE_FILE materialization must return a local path or bytes; got {type(data).__name__}"
     )
 
 
