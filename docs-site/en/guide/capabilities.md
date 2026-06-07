@@ -235,8 +235,18 @@ Combine multiple layers into one — either geometrically (FME / QGIS-style over
 | `line_merge` | Merges touching line segments. | — |
 | `line_substring` | Line substring between two measures. | `start_measure`, `end_measure` |
 | `line_locate_point` | Projects points onto the nearest reference line + computes the measure. | `ref_layer` |
+| `snap_points_to_lines` | Snaps points onto the nearest line, returning a **stable** `edge_id` (from `ref_id_col`), the along-line `measure`, the perpendicular `offset_distance` and a `snapped` flag; geometry becomes the projected point. | `ref_layer`, `ref_id_col`, `max_distance_m` |
 | `extract_vertices` | Emits one `Point` per vertex with indices. | — |
 | `extract_segments` | Splits each line / polygon boundary into 2-point segments. | — |
+
+`snap_points_to_lines` is the stable-id evolution of `line_locate_point`: it returns the matched line's durable id rather than a positional row index, plus the projected point — everything needed to attach an event (accidents on roads, meters on a utility line, discharges on a watercourse) to an identified edge. The nearest line is always resolved, so a point beyond `max_distance_m` still carries its `edge_id` and projection with `snapped=False` (the consumer filters on the flag). `ref_id_col` is required.
+
+```json
+{
+  "capability": "snap_points_to_lines",
+  "config": { "ref_layer": "network_edges", "ref_id_col": "edge_id", "max_distance_m": 25 }
+}
+```
 
 ```json
 { "capability": "simplify", "config": { "tolerance": 5.0, "algorithm": "vw" } }

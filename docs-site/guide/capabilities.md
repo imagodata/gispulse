@@ -235,8 +235,18 @@ Combine plusieurs layers en une, soit géométriquement (overlay façon FME / QG
 | `line_merge` | Fusionne les segments adjacents. | — |
 | `line_substring` | Sous-section d'une ligne entre deux mesures. | `start_measure`, `end_measure` |
 | `line_locate_point` | Projette des points sur la ligne la plus proche et calcule la mesure. | `ref_layer` |
+| `snap_points_to_lines` | Projette les points sur la ligne la plus proche en restituant un `edge_id` **stable** (depuis `ref_id_col`), l'abscisse curviligne `measure`, la distance perpendiculaire `offset_distance` et un drapeau `snapped` ; la géométrie devient le point projeté. | `ref_layer`, `ref_id_col`, `max_distance_m` |
 | `extract_vertices` | Extrait un `Point` par vertex avec index. | — |
 | `extract_segments` | Découpe chaque ligne/bord en segments 2 points. | — |
+
+`snap_points_to_lines` est l'évolution « identifiant stable » de `line_locate_point` : il restitue l'id durable de la ligne (et non un index positionnel), plus le point projeté — tout ce qu'il faut pour rattacher un événement (accidents sur routes, compteurs sur réseau, rejets sur cours d'eau) à une arête identifiée. La ligne la plus proche est toujours résolue : un point au-delà de `max_distance_m` conserve son `edge_id` et sa projection avec `snapped=False` (le filtrage est laissé au consommateur via le drapeau). `ref_id_col` est requis.
+
+```json
+{
+  "capability": "snap_points_to_lines",
+  "config": { "ref_layer": "network_edges", "ref_id_col": "edge_id", "max_distance_m": 25 }
+}
+```
 
 ```json
 { "capability": "simplify", "config": { "tolerance": 5.0, "algorithm": "vw" } }

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`snap_points_to_lines` aligned on the stable-id contract.** `ref_id_col`
+  is now **required**: a missing/absent column raises a clear `ValueError`
+  instead of silently falling back to a positional index. Points beyond
+  `max_distance_m` now still carry their **nearest** line's `edge_id` and the
+  **projected** geometry (with `snapped=False`) rather than a null id and the
+  original point — filtering stays the consumer's call via the `snapped` flag.
+  Ties between equidistant lines break deterministically on the smallest
+  `edge_id`. Same inputs → same outputs.
+
 ## [2.2.1]
 
 ### Added
