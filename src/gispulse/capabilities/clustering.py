@@ -1,6 +1,6 @@
 """Spatial clustering capabilities for GISPulse.
 
-Three algorithms, all building on scikit-learn:
+Four algorithms, all building on scikit-learn:
 
 - :class:`DBSCANClusterCapability`      — density-based, discovers arbitrary
   shapes, tags noise points separately. Best for point clouds with varying
@@ -11,9 +11,14 @@ Three algorithms, all building on scikit-learn:
 - :class:`HDBSCANClusterCapability`     — hierarchical density-based. Adapts
   to varying density without the ``eps`` tuning DBSCAN needs; recommended
   default for exploratory analysis.
+- :class:`NetworkDBSCANClusterCapability` — DBSCAN where distance is measured
+  as the **shortest path along a line network** rather than straight-line
+  (capability H). Points snapped to the nearest network node; ``eps_m`` is a
+  distance along edges. Two points close as the crow flies but far along the
+  network do **not** end up in the same cluster.
 
-All three operate on the centroids of input geometries (so they work for
-points, lines and polygons alike). They add a ``cluster`` column to the
+The first three operate on the centroids of input geometries (so they work
+for points, lines and polygons alike). They add a ``cluster`` column to the
 output GeoDataFrame. ``-1`` marks noise points (DBSCAN/HDBSCAN).
 """
 
@@ -25,6 +30,8 @@ import numpy as np
 
 from gispulse.capabilities.base import Capability
 from gispulse.capabilities.registry import register
+from gispulse.core.crs import is_angular
+from gispulse.core.network_graph_handle import NetworkGraph
 
 
 def _coords_from_gdf(
@@ -301,6 +308,174 @@ class HDBSCANClusterCapability(Capability):
                 "crs_meters": {
                     "type": "string",
                     "default": "EPSG:3857",
+                },
+            },
+        }
+
+
+@register
+class NetworkDBSCANClusterCapability(Capability):
+    """Network-constrained DBSCAN (shortest-path metric, capability H)."""
+
+    name = "cluster_network_dbscan"
+    description = (
+        "Network-constrained DBSCAN — clusters points by shortest-path "
+        "distance along a line network instead of straight-line distance. "
+        "Points are snapped to the nearest network node; eps_m is measured "
+        "along edges. Adds a 'cluster' column (-1 = noise). Pass the network "
+        "as ref_layer."
+    )
+
+    def execute(
+        self,
+        gdf: gpd.GeoDataFrame,
+        ref_gdf: gpd.GeoDataFrame | None = None,
+        eps_m: float = 100.0,
+        min_samples: int = 5,
+        cluster_col: str = "cluster",
+        weight_col: str | None = None,
+        crs_meters: str = "EPSG:3857",
+        **_,
+    ) -> gpd.GeoDataFrame:
+        """
+        Args:
+            gdf:         Point layer to cluster (non-point geometries use their
+                         centroid).
+            ref_gdf:     Line-network layer, injected via ``ref_layer``. The
+                         clustering metric is the shortest-path distance over
+                         this network.
+            eps_m:       Neighborhood radius **along the network**, in units of
+                         *crs_meters* (meters) — or of *weight_col* when set.
+                         Two points are neighbors when their snapped nodes are
+                         within this network distance. Default 100.
+            min_samples: Min samples in a neighborhood to form a core point.
+            cluster_col: Output column name.
+            weight_col:  Edge-weight column on the network; defaults to metric
+                         edge length. When set, *eps_m* is in its units.
+            crs_meters:  Metric CRS used for snapping and edge lengths.
+                         EPSG:3857 worldwide default; prefer EPSG:2154 in
+                         France.
+
+        Returns:
+            Copy of *gdf* (in its original CRS) with an added integer
+            *cluster_col* (``-1`` = noise / unreachable).
+        """
+        from sklearn.cluster import DBSCAN
+
+        if gdf.empty:
+            out = gdf.copy()
+            out[cluster_col] = np.array([], dtype=np.int64)
+            return out
+        if ref_gdf is None or ref_gdf.empty:
+            raise ValueError(
+                "cluster_network_dbscan requires a line-network layer "
+                "(inject via ref_layer)."
+            )
+        if eps_m <= 0:
+            raise ValueError("eps_m must be > 0.")
+        if min_samples < 1:
+            raise ValueError("min_samples must be >= 1.")
+
+        try:
+            import networkx as nx
+        except ImportError as exc:
+            raise ImportError(
+                "cluster_network_dbscan requires 'networkx'. "
+                "Install with: pip install networkx"
+            ) from exc
+
+        # Reproject to a metric CRS so eps_m and edge weights are in meters.
+        network_m = ref_gdf.to_crs(crs_meters) if is_angular(ref_gdf) else ref_gdf
+        points_m = gdf.to_crs(crs_meters) if is_angular(gdf) else gdf
+
+        graph = NetworkGraph.from_lines(network_m, weight_col)
+        if len(graph) == 0:
+            raise ValueError(
+                "cluster_network_dbscan: the network produced an empty graph."
+            )
+
+        # Snap each point centroid to its nearest network node (O(log n)).
+        node_of_point: list[int] = []
+        for geom in points_m.geometry:
+            if geom is None or geom.is_empty:
+                node_of_point.append(-1)
+                continue
+            pt = geom if geom.geom_type == "Point" else geom.centroid
+            node_of_point.append(graph.nearest_node(pt))
+
+        n = len(node_of_point)
+        big = float(eps_m) * 2.0 + 1.0  # sentinel > eps → never a neighbor
+
+        # One bounded Dijkstra per *distinct* snapped node (cutoff eps_m),
+        # then fill the point×point precomputed distance matrix by lookup —
+        # points sharing a node reuse the same single-source result.
+        G = graph.graph
+        lengths_by_node: dict[int, dict[int, float]] = {}
+        for nid in set(node_of_point):
+            if nid < 0:
+                continue
+            lengths_by_node[nid] = nx.single_source_dijkstra_path_length(
+                G, nid, cutoff=float(eps_m), weight="weight"
+            )
+
+        dist = np.full((n, n), big, dtype=float)
+        for i in range(n):
+            ni = node_of_point[i]
+            dist[i, i] = 0.0
+            if ni < 0:
+                continue
+            li = lengths_by_node.get(ni, {})
+            for j in range(n):
+                if i == j:
+                    continue
+                d = li.get(node_of_point[j])
+                if d is not None:
+                    dist[i, j] = d
+        # Symmetrize defensively (graph is undirected → distances are
+        # symmetric; this guards against cutoff edge effects).
+        dist = np.minimum(dist, dist.T)
+
+        labels = DBSCAN(
+            eps=float(eps_m), min_samples=min_samples, metric="precomputed"
+        ).fit_predict(dist)
+
+        out = gdf.copy()
+        out[cluster_col] = labels.astype(np.int64)
+        return out
+
+    def get_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "ref_layer": {
+                    "type": ["string", "null"],
+                    "description": "Line-network layer used as the routing graph.",
+                },
+                "eps_m": {
+                    "type": "number",
+                    "minimum": 0,
+                    "default": 100.0,
+                    "description": "Neighborhood radius along the network (crs_meters units, or weight_col units).",
+                },
+                "min_samples": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 5,
+                    "description": "Minimum samples in a core neighborhood.",
+                },
+                "cluster_col": {
+                    "type": "string",
+                    "default": "cluster",
+                    "description": "Output column name.",
+                },
+                "weight_col": {
+                    "type": ["string", "null"],
+                    "description": "Edge-weight column; defaults to metric edge length.",
+                },
+                "crs_meters": {
+                    "type": "string",
+                    "default": "EPSG:3857",
+                    "description": "Metric CRS for snapping and edge lengths.",
                 },
             },
         }
