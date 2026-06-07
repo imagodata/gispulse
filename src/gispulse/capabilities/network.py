@@ -17,82 +17,13 @@ from __future__ import annotations
 from typing import Any
 
 import geopandas as gpd
-from shapely.geometry import LineString, MultiLineString, Point
+from shapely.geometry import LineString, Point
 
 from gispulse.capabilities.base import Capability
 from gispulse.capabilities.registry import register
 from gispulse.core.crs import is_angular
+from gispulse.core.network_graph_handle import NetworkGraph
 from gispulse.persistence.tier import check_tier
-
-
-def _build_graph(
-    gdf: gpd.GeoDataFrame,
-    weight_col: str | None = None,
-) -> tuple[Any, dict[Any, int]]:
-    """Construit un graphe NetworkX depuis un GeoDataFrame de lignes.
-
-    Chaque extrémité de ligne (arrondie à 6 décimales) devient un nœud.
-    Le poids d'un arc est `weight_col` si fourni, sinon la longueur géographique.
-
-    Returns:
-        (graph, node_index) — le graphe et un dict {(x,y) -> node_id}.
-    """
-    try:
-        import networkx as nx
-    except ImportError as exc:
-        raise ImportError(
-            "Network capabilities require 'networkx'. "
-            "Install with: pip install networkx"
-        ) from exc
-
-    G = nx.Graph()
-    node_idx: dict[tuple[float, float], int] = {}
-
-    def _snap(pt: Point) -> tuple[float, float]:
-        return (round(pt.x, 6), round(pt.y, 6))
-
-    def _node(pt: Point) -> int:
-        key = _snap(pt)
-        if key not in node_idx:
-            nid = len(node_idx)
-            node_idx[key] = nid
-            G.add_node(nid, x=key[0], y=key[1])
-        return node_idx[key]
-
-    for _, row in gdf.iterrows():
-        geom = row.geometry
-        if geom is None or geom.is_empty:
-            continue
-        lines = geom.geoms if isinstance(geom, MultiLineString) else [geom]
-        for line in lines:
-            if not isinstance(line, LineString) or len(line.coords) < 2:
-                continue
-            coords = list(line.coords)
-            start = _node(Point(coords[0]))
-            end = _node(Point(coords[-1]))
-            weight = (
-                float(row[weight_col])
-                if weight_col and weight_col in gdf.columns
-                else line.length
-            )
-            G.add_edge(start, end, weight=weight, geometry=line)
-
-    return G, node_idx
-
-
-def _nearest_node(
-    pt: Point,
-    node_idx: dict[tuple[float, float], int],
-) -> int:
-    """Retourne l'identifiant du nœud le plus proche d'un point."""
-    best_id = -1
-    best_dist = float("inf")
-    for (x, y), nid in node_idx.items():
-        d = (x - pt.x) ** 2 + (y - pt.y) ** 2
-        if d < best_dist:
-            best_dist = d
-            best_id = nid
-    return best_id
 
 
 @register
@@ -152,9 +83,10 @@ class ShortestPathCapability(Capability):
             src_pt = Point(start_x, start_y)
             dst_pt = Point(end_x, end_y)
 
-        G, node_idx = _build_graph(network_m, weight_col)
-        start_node = _nearest_node(src_pt, node_idx)
-        end_node = _nearest_node(dst_pt, node_idx)
+        graph = NetworkGraph.from_lines(network_m, weight_col)
+        G = graph.graph
+        start_node = graph.nearest_node(src_pt)
+        end_node = graph.nearest_node(dst_pt)
 
         try:
             path_nodes = nx.shortest_path(G, start_node, end_node, weight="weight")
@@ -320,8 +252,9 @@ class IsochroneCapability(Capability):
         else:
             network_m = network
 
-        G, node_idx = _build_graph(network_m, weight_col)
-        if len(node_idx) == 0:
+        graph = NetworkGraph.from_lines(network_m, weight_col)
+        G = graph.graph
+        if len(graph) == 0:
             return gpd.GeoDataFrame(columns=["geometry", "cost_budget"], crs=result_crs)
 
         # Collect start nodes — one per source feature (batch) or a single
@@ -333,11 +266,11 @@ class IsochroneCapability(Capability):
                 if geom is None or geom.is_empty:
                     continue
                 pt = geom.centroid if geom.geom_type != "Point" else geom
-                start_nodes.add(_nearest_node(pt, node_idx))
+                start_nodes.add(graph.nearest_node(pt))
             if not start_nodes:
                 return gpd.GeoDataFrame(columns=["geometry", "cost_budget"], crs=result_crs)
         else:
-            start_nodes = {_nearest_node(Point(start_x, start_y), node_idx)}
+            start_nodes = {graph.nearest_node(Point(start_x, start_y))}
 
         # Single Dijkstra pass for all budgets — cutoff at the largest, then
         # filter reachable nodes per budget. N-budget cost ≈ 1-budget cost.
@@ -512,7 +445,8 @@ class NetworkAllocationCapability(Capability):
             hubs_m = hubs_gdf
             feats_m = gdf
 
-        G, node_idx = _build_graph(net_m, weight_col)
+        graph = NetworkGraph.from_lines(net_m, weight_col)
+        G = graph.graph
 
         # Snap chaque hub sur le graphe
         hub_nodes: list[tuple[int, Any]] = []
@@ -520,7 +454,7 @@ class NetworkAllocationCapability(Capability):
             if hub_row.geometry is None or hub_row.geometry.is_empty:
                 continue
             hub_pt = hub_row.geometry
-            nid = _nearest_node(Point(hub_pt.x, hub_pt.y), node_idx)
+            nid = graph.nearest_node(Point(hub_pt.x, hub_pt.y))
             hub_id_val = hub_row.get(hub_id_col, hub_row.name)
             hub_nodes.append((nid, hub_id_val))
 
@@ -561,7 +495,7 @@ class NetworkAllocationCapability(Capability):
             if not isinstance(feat_pt, Point):
                 feat_pt = feat_pt.centroid
 
-            nearest_nid = _nearest_node(feat_pt, node_idx)
+            nearest_nid = graph.nearest_node(feat_pt)
             if nearest_nid in node_to_hub:
                 hub_val, cost = node_to_hub[nearest_nid]
                 hub_ids.append(hub_val)
@@ -671,7 +605,7 @@ class ConnectivityCheckCapability(Capability):
                 crs=gdf.crs,
             )
 
-        G, node_idx = _build_graph(gdf, weight_col)
+        G = NetworkGraph.from_lines(gdf, weight_col).graph
 
         is_connected = nx.is_connected(G)
         components = list(nx.connected_components(G))
@@ -840,10 +774,11 @@ class ODMatrixCapability(Capability):
         except ImportError as exc:
             raise ImportError("networkx required for od_matrix.") from exc
 
-        G, node_idx = _build_graph(gdf, weight_col=weight_col)
+        graph = NetworkGraph.from_lines(gdf, weight_col=weight_col)
+        G = graph.graph
 
-        origin_nodes = [_nearest_node(Point(g.x, g.y) if g.geom_type == "Point" else g.centroid, node_idx) for g in ref_gdf.geometry]
-        dest_nodes = [_nearest_node(Point(g.x, g.y) if g.geom_type == "Point" else g.centroid, node_idx) for g in dest_gdf.geometry]
+        origin_nodes = [graph.nearest_node(Point(g.x, g.y) if g.geom_type == "Point" else g.centroid) for g in ref_gdf.geometry]
+        dest_nodes = [graph.nearest_node(Point(g.x, g.y) if g.geom_type == "Point" else g.centroid) for g in dest_gdf.geometry]
 
         origin_ids = (
             list(ref_gdf[origin_id_col])
@@ -957,7 +892,7 @@ class MinimumSpanningTreeCapability(Capability):
         if gdf.empty:
             return gdf.copy()
 
-        G, _ = _build_graph(gdf, weight_col=weight_col)
+        G = NetworkGraph.from_lines(gdf, weight_col=weight_col).graph
         if G.number_of_edges() == 0:
             return gpd.GeoDataFrame(geometry=[], crs=gdf.crs)
 
