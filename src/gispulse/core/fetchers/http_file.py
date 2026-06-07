@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
+from gispulse.core.fetchers._http_download import stream_http_to_file
 from gispulse.core.fetchers.base import LazyFetcher, resolve_s3_materialize_uri
 from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
@@ -78,9 +79,7 @@ class HttpFileFetcher(LazyFetcher):
         if not extent:
             return ""
         minx, miny, maxx, maxy = (float(c) for c in extent)
-        envelope = (
-            f"ST_MakeEnvelope({minx}, {miny}, {maxx}, {maxy})"
-        )
+        envelope = f"ST_MakeEnvelope({minx}, {miny}, {maxx}, {maxy})"
         return f" WHERE ST_Intersects({geom_expr}, {envelope})"
 
     def _csv_scan(self, access: AccessSpec, extent: Any | None) -> str:
@@ -90,10 +89,7 @@ class HttpFileFetcher(LazyFetcher):
         lon = access.params.get("lon", "longitude")
         geom = f'ST_Point("{lon}", "{lat}")'
         where = self._bbox_clause(extent, geom)
-        return (
-            f"(SELECT *, {geom} AS geometry "
-            f"FROM read_csv_auto('{uri}'){where})"
-        )
+        return f"(SELECT *, {geom} AS geometry FROM read_csv_auto('{uri}'){where})"
 
     def _spatial_scan(self, access: AccessSpec, extent: Any | None) -> str:
         """Spatial-file scan via ``ST_Read`` (GeoJSON / GPKG / FGB / SHP)."""
@@ -133,17 +129,13 @@ class HttpFileFetcher(LazyFetcher):
         """
         import tempfile
 
-        import httpx
-
         s3_destination = resolve_s3_materialize_uri(access)
         if s3_destination:
             from gispulse.persistence.duckdb_engine import DuckDBSession
 
             select = self._reference_scan(access, extent)
             dest = s3_destination.replace("'", "''")
-            copy_sql = (
-                f"COPY (SELECT * FROM {select}) TO '{dest}' (FORMAT PARQUET)"
-            )
+            copy_sql = f"COPY (SELECT * FROM {select}) TO '{dest}' (FORMAT PARQUET)"
             with DuckDBSession() as session:
                 session.conn.execute(copy_sql)
             log.info("http_file_materialized", path=s3_destination)
@@ -163,11 +155,11 @@ class HttpFileFetcher(LazyFetcher):
             handle.close()
             local_path = handle.name
 
-        with httpx.stream("GET", access.endpoint, follow_redirects=True) as resp:
-            resp.raise_for_status()
-            with open(local_path, "wb") as fh:
-                for chunk in resp.iter_bytes():
-                    fh.write(chunk)
+        stream_http_to_file(
+            access.endpoint,
+            local_path,
+            retry_log_event="http_file_download_retry",
+        )
         log.info("http_file_materialized", path=local_path)
         return SourceResult(
             payload=self.payload,
