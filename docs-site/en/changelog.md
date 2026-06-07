@@ -13,6 +13,14 @@ The authoritative version of this file lives at [`CHANGELOG.md`](https://github.
 
 ---
 
+## [2.2.2] — 2026-06-07
+
+### Changed
+
+- **`snap_points_to_lines` hardening.** `ref_id_col` is now **required**: a missing column raises a clear `ValueError` instead of silently falling back to a positional index. Ties between equidistant lines break **deterministically** on the smallest `edge_id` (same inputs → same outputs). The unsnapped-row contract is unchanged (beyond `max_distance_m`: `snapped=False`, null `edge_id`/`measure`, original geometry kept, only `offset_distance` reported) — downstream consumers (e.g. MILOU's `build_site_network_candidates`) need no changes.
+
+---
+
 ## [2.2.1] — 2026-06-07
 
 ### Added
