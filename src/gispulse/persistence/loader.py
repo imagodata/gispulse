@@ -119,12 +119,30 @@ class LazyDataset:
         return _scan_to_gdf(self.scan_sql, crs=self.crs, bbox=bbox)
 
 
+@dataclass(frozen=True)
+class _DuckDBTableRef:
+    """Reference to a table living inside a single DuckDB database file.
+
+    Produced by :func:`resolve_source` for a ``duckdb``-kind datamart
+    (``datamart://<mart>/<table>`` where the mart's location is a
+    ``.duckdb`` file). Unlike a Parquet table it is not a file URI the
+    loader can hand to ``read_vector`` / a remote-table scan, so the loader
+    reads it via :func:`_duckdb_table_to_gdf` (attach read-only, select).
+    """
+
+    db_path: str
+    table: str
+    crs: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Source resolution
 # ---------------------------------------------------------------------------
 
 
-def resolve_source(source: "str | Path | AccessSpec | dict[str, Any]") -> "Path | AccessSpec":
+def resolve_source(
+    source: "str | Path | AccessSpec | dict[str, Any]",
+) -> "Path | AccessSpec | _DuckDBTableRef":
     """Resolve a user-supplied source into a local path or an access spec.
 
     Accepted forms:
@@ -162,12 +180,19 @@ def resolve_source(source: "str | Path | AccessSpec | dict[str, Any]") -> "Path 
     scheme = head.lower()
 
     # Datamart indirection: resolve datamart://<mart>/<table> to its
-    # concrete source URI, then resolve that recursively.
+    # concrete source. A "parquet" mart yields a file URI resolved
+    # recursively; a "duckdb" mart yields a table reference inside a
+    # database file, read via _duckdb_table_to_gdf.
     if scheme == DATAMART_SCHEME:
         from gispulse.persistence.datamart import DATAMARTS, parse_datamart_uri
 
-        mart, table = parse_datamart_uri(raw)
-        return resolve_source(DATAMARTS.resolve(mart, table))
+        mart_name, table = parse_datamart_uri(raw)
+        mart = DATAMARTS.get(mart_name)
+        if mart.kind == "duckdb":
+            if not table:
+                raise ValueError(f"datamart '{mart_name}': empty table name")
+            return _DuckDBTableRef(db_path=mart.location, table=table, crs=mart.crs)
+        return resolve_source(mart.uri_for(table))
 
     # GeoNode: geonode://<instance>/<dataset> reads via the instance's
     # GeoServer WFS endpoint (reuses the OGC fetcher).
@@ -330,6 +355,52 @@ def _scan_to_gdf(
     return gdf
 
 
+def _duckdb_table_to_gdf(
+    db_path: str, table: str, *, crs: str | None, bbox: BBox | None
+) -> gpd.GeoDataFrame:
+    """Read a table from a DuckDB database file into a GeoDataFrame.
+
+    Attaches *db_path* **read-only** (so concurrent readers don't contend on
+    a write lock) onto an ephemeral in-memory session, then selects *table*.
+    When *bbox* is given an ``ST_Intersects`` envelope predicate is pushed
+    into the query against a ``geom`` column (matching the convention of
+    :func:`_scan_to_gdf`).
+    """
+    from gispulse.persistence.duckdb_engine import DuckDBSession
+
+    # ATTACH cannot be wrapped in the SELECT sub-query DuckDBSession.sql
+    # builds, so run it separately on the connection, then SELECT the table
+    # — that SELECT *is* wrappable, so geometry/CRS decoding still works.
+    db_lit = db_path.replace("'", "''")
+    rel = f"_mart.{_quote_ident(table)}"
+    query = f"SELECT * FROM {rel}"
+    if bbox is not None:
+        minx, miny, maxx, maxy = bbox
+        query = (
+            f"SELECT * FROM {rel} "
+            f"WHERE ST_Intersects(geom, ST_MakeEnvelope("
+            f"{minx}, {miny}, {maxx}, {maxy}))"
+        )
+
+    session = DuckDBSession()
+    session.open()
+    try:
+        session.conn.execute(f"ATTACH '{db_lit}' AS _mart (READ_ONLY)")
+        gdf = session.sql(query)
+    finally:
+        session.close()
+
+    if crs and gdf.crs is None:
+        gdf = gdf.set_crs(crs)
+    return gdf
+
+
+def _quote_ident(identifier: str) -> str:
+    """Quote a SQL identifier (double-quote, doubling embedded quotes)."""
+    escaped = identifier.replace('"', '""')
+    return f'"{escaped}"'
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -379,6 +450,15 @@ def load(
         return gdf
 
     resolved = resolve_source(source)
+
+    # --- DuckDB-file datamart table ---------------------------------------
+    if isinstance(resolved, _DuckDBTableRef):
+        if lazy:
+            log.debug("loader_lazy_ignored_for_duckdb_table", table=resolved.table)
+        gdf = _duckdb_table_to_gdf(
+            resolved.db_path, resolved.table, crs=crs or resolved.crs, bbox=bbox
+        )
+        return gdf
 
     # --- Local file path ---------------------------------------------------
     if isinstance(resolved, Path):

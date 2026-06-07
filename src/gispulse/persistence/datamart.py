@@ -19,8 +19,14 @@ from the ``GISPULSE_DATAMARTS`` environment variable (a JSON object), e.g.::
 
     GISPULSE_DATAMARTS='{
       "referentiel": {"location": "s3://bucket/marts/referentiel"},
-      "local": {"location": "/data/marts/local", "table_pattern": "{table}.parquet"}
+      "local": {"location": "/data/marts/local", "table_pattern": "{table}.parquet"},
+      "warehouse": {"location": "/data/marts/warehouse.duckdb", "kind": "duckdb"}
     }'
+
+A ``kind: "duckdb"`` mart points :attr:`Datamart.location` at a single
+DuckDB database file; ``datamart://warehouse/<table>`` then reads the table
+of that name from inside the file (attached read-only, bbox push-down still
+applies via an ``ST_Intersects`` predicate on a ``geom`` column).
 """
 
 from __future__ import annotations
@@ -42,17 +48,33 @@ DATAMARTS_ENV = "GISPULSE_DATAMARTS"
 DATAMART_SCHEME = "datamart"
 
 
+#: Supported datamart backends.
+DATAMART_KINDS = ("parquet", "duckdb")
+
+
 @dataclass(frozen=True)
 class Datamart:
     """Declaration of one curated table store.
 
+    Two backends are supported, selected by :attr:`kind`:
+
+    * ``"parquet"`` (default) — *location* is a directory / ``s3://`` /
+      ``https://`` prefix holding **one file per table**; the file is
+      addressed by joining *location* with *table_pattern* and read as an
+      ordinary source (DuckDB-scannable, bbox push-down applies).
+    * ``"duckdb"`` — *location* is the path to a **single DuckDB database
+      file** (``.duckdb``); a table is a relation *inside* that file, read by
+      attaching the database read-only and selecting the table.
+
     Args:
         name:          Logical mart name used in ``datamart://<name>/…``.
-        location:      Base location of the tables — a directory path or
-                       an ``s3://`` / ``https://`` prefix. Joined with
-                       ``table_pattern`` to address a single table.
-        table_pattern: Filename pattern for a table, ``{table}`` being the
-                       table name. Defaults to ``"{table}.parquet"``.
+        location:      Base location: a directory / ``s3://`` / ``https://``
+                       prefix (``parquet``), or the path to a ``.duckdb``
+                       file (``duckdb``).
+        table_pattern: Filename pattern for a ``parquet`` table, ``{table}``
+                       being the table name. Defaults to ``"{table}.parquet"``.
+                       Ignored for ``duckdb`` marts.
+        kind:          Backend, ``"parquet"`` (default) or ``"duckdb"``.
         crs:           Optional CRS to force on tables that declare none.
         metadata:      Free-form descriptive metadata.
     """
@@ -60,13 +82,31 @@ class Datamart:
     name: str
     location: str
     table_pattern: str = "{table}.parquet"
+    kind: str = "parquet"
     crs: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if self.kind not in DATAMART_KINDS:
+            raise ValueError(
+                f"datamart '{self.name}': unknown kind {self.kind!r} "
+                f"(expected one of {DATAMART_KINDS})"
+            )
+
     def uri_for(self, table: str) -> str:
-        """Return the concrete source URI for *table* in this mart."""
+        """Return the concrete source URI for *table* (``parquet`` marts).
+
+        Raises:
+            ValueError: for a ``duckdb`` mart — a table there is not a file
+                URI; resolve it via the loader's DuckDB-table path instead.
+        """
         if not table:
             raise ValueError(f"datamart '{self.name}': empty table name")
+        if self.kind != "parquet":
+            raise ValueError(
+                f"datamart '{self.name}': uri_for is only valid for parquet "
+                f"marts, not kind={self.kind!r}"
+            )
         filename = self.table_pattern.format(table=table)
         base = self.location.rstrip("/")
         return f"{base}/{filename}"
@@ -141,13 +181,19 @@ class DatamartRegistry:
                 if not isinstance(spec, dict) or "location" not in spec:
                     log.warning("datamart_env_bad_decl", name=name)
                     continue
-                self._marts[name] = Datamart(
-                    name=name,
-                    location=str(spec["location"]),
-                    table_pattern=str(spec.get("table_pattern", "{table}.parquet")),
-                    crs=spec.get("crs"),
-                    metadata=dict(spec.get("metadata") or {}),
-                )
+                try:
+                    self._marts[name] = Datamart(
+                        name=name,
+                        location=str(spec["location"]),
+                        table_pattern=str(
+                            spec.get("table_pattern", "{table}.parquet")
+                        ),
+                        kind=str(spec.get("kind", "parquet")),
+                        crs=spec.get("crs"),
+                        metadata=dict(spec.get("metadata") or {}),
+                    )
+                except ValueError as exc:
+                    log.warning("datamart_env_bad_decl", name=name, error=str(exc))
 
 
 def parse_datamart_uri(uri: str) -> tuple[str, str]:
@@ -177,6 +223,7 @@ DATAMARTS = DatamartRegistry()
 __all__ = [
     "DATAMARTS",
     "DATAMARTS_ENV",
+    "DATAMART_KINDS",
     "DATAMART_SCHEME",
     "Datamart",
     "DatamartRegistry",

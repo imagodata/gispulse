@@ -166,3 +166,112 @@ def test_load_via_datamart(tmp_path, points_gdf):
     assert isinstance(out, gpd.GeoDataFrame)
     assert len(out) == 2
     assert list(out["name"]) == ["a", "b"]
+
+
+# ---------------------------------------------------------------------------
+# DuckDB-file marts (DP2b)
+# ---------------------------------------------------------------------------
+
+
+def _make_duckdb_file(path, *, with_geom=True):
+    """Create a .duckdb file with a 'parcels' (geom) or 'stats' (plain) table."""
+    import duckdb
+
+    con = duckdb.connect(str(path))
+    try:
+        con.execute("INSTALL spatial; LOAD spatial")
+        if with_geom:
+            con.execute(
+                "CREATE TABLE parcels AS SELECT * FROM (VALUES "
+                "(1, 'a', ST_Point(0, 0)), (2, 'b', ST_Point(5, 5))) "
+                "AS t(id, name, geom)"
+            )
+        else:
+            con.execute(
+                "CREATE TABLE stats AS SELECT * FROM (VALUES "
+                "(1, 'x'), (2, 'y')) AS t(id, label)"
+            )
+    finally:
+        con.close()
+
+
+def test_datamart_invalid_kind_raises():
+    with pytest.raises(ValueError, match="unknown kind"):
+        Datamart(name="m", location="/x", kind="sqlite")
+
+
+def test_uri_for_rejects_duckdb_kind():
+    m = Datamart(name="m", location="/data/m.duckdb", kind="duckdb")
+    with pytest.raises(ValueError, match="only valid for parquet"):
+        m.uri_for("parcels")
+
+
+def test_resolve_source_duckdb_returns_table_ref(tmp_path):
+    from gispulse.persistence.loader import _DuckDBTableRef
+
+    dbp = tmp_path / "mart.duckdb"
+    _make_duckdb_file(dbp)
+    DATAMARTS.register(
+        Datamart(name="ref", location=str(dbp), kind="duckdb", crs="EPSG:4326")
+    )
+    resolved = resolve_source("datamart://ref/parcels")
+    assert isinstance(resolved, _DuckDBTableRef)
+    assert resolved.table == "parcels"
+    assert resolved.db_path == str(dbp)
+    assert resolved.crs == "EPSG:4326"
+
+
+def test_load_duckdb_table(tmp_path):
+    dbp = tmp_path / "mart.duckdb"
+    _make_duckdb_file(dbp)
+    DATAMARTS.register(
+        Datamart(name="ref", location=str(dbp), kind="duckdb", crs="EPSG:4326")
+    )
+    out = load("datamart://ref/parcels")
+    assert isinstance(out, gpd.GeoDataFrame)
+    assert len(out) == 2
+    assert out.crs == "EPSG:4326"
+    assert "geometry" in out.columns
+    assert sorted(out["name"]) == ["a", "b"]
+
+
+def test_load_duckdb_table_bbox_pushdown(tmp_path):
+    dbp = tmp_path / "mart.duckdb"
+    _make_duckdb_file(dbp)
+    DATAMARTS.register(Datamart(name="ref", location=str(dbp), kind="duckdb"))
+    out = load("datamart://ref/parcels", bbox=(-1, -1, 1, 1))
+    assert len(out) == 1
+    assert out["name"].iloc[0] == "a"
+
+
+def test_load_duckdb_plain_table(tmp_path):
+    dbp = tmp_path / "mart.duckdb"
+    _make_duckdb_file(dbp, with_geom=False)
+    DATAMARTS.register(Datamart(name="ref", location=str(dbp), kind="duckdb"))
+    out = load("datamart://ref/stats")
+    assert len(out) == 2
+    assert sorted(out["label"]) == ["x", "y"]
+
+
+def test_load_duckdb_concurrent_readonly(tmp_path):
+    # Read-only ATTACH must allow a second concurrent reader on the same file.
+    dbp = tmp_path / "mart.duckdb"
+    _make_duckdb_file(dbp)
+    DATAMARTS.register(Datamart(name="ref", location=str(dbp), kind="duckdb"))
+    a = load("datamart://ref/parcels")
+    b = load("datamart://ref/parcels")
+    assert len(a) == len(b) == 2
+
+
+def test_duckdb_mart_from_env(tmp_path, monkeypatch):
+    import json
+
+    dbp = tmp_path / "mart.duckdb"
+    _make_duckdb_file(dbp)
+    monkeypatch.setenv(
+        "GISPULSE_DATAMARTS",
+        json.dumps({"ref": {"location": str(dbp), "kind": "duckdb"}}),
+    )
+    DATAMARTS.clear()  # force env reload
+    out = load("datamart://ref/parcels")
+    assert len(out) == 2
