@@ -27,6 +27,7 @@ All entries use `AccessProtocol.WFS`, endpoint
 | id | WFS typename | CQL filter |
 |----|--------------|------------|
 | `servitude` | `wfs_sup:servitude` | |
+| `acte` | `wfs_sup:acte_sup` | |
 | `assiette-surf` | `wfs_sup:assiette_sup_s` | |
 | `assiette-lin` | `wfs_sup:assiette_sup_l` | |
 | `assiette-pct` | `wfs_sup:assiette_sup_p` | |

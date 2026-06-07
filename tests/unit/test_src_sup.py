@@ -85,6 +85,7 @@ def test_catalog_lists_raw_layers_and_filtered_views(source: SupSource) -> None:
     ids = {e.id for e in source.catalog()}
     assert ids == {
         "servitude",
+        "acte",
         "assiette-surf",
         "assiette-lin",
         "assiette-pct",
@@ -123,6 +124,7 @@ def test_every_entry_carries_classification_axes(source: SupSource) -> None:
 def test_every_entry_targets_wfs_sup_typename(source: SupSource) -> None:
     expected = {
         "servitude": ("wfs_sup:servitude", None),
+        "acte": ("wfs_sup:acte_sup", None),
         "assiette-surf": ("wfs_sup:assiette_sup_s", None),
         "assiette-lin": ("wfs_sup:assiette_sup_l", None),
         "assiette-pct": ("wfs_sup:assiette_sup_p", None),

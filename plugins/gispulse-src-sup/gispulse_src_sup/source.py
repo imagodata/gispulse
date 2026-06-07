@@ -46,6 +46,11 @@ _ENTRIES: dict[str, tuple[str, str, str | None]] = {
         "wfs_sup:servitude",
         None,
     ),
+    "acte": (
+        "SUP — actes",
+        "wfs_sup:acte_sup",
+        None,
+    ),
     "assiette-surf": (
         "SUP — assiettes surfaciques",
         "wfs_sup:assiette_sup_s",
