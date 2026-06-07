@@ -13,6 +13,23 @@ La source de vérité de ce fichier est [`CHANGELOG.md`](https://github.com/imag
 
 ---
 
+## [2.2.0] — 2026-06-07
+
+Release de fonctionnalités ajoutant un ensemble cohérent de **capacités SIG génériques** pour l'analyse réseau, le linear referencing et le clustering (le plan « A–K »), ainsi qu'un provider de données multi-sources unifié. Entièrement rétro-compatible.
+
+### Ajouts
+
+- **Loader & providers unifiés (#374).** `gispulse.load(source, …)` / `app.load()` résolvent fichiers (dont GeoParquet), URI distants (s3/http), `wfs://` / `stac://` / `ogc-features://`, datamarts (`datamart://`, Parquet curés) et instances GeoNode (`geonode://`, lecture + `publish()`) vers un GeoDataFrame ou un scan DuckDB lazy.
+- **`SpatialIndex` (K) & `NetworkGraph` (F).** Infrastructure cœur réutilisable : wrapper STRtree (build once / query many) et handle de routage persistant qui construit le graphe NetworkX une seule fois et snappe les points aux nœuds en O(log n). Toutes les capacités réseau (`shortest_path`, `isochrone`, `od_matrix`, `mst`, `network_allocation`, `connectivity_check`) le réutilisent.
+- **`build_network_graph` (A), `snap_points_to_lines` (B), `split_lines_at_points` (C).**
+- **`planarize` (D), `connected_components` (E).**
+- **`steiner_tree` (G).** Arbre de Steiner approximé reliant un sous-ensemble de terminaux au moindre coût.
+- **`cluster_network_dbscan` (H).** DBSCAN sur distance plus-court-chemin réseau.
+- **`community_detection` (I).** Partition en communautés (Louvain / greedy modularity / label propagation), annote `community_id`.
+- **`cluster_st_dbscan` (J).** DBSCAN spatio-temporel (seuils `eps_m` + `eps_time`).
+
+---
+
 ## [2.1.0] — 2026-06-05
 
 Release de fonctionnalités consolidant tout ce qui a atterri sur `main` depuis `2.0.0` : une vague de nouveaux plugins sources déclaratifs, le pipeline ELT push-down / manifest-v3, la matérialisation S3 en masse des sources tabulaires, et un object store Garage piloté par l'environnement. Entièrement rétro-compatible — le shim meta-path `_compat` et l'alias `PluginHub = ExtensionHub` restent en place.

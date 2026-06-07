@@ -13,6 +13,23 @@ The authoritative version of this file lives at [`CHANGELOG.md`](https://github.
 
 ---
 
+## [2.2.0] — 2026-06-07
+
+Feature release adding a coherent set of **generic GIS capabilities** for network analysis, linear referencing and clustering (the "A–K" plan), plus a unified multi-source data provider. Fully backwards-compatible.
+
+### Added
+
+- **Unified data loader & providers (#374).** `gispulse.load(source, …)` / `app.load()` resolve files (incl. GeoParquet), remote URIs (s3/http), `wfs://` / `stac://` / `ogc-features://`, datamarts (`datamart://`, curated Parquet) and GeoNode instances (`geonode://`, read + `publish()`) to a GeoDataFrame or a lazy DuckDB scan.
+- **`SpatialIndex` (K) & `NetworkGraph` (F).** Reusable core infrastructure: a thin STRtree wrapper (build once / query many) and a persistent routing handle building the NetworkX graph once and snapping points in O(log n). All network capabilities reuse it.
+- **`build_network_graph` (A), `snap_points_to_lines` (B), `split_lines_at_points` (C).**
+- **`planarize` (D), `connected_components` (E).**
+- **`steiner_tree` (G).** Approximate minimum Steiner tree connecting a subset of terminals.
+- **`cluster_network_dbscan` (H).** DBSCAN over shortest-path network distance.
+- **`community_detection` (I).** Community partition (Louvain / greedy modularity / label propagation), tags `community_id`.
+- **`cluster_st_dbscan` (J).** Spatio-temporal DBSCAN (`eps_m` + `eps_time`).
+
+---
+
 ## [2.1.0] — 2026-06-05
 
 Feature release consolidating everything that landed on `main` since `2.0.0`: a wave of new declarative source plugins, the ELT push-down / manifest-v3 pipeline, S3 bulk materialisation for tabular sources, and an env-driven Garage object store. Fully backwards-compatible — the `_compat` meta-path shim and the `PluginHub = ExtensionHub` alias stay in place.
