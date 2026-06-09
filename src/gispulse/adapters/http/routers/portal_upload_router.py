@@ -148,13 +148,28 @@ async def upload_dataset(
 
     dataset_id = str(uuid.uuid4())
 
+    # Enforce upload size limit (default 500 MB, max 5000 MB)
+    from gispulse.core.config import settings as _cfg
+    _max_mb = _cfg.api.max_upload_mb
+    _MAX_UPLOAD_SIZE = _max_mb * 1024 * 1024
+
     # Write to a temp file for format detection and metadata extraction
     # (these operations require local filesystem access)
     tmp_dir = Path(tempfile.mkdtemp(prefix="gispulse_upload_"))
     tmp_dest = tmp_dir / safe_filename
     try:
+        total_written = 0
         with open(tmp_dest, "wb") as f:
-            shutil.copyfileobj(file.file, f)
+            while chunk := await file.read(1024 * 1024):  # 1 MB chunks
+                total_written += len(chunk)
+                if total_written > _MAX_UPLOAD_SIZE:
+                    f.close()
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    raise HTTPException(
+                        413,
+                        f"File too large. Maximum upload size: {_MAX_UPLOAD_SIZE // (1024 * 1024)} MB.",
+                    )
+                f.write(chunk)
 
         driver = detect_format(str(tmp_dest))
         if driver is None:

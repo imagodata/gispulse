@@ -42,6 +42,19 @@ from gispulse.rules.predicates import PredicateEvaluator
 MAX_CASCADE_DEPTH = 3
 
 
+def _quote_ident(name: str) -> str:
+    """Double-quote a (possibly schema-qualified) SQL identifier.
+
+    ``validate_layer_name`` is permissive (it accepts spaces, ``=``, parens,
+    ``UNION`` …) and is therefore only safe when the resulting identifier is
+    interpolated **between double quotes**. It forbids the ``"`` character, so
+    no escaping is required. Schema-qualified names (``schema.table``) are
+    split on ``.`` so each part is quoted independently:
+    ``"schema"."table"``.
+    """
+    return ".".join(f'"{part}"' for part in name.split("."))
+
+
 class CascadeDepthExceeded(Exception):
     """Levée quand une cascade de triggers dépasse MAX_CASCADE_DEPTH niveaux."""
 
@@ -289,7 +302,7 @@ class TriggerEvaluator:
 
         table = tc.table or record.table_name
         try:
-            table = _validate_identifier(table)
+            table = _quote_ident(_validate_identifier(table))
             if tc.metric == "feature_count":
                 sql = f"SELECT COUNT(*) AS val FROM {table}"
             elif tc.metric == "total_area":
@@ -297,7 +310,7 @@ class TriggerEvaluator:
             elif tc.metric == "total_length":
                 sql = f"SELECT COALESCE(SUM(ST_Length(geom::geography)), 0) AS val FROM {table}"
             elif tc.metric in ("sum_value", "avg_value", "max_value", "min_value"):
-                field = _validate_identifier(tc.field or "value")
+                field = _quote_ident(_validate_identifier(tc.field or "value"))
                 agg = tc.metric.split("_")[0].upper()
                 sql = f"SELECT COALESCE({agg}({field}), 0) AS val FROM {table}"
             else:
@@ -362,7 +375,7 @@ class TriggerEvaluator:
             return True
 
         try:
-            table = _validate_identifier(table)
+            table = _quote_ident(_validate_identifier(table))
             _validate_business_expression(expression)
             sql = f"SELECT NOT ({expression}) AS violated FROM {table} WHERE id = %s"
             rows = self._postgis.execute(sql, (str(fid),))
@@ -391,7 +404,7 @@ class TriggerEvaluator:
 
         table = tc.table or record.table_name
         try:
-            table = _validate_identifier(table)
+            table = _quote_ident(_validate_identifier(table))
             geom_param = "ST_GeomFromText(%s, 4326)"
             params: list[Any] = [record.new_geom_wkt]
             if tc.topo_check == "no_overlap":
@@ -405,12 +418,12 @@ class TriggerEvaluator:
             elif tc.topo_check == "must_be_inside":
                 if not tc.ref_table:
                     return False
-                ref_table = _validate_identifier(tc.ref_table)
+                ref_table = _quote_ident(_validate_identifier(tc.ref_table))
                 sql = f"SELECT NOT EXISTS (SELECT 1 FROM {ref_table} WHERE ST_Contains(geom, {geom_param})) AS violated"
             elif tc.topo_check == "must_not_overlap_with":
                 if not tc.ref_table:
                     return False
-                ref_table = _validate_identifier(tc.ref_table)
+                ref_table = _quote_ident(_validate_identifier(tc.ref_table))
                 sql = f"SELECT EXISTS (SELECT 1 FROM {ref_table} WHERE ST_Overlaps(geom, {geom_param})) AS violated"
             else:
                 return False
@@ -437,7 +450,7 @@ class TriggerEvaluator:
             return True
 
         try:
-            ref_table = _validate_identifier(sc.ref_table)
+            ref_table = _quote_ident(_validate_identifier(sc.ref_table))
             geom_param = "ST_GeomFromText(%s, 4326)"
             params: list[Any] = [record.new_geom_wkt]
             if sc.spatial_type == "min_distance":

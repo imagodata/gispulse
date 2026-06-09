@@ -303,8 +303,8 @@ class TestExecuteAfter:
         assert len(applied) == 1
         assert applied[0]["table"] == "zones"
         sql = conn.calls[0][0]
-        assert "UPDATE zones" in sql
-        assert "SET pois_count" in sql
+        assert 'UPDATE "zones"' in sql
+        assert 'SET "pois_count"' in sql
         assert "ST_Contains" in sql
 
     def test_sum_st_contains_uses_field_parameter(self):
@@ -320,7 +320,7 @@ class TestExecuteAfter:
         }]
         exec_.execute_after(ops, {}, geom_wkt="POINT(0 0)")
         sql = conn.calls[0][0]
-        assert "SUM(buildings.population)" in sql
+        assert 'SUM("buildings"."population")' in sql
 
     def test_string_agg_st_intersects(self):
         conn = FakeConn()

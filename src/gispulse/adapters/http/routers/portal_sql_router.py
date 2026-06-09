@@ -20,9 +20,14 @@ from gispulse.core.logging import get_logger
 
 log = get_logger(__name__)
 
-# SQL keywords forbidden in user SQL to prevent DDL/DCL via the SQL endpoint
+# SQL keywords forbidden in user SQL to prevent DDL/DCL/DML via the SQL endpoint.
+# These endpoints are read-only ("Only SELECT queries are allowed"), so data
+# mutation verbs (DELETE/INSERT/UPDATE/MERGE/UPSERT) are blocked alongside DDL/DCL.
+# Detection is token-based (\b boundaries) to avoid false positives on column or
+# table names that merely contain a keyword substring (e.g. "update_ts", "deleted").
 _SQL_DDL_BLOCKLIST = re.compile(
     r"\b(DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COPY|"
+    r"DELETE|INSERT|UPDATE|MERGE|UPSERT|"
     r"pg_read_file|pg_write_file|lo_import|lo_export|"
     r"pg_terminate_backend|pg_cancel_backend|"
     r"set\s+role|reset\s+role)\b",
@@ -190,7 +195,11 @@ def sql_export(
 
         rendered = _render_and_clean(body.sql, body.params)
 
+        # Defence in depth: even though the blocklist rejects DML/DDL, run the
+        # export query inside a READ ONLY transaction so PostGIS itself refuses
+        # any data mutation that slips past the keyword filter.
         with engine.connect() as conn:
+            conn.execute(text("SET TRANSACTION READ ONLY"))
             result = conn.execute(text(rendered))
             columns = list(result.keys())
             raw_rows = result.fetchall()

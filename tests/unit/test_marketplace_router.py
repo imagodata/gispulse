@@ -91,13 +91,51 @@ class TestSafeNameRegex:
 
 @pytest.fixture
 def client():
-    """Minimal test client with the marketplace router mounted."""
+    """Minimal test client with the marketplace router mounted.
+
+    No ``auth_repo`` is attached, so privileged install/uninstall endpoints
+    are fail-closed (HTTP 403) — see ``require_rbac_enabled``.
+    """
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
     app = FastAPI()
     app.include_router(router)
     return TestClient(app)
+
+
+@pytest.fixture
+def admin_client():
+    """Test client with RBAC configured and an admin user resolvable by key.
+
+    Wires a stub ``AuthRepository`` on ``app.state`` so ``require_rbac_enabled``
+    passes and ``require_role('admin')`` resolves an admin user from the
+    ``X-API-Key`` header. Privileged endpoints are reached with
+    ``headers={"X-API-Key": "admin-key"}``.
+    """
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from gispulse.persistence.auth_models import User
+
+    admin_user = User(id="u-admin", email="admin@example.com", role="admin", is_active=True)
+    api_key_row = SimpleNamespace(
+        user_id="u-admin", scopes=["admin"], expires_at=None
+    )
+
+    auth_repo = MagicMock()
+    auth_repo.get_api_key_by_hash.return_value = api_key_row
+    auth_repo.get_user.return_value = admin_user
+
+    app = FastAPI()
+    app.state.auth_repo = auth_repo
+    app.include_router(router)
+    return TestClient(app)
+
+
+_ADMIN_HEADERS = {"X-API-Key": "admin-key"}
 
 
 class TestListPlugins:
@@ -300,7 +338,7 @@ class TestCatalog:
 
 
 class TestInstallPluginById:
-    def test_install_by_id(self, client, tmp_path):
+    def test_install_by_id(self, admin_client, tmp_path):
         registry_data = {
             "plugins": [{"id": "gispulse-cap-ftth", "package": "gispulse-cap-ftth", "name": "FTTH"}]
         }
@@ -310,12 +348,14 @@ class TestInstallPluginById:
 
         with patch("gispulse.adapters.http.routers.marketplace_router._REGISTRY_PATH", fake_path):
             with patch("subprocess.run", return_value=fake_result):
-                resp = client.post("/marketplace/plugins/gispulse-cap-ftth/install")
+                resp = admin_client.post(
+                    "/marketplace/plugins/gispulse-cap-ftth/install", headers=_ADMIN_HEADERS
+                )
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
         assert resp.json()["package"] == "gispulse-cap-ftth"
 
-    def test_install_unknown_id(self, client, tmp_path):
+    def test_install_unknown_id(self, admin_client, tmp_path):
         registry_data = {"plugins": []}
         fake_path = tmp_path / "registry.json"
         fake_path.write_text(json.dumps(registry_data))
@@ -323,13 +363,22 @@ class TestInstallPluginById:
 
         with patch("gispulse.adapters.http.routers.marketplace_router._REGISTRY_PATH", fake_path):
             with patch("subprocess.run", return_value=fake_result):
-                resp = client.post("/marketplace/plugins/myplug/install")
+                resp = admin_client.post(
+                    "/marketplace/plugins/myplug/install", headers=_ADMIN_HEADERS
+                )
         assert resp.status_code == 200
         assert resp.json()["package"] == "gispulse-cap-myplug"
 
+    def test_install_by_id_fail_closed_without_rbac(self, client):
+        """Install is rejected (403) when RBAC is not configured."""
+        with patch("subprocess.run") as mock_run:
+            resp = client.post("/marketplace/plugins/gispulse-cap-ftth/install")
+        assert resp.status_code == 403
+        mock_run.assert_not_called()
+
 
 class TestUninstallPluginById:
-    def test_uninstall_by_id(self, client, tmp_path):
+    def test_uninstall_by_id(self, admin_client, tmp_path):
         registry_data = {
             "plugins": [{"id": "gispulse-cap-ftth", "package": "gispulse-cap-ftth", "name": "FTTH"}]
         }
@@ -339,55 +388,70 @@ class TestUninstallPluginById:
 
         with patch("gispulse.adapters.http.routers.marketplace_router._REGISTRY_PATH", fake_path):
             with patch("subprocess.run", return_value=fake_result):
-                resp = client.delete("/marketplace/plugins/gispulse-cap-ftth/uninstall")
+                resp = admin_client.delete(
+                    "/marketplace/plugins/gispulse-cap-ftth/uninstall", headers=_ADMIN_HEADERS
+                )
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
 
 
 class TestInstallPlugin:
-    """Install requires admin role.
+    """Install requires admin role and a configured RBAC backend.
 
-    In our minimal test app the require_role dependency is active but no
-    auth repo is attached, so in legacy/dev mode the check is a no-op
-    (returns None). We test the happy path and the validation.
+    When no auth repo is attached (dev/legacy mode), ``require_role('admin')``
+    is a no-op, so ``require_rbac_enabled`` fails the request closed (403).
+    The happy-path tests use ``admin_client`` which wires a stub
+    AuthRepository resolving an admin user from the API key.
     """
 
-    def test_install_success(self, client):
+    def test_install_fail_closed_without_rbac(self, client):
+        """Without RBAC configured, install is rejected with 403 and pip never runs."""
+        with patch("subprocess.run") as mock_run:
+            resp = client.post("/marketplace/install", json={"name": "ftth"})
+        assert resp.status_code == 403
+        assert "RBAC" in resp.json()["detail"]
+        mock_run.assert_not_called()
+
+    def test_install_success(self, admin_client):
         fake_result = MagicMock(returncode=0, stderr="", stdout="ok")
         with patch("subprocess.run", return_value=fake_result):
-            resp = client.post(
+            resp = admin_client.post(
                 "/marketplace/install",
                 json={"name": "ftth"},
+                headers=_ADMIN_HEADERS,
             )
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True
         assert data["package"] == "gispulse-cap-ftth"
 
-    def test_install_failure(self, client):
+    def test_install_failure(self, admin_client):
         fake_result = MagicMock(returncode=1, stderr="not found", stdout="")
         with patch("subprocess.run", return_value=fake_result):
-            resp = client.post(
+            resp = admin_client.post(
                 "/marketplace/install",
                 json={"name": "ftth"},
+                headers=_ADMIN_HEADERS,
             )
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is False
 
-    def test_install_invalid_name(self, client):
-        resp = client.post(
+    def test_install_invalid_name(self, admin_client):
+        resp = admin_client.post(
             "/marketplace/install",
             json={"name": "foo;rm -rf /"},
+            headers=_ADMIN_HEADERS,
         )
         assert resp.status_code == 400
 
-    def test_install_with_upgrade(self, client):
+    def test_install_with_upgrade(self, admin_client):
         fake_result = MagicMock(returncode=0, stderr="", stdout="ok")
         with patch("subprocess.run", return_value=fake_result) as mock_run:
-            resp = client.post(
+            resp = admin_client.post(
                 "/marketplace/install",
                 json={"name": "ftth", "upgrade": True},
+                headers=_ADMIN_HEADERS,
             )
         assert resp.status_code == 200
         # Verify --upgrade was passed
@@ -396,19 +460,28 @@ class TestInstallPlugin:
 
 
 class TestUninstallPlugin:
-    def test_uninstall_success(self, client):
+    def test_uninstall_success(self, admin_client):
         fake_result = MagicMock(returncode=0, stderr="", stdout="ok")
         with patch("subprocess.run", return_value=fake_result):
-            resp = client.post(
+            resp = admin_client.post(
                 "/marketplace/uninstall",
                 json={"name": "ftth"},
+                headers=_ADMIN_HEADERS,
             )
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
 
-    def test_uninstall_invalid_name(self, client):
-        resp = client.post(
+    def test_uninstall_invalid_name(self, admin_client):
+        resp = admin_client.post(
             "/marketplace/uninstall",
             json={"name": "../../etc/passwd"},
+            headers=_ADMIN_HEADERS,
         )
         assert resp.status_code == 400
+
+    def test_uninstall_fail_closed_without_rbac(self, client):
+        """Without RBAC configured, uninstall is rejected with 403."""
+        with patch("subprocess.run") as mock_run:
+            resp = client.post("/marketplace/uninstall", json={"name": "ftth"})
+        assert resp.status_code == 403
+        mock_run.assert_not_called()
