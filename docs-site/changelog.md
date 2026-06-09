@@ -13,6 +13,19 @@ La source de vérité de ce fichier est [`CHANGELOG.md`](https://github.com/imag
 
 ---
 
+## [2.2.3] — 2026-06-09
+
+### Ajouté
+
+- **Tiling PMTiles (`gispulse.tiling.write_pmtiles`).** Writer GeoParquet → PMTiles statiques via DuckDB `ST_AsMVT`, avec le nouvel extra `tiling` (`pmtiles`, `pyarrow`). Porte la dernière capability de la branche `milou` dans la mainline.
+
+### Corrigé
+
+- **Corruption mémoire sur volume de lignes.** L'encodage faisait un appel `ST_AsMVT` par tuile de couverture sur une même connexion DuckDB ; au-delà de quelques centaines de features lignes, l'extension spatiale corrompait la mémoire → segfault non-déterministe ou `ST_AsMVTGeom: tile width and height must be positive`. Réécrit en une seule requête groupée (jointure spatiale features × tuiles → `GROUP BY` tuile). Robuste et bien plus rapide.
+- **Types de propriété MVT non supportés.** Une colonne `DATE`/`TIMESTAMP` (ou autre type non numérique) faisait échouer le tiling (`ST_AsMVT` n'accepte que VARCHAR/FLOAT/DOUBLE/INTEGER/BIGINT/BOOLEAN). Les propriétés sont désormais castées (entiers larges → BIGINT, décimaux → DOUBLE, reste → VARCHAR).
+
+---
+
 ## [2.2.2] — 2026-06-07
 
 ### Modifié

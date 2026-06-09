@@ -333,7 +333,7 @@ def _materialize_features(
 ) -> int:
     _cleanup_temp_relation(session)
     properties = [column for column in columns if column.name != geometry.name]
-    select_properties = ", ".join(_quote_identifier(column.name) for column in properties)
+    select_properties = ", ".join(_property_select_expr(column) for column in properties)
     if select_properties:
         select_properties += ", "
     geom_expr = _geometry_expression(geometry)
@@ -354,6 +354,33 @@ def _materialize_features(
         f"SELECT COUNT(*) FROM {_quote_identifier(_TEMP_FEATURES)}"
     ).fetchone()
     return int(row[0]) if row else 0
+
+
+# Types de propriete encodables tels quels par ``ST_AsMVT``.
+_MVT_DIRECT_TYPES = frozenset({"VARCHAR", "FLOAT", "DOUBLE", "INTEGER", "BIGINT", "BOOLEAN"})
+_MVT_INTEGER_TYPES = frozenset(
+    {"TINYINT", "SMALLINT", "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "HUGEINT", "UHUGEINT"}
+)
+_MVT_DOUBLE_TYPES = frozenset({"DECIMAL", "NUMERIC", "REAL"})
+
+
+def _property_select_expr(column: _Column) -> str:
+    """Expression SELECT d'une propriete, castee vers un type encodable MVT.
+
+    ``ST_AsMVT`` n'accepte que VARCHAR / FLOAT / DOUBLE / INTEGER / BIGINT / BOOLEAN.
+    Les autres types (DATE, TIMESTAMP, UUID, listes, …) sont caste : les entiers
+    elargis vers BIGINT, les decimaux vers DOUBLE, le reste vers VARCHAR. Sans cela
+    une colonne date/timestamp fait echouer l'encodage de la tuile.
+    """
+    identifier = _quote_identifier(column.name)
+    base = column.type_name.upper().split("(", 1)[0].strip()
+    if base in _MVT_DIRECT_TYPES:
+        return identifier
+    if base in _MVT_INTEGER_TYPES:
+        return f"CAST({identifier} AS BIGINT) AS {identifier}"
+    if base in _MVT_DOUBLE_TYPES:
+        return f"CAST({identifier} AS DOUBLE) AS {identifier}"
+    return f"CAST({identifier} AS VARCHAR) AS {identifier}"
 
 
 def _cleanup_temp_relation(session: DuckDBSession) -> None:
@@ -458,6 +485,9 @@ def _lonlat_to_tile(lon: float, lat: float, z: int) -> tuple[int, int]:
     return (max(0, min(n - 1, x)), max(0, min(n - 1, y)))
 
 
+_TEMP_TILES = "__gispulse_pmtiles_tiles"
+
+
 def _write_archive(
     session: DuckDBSession,
     out_path: Path,
@@ -470,35 +500,90 @@ def _write_archive(
     extent: int,
     buffer: int,
 ) -> int:
-    from pmtiles.tile import Compression, TileType
+    from pmtiles.tile import Compression, TileType, zxy_to_tileid
     from pmtiles.writer import Writer
 
-    tile_count = 0
+    # Encodage MVT en UNE seule requete groupee (jointure spatiale features x tuiles
+    # -> ST_AsMVTGeom -> GROUP BY tuile -> ST_AsMVT) au lieu d'un appel ST_AsMVT par
+    # tuile. La boucle par tuile (N appels successifs sur la meme connexion DuckDB)
+    # corrompt la memoire de l'extension spatiale au-dela de quelques centaines de
+    # features lignes (segfault / "tile width and height must be positive" non
+    # deterministe). La forme groupee evite cette accumulation et est nettement plus
+    # rapide.
+    geom_expr = "features.__geom_3857"
+    if simplify_tolerance is not None and simplify_tolerance > 0:
+        geom_expr = f"ST_SimplifyPreserveTopology({geom_expr}, {float(simplify_tolerance)})"
+
+    tiles_table = _quote_identifier(_TEMP_TILES)
+    session.conn.execute(f"DROP TABLE IF EXISTS {tiles_table}")
+    session.conn.execute(
+        f"CREATE TEMP TABLE {tiles_table} "
+        "(z INTEGER, x INTEGER, y INTEGER, "
+        "xmin DOUBLE, ymin DOUBLE, xmax DOUBLE, ymax DOUBLE)"
+    )
+    tile_rows = []
+    for _tile_id, z, x, y in tile_coords:
+        xmin, ymin, xmax, ymax = _tile_bounds_3857(z, x, y)
+        tile_rows.append((z, x, y, xmin, ymin, xmax, ymax))
+    if not tile_rows:
+        return 0
+    session.conn.executemany(f"INSERT INTO {tiles_table} VALUES (?, ?, ?, ?, ?, ?, ?)", tile_rows)
+
+    box_expr = "ST_MakeBox2D(ST_Point(tiles.xmin, tiles.ymin), ST_Point(tiles.xmax, tiles.ymax))"
+    struct_fields = ", ".join(
+        f"{_quote_identifier(name)}: {_quote_identifier(name)}" for name in field_types
+    )
+    feature_struct = "{" + (struct_fields + ", " if struct_fields else "") + "geom: geom}"
+
+    sql = f"""
+        WITH mvtgeom AS (
+            SELECT
+                tiles.z AS __z,
+                tiles.x AS __x,
+                tiles.y AS __y,
+                ST_AsMVTGeom(
+                    {geom_expr},
+                    {box_expr},
+                    {int(extent)},
+                    {int(buffer)},
+                    true
+                ) AS geom,
+                features.* EXCLUDE (__geom_3857, __geom_4326)
+            FROM {tiles_table} AS tiles
+            JOIN {_quote_identifier(_TEMP_FEATURES)} AS features
+              ON ST_Intersects(features.__geom_3857, {box_expr})
+        )
+        SELECT
+            __z, __x, __y,
+            ST_AsMVT({feature_struct}, {_sql_literal(layer)}, {int(extent)}, 'geom') AS tile
+        FROM mvtgeom
+        WHERE geom IS NOT NULL
+        GROUP BY __z, __x, __y
+    """
+    result = session.conn.execute(sql).fetchall()
+    session.conn.execute(f"DROP TABLE IF EXISTS {tiles_table}")
+
+    encoded: list[tuple[int, bytes]] = []
+    for z, x, y, tile in result:
+        if tile is None:
+            continue
+        data = bytes(tile)
+        if data:
+            encoded.append((zxy_to_tileid(int(z), int(x), int(y)), data))
+    if not encoded:
+        return 0
+    encoded.sort(key=lambda item: item[0])
+
     with out_path.open("wb") as fh:
         writer = Writer(fh)
-        for tile_id, z, x, y in tile_coords:
-            tile = _mvt_tile(
-                session,
-                z,
-                x,
-                y,
-                layer=layer,
-                simplify_tolerance=simplify_tolerance,
-                extent=extent,
-                buffer=buffer,
-            )
-            if not tile:
-                continue
-            writer.write_tile(tile_id, tile)
-            tile_count += 1
-        if tile_count == 0:
-            return 0
+        for tile_id, data in encoded:
+            writer.write_tile(tile_id, data)
         with _deterministic_gzip():
             writer.finalize(
                 _pmtiles_header(bounds_4326, Compression.NONE, TileType.MVT),
                 _pmtiles_metadata(layer, bounds_4326, field_types),
             )
-    return tile_count
+    return len(encoded)
 
 
 def _mvt_tile(

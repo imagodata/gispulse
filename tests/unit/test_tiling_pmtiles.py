@@ -118,3 +118,58 @@ def test_coverage_spans_all_features_not_just_the_first(tmp_path: Path) -> None:
     written = {zxy for zxy, _data in tiles}
     expected = {(8, 129, 88), (8, 131, 91)}
     assert expected.issubset(written), f"couverture incomplete: {sorted(written)}"
+
+
+def _grid_lines(n: int) -> list:
+    """``n`` LineStrings reparties sur une grille (densite multi-tuiles)."""
+    from shapely.geometry import LineString
+
+    lines = []
+    for i in range(n):
+        x = 2.5 + (i % 50) * 0.06
+        y = 49.5 + (i // 50) * 0.04
+        lines.append(LineString([(x, y), (x + 0.05, y + 0.03)]))
+    return lines
+
+
+def test_write_pmtiles_handles_many_line_features(tmp_path: Path) -> None:
+    """Regression : un volume de lignes ne doit plus corrompre l'encodeur MVT.
+
+    La forme « un appel ST_AsMVT par tuile » segfaultait (corruption memoire de
+    l'extension spatiale DuckDB) au-dela de quelques centaines de lignes. La forme
+    groupee (une requete, GROUP BY tuile) doit produire une archive valide.
+    """
+    write_pmtiles = import_module("gispulse.tiling").write_pmtiles
+    path = tmp_path / "lines.parquet"
+    gpd.GeoDataFrame(
+        {"id": list(range(600))},
+        geometry=_grid_lines(600),
+        crs="EPSG:4326",
+    ).to_parquet(path)
+
+    out = tmp_path / "lines.pmtiles"
+    report = write_pmtiles(path, out, layer="lines", min_zoom=0, max_zoom=10)
+    assert report.rows_written > 0
+    _, _, tiles = _read_pmtiles(out)
+    assert len(tiles) > 0
+
+
+def test_write_pmtiles_coerces_unsupported_property_types(tmp_path: Path) -> None:
+    """Regression : une colonne DATE/timestamp ne doit pas casser l'encodage.
+
+    ``ST_AsMVT`` n'accepte que VARCHAR/FLOAT/DOUBLE/INTEGER/BIGINT/BOOLEAN ; les
+    autres types doivent etre castes (ici DATE -> VARCHAR) au lieu de lever.
+    """
+    import datetime as _dt
+
+    write_pmtiles = import_module("gispulse.tiling").write_pmtiles
+    path = tmp_path / "dated.parquet"
+    gpd.GeoDataFrame(
+        {"id": [1, 2], "target_date": [_dt.date(2030, 7, 1), _dt.date(2031, 1, 15)]},
+        geometry=[Point(4.35, 50.85), Point(4.40, 50.80)],
+        crs="EPSG:4326",
+    ).to_parquet(path)
+
+    out = tmp_path / "dated.pmtiles"
+    report = write_pmtiles(path, out, layer="dated", min_zoom=0, max_zoom=10)
+    assert report.rows_written > 0
