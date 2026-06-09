@@ -2,8 +2,8 @@
 
 Covers the published contract consumed by downstream callers (e.g. MILOU's
 ``build_site_network_candidates``): stable ``edge_id``, along-line ``measure``,
-perpendicular ``offset_distance`` and a ``snapped`` flag, with the nearest line
-always resolved and input columns preserved.
+perpendicular ``offset_distance`` and a ``snapped`` flag, with deterministic
+candidate ranks and input columns preserved.
 """
 
 from __future__ import annotations
@@ -50,12 +50,103 @@ def test_basic_snap_fields(lines):
     out = _run(pts, lines)
     row = out.iloc[0]
     assert bool(row["snapped"]) is True
-    assert row["edge_id"] == "E1"          # nearest line is y=0
+    assert row["edge_id"] == "E1"  # nearest line is y=0
+    assert row["rank"] == 1
     assert row["measure"] == pytest.approx(30.0)
-    assert 0.0 <= row["measure"] <= 100.0   # measure within [0, line length]
+    assert 0.0 <= row["measure"] <= 100.0  # measure within [0, line length]
     assert row["offset_distance"] == pytest.approx(5.0)
     # geometry is the projected point on the line
     assert row.geometry.distance(Point(30, 0)) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_k_one_preserves_single_best_match(lines):
+    pts = gpd.GeoDataFrame(geometry=[Point(30, 45)], crs="EPSG:3857")
+
+    out = _run(pts, lines, ref_id_col="eid", k=1)
+
+    assert len(out) == 1
+    assert out.iloc[0]["edge_id"] == "E2"
+    assert out.iloc[0]["rank"] == 1
+    assert out.iloc[0]["offset_distance"] == pytest.approx(5.0)
+
+
+def test_top_k_returns_candidates_ranked_by_offset(lines):
+    pts = gpd.GeoDataFrame(geometry=[Point(30, 20)], crs="EPSG:3857")
+
+    out = _run(pts, lines, ref_id_col="eid", k=3)
+
+    assert len(out) == 2
+    assert list(out["edge_id"]) == ["E1", "E2"]
+    assert list(out["rank"]) == [1, 2]
+    assert list(out["offset_distance"]) == pytest.approx([20.0, 30.0])
+
+
+def test_top_k_is_bounded_by_number_of_edges(lines):
+    pts = gpd.GeoDataFrame(geometry=[Point(30, 20)], crs="EPSG:3857")
+
+    out = _run(pts, lines, ref_id_col="eid", k=5)
+
+    assert len(out) == 2
+    assert list(out["rank"]) == [1, 2]
+
+
+def test_top_k_respects_max_distance(lines):
+    pts = gpd.GeoDataFrame(geometry=[Point(30, 20)], crs="EPSG:3857")
+
+    out = _run(pts, lines, ref_id_col="eid", k=3, max_distance_m=25.0)
+
+    assert len(out) == 1
+    assert out.iloc[0]["edge_id"] == "E1"
+    assert out.iloc[0]["rank"] == 1
+    assert out.iloc[0]["offset_distance"] == pytest.approx(20.0)
+
+
+def test_top_k_orphan_keeps_single_unsnapped_row(lines):
+    pts = gpd.GeoDataFrame(geometry=[Point(30, 20)], crs="EPSG:3857")
+
+    out = _run(pts, lines, ref_id_col="eid", k=3, max_distance_m=10.0)
+
+    assert len(out) == 1
+    row = out.iloc[0]
+    assert not row["snapped"]
+    assert pd.isna(row["edge_id"])
+    assert pd.isna(row["measure"])
+    assert row["rank"] == 1
+    assert row["offset_distance"] == pytest.approx(20.0)
+    assert row.geometry.equals(Point(30, 20))
+
+
+def test_k_must_be_positive(lines):
+    pts = gpd.GeoDataFrame(geometry=[Point(30, 20)], crs="EPSG:3857")
+
+    with pytest.raises(ValueError, match="k must be >= 1"):
+        _run(pts, lines, ref_id_col="eid", k=0)
+
+
+def test_rank_column_can_be_customized(lines):
+    pts = gpd.GeoDataFrame(geometry=[Point(30, 20)], crs="EPSG:3857")
+
+    out = _run(pts, lines, ref_id_col="eid", k=2, rank_col="candidate_rank")
+
+    assert "candidate_rank" in out.columns
+    assert "rank" not in out.columns
+    assert list(out["candidate_rank"]) == [1, 2]
+
+
+def test_schema_exposes_top_k_parameters():
+    schema = SnapPointsToLinesCapability().get_schema()
+
+    assert schema["properties"]["k"] == {
+        "type": "integer",
+        "default": 1,
+        "minimum": 1,
+        "description": "Number of candidate lines to keep per input point.",
+    }
+    assert schema["properties"]["rank_col"] == {
+        "type": "string",
+        "default": "rank",
+        "description": "Output column for candidate rank, nearest first.",
+    }
 
 
 # --- DoD #4 : nearest of several wins; ties broken deterministically -------
@@ -71,7 +162,7 @@ def test_equidistant_tie_breaks_on_smallest_edge_id():
     lines = gpd.GeoDataFrame(
         {"eid": ["B", "A"]},  # deliberately not pre-sorted
         geometry=[
-            LineString([(0, 10), (100, 10)]),    # 10 m above
+            LineString([(0, 10), (100, 10)]),  # 10 m above
             LineString([(0, -10), (100, -10)]),  # 10 m below
         ],
         crs="EPSG:3857",
@@ -81,8 +172,24 @@ def test_equidistant_tie_breaks_on_smallest_edge_id():
     assert out.iloc[0]["offset_distance"] == pytest.approx(10.0)
     # ex aequo -> smallest edge_id ("A") wins, regardless of row order
     assert out.iloc[0]["edge_id"] == "A"
+    assert out.iloc[0]["rank"] == 1
     # ... and it is stable across runs
     assert _run(pts, lines).iloc[0]["edge_id"] == "A"
+
+
+def test_top_k_tie_breaks_across_more_than_tie_sample_size():
+    ids = [chr(ord("Z") - i) for i in range(20)]
+    lines = gpd.GeoDataFrame(
+        {"eid": ids},
+        geometry=[LineString([(0, 10), (100, 10)]) for _ in ids],
+        crs="EPSG:3857",
+    )
+    pts = gpd.GeoDataFrame(geometry=[Point(50, 0)], crs="EPSG:3857")
+
+    out = _run(pts, lines, k=5)
+
+    assert list(out["edge_id"]) == sorted(ids)[:5]
+    assert list(out["rank"]) == [1, 2, 3, 4, 5]
 
 
 # --- DoD #2 : beyond max_distance_m -> unsnapped (MILOU's consumed contract)
@@ -97,8 +204,9 @@ def test_max_distance_leaves_unsnapped(lines):
     assert not row["snapped"]
     assert pd.isna(row["edge_id"])
     assert pd.isna(row["measure"])
+    assert row["rank"] == 1
     assert row["offset_distance"] == pytest.approx(20.0)  # true nearest distance
-    assert row.geometry.equals(Point(30, 20))             # original point kept
+    assert row.geometry.equals(Point(30, 20))  # original point kept
 
 
 def test_within_max_distance_snaps(lines):
@@ -125,9 +233,7 @@ def test_missing_ref_id_col_raises(lines):
     with pytest.raises(ValueError, match="ref_id_col"):
         SnapPointsToLinesCapability().execute(pts, ref_gdf=lines)
     with pytest.raises(ValueError, match="ref_id_col"):
-        SnapPointsToLinesCapability().execute(
-            pts, ref_gdf=lines, ref_id_col="does_not_exist"
-        )
+        SnapPointsToLinesCapability().execute(pts, ref_gdf=lines, ref_id_col="does_not_exist")
 
 
 # --- DoD #5 : input columns of gdf survive intact -------------------------
@@ -141,7 +247,7 @@ def test_input_columns_preserved(lines):
     assert out.iloc[0]["site_id"] == 42
     assert out.iloc[0]["label"] == "alpha"
     # and the new columns coexist
-    assert {"edge_id", "measure", "offset_distance", "snapped"} <= set(out.columns)
+    assert {"edge_id", "measure", "offset_distance", "snapped", "rank"} <= set(out.columns)
 
 
 def test_empty_point_geometry(lines):
@@ -151,6 +257,7 @@ def test_empty_point_geometry(lines):
     # no nearest line for a null geometry: edge_id is null (None or NaN
     # depending on the pandas version's column upcasting).
     assert pd.isna(out.iloc[0]["edge_id"])
+    assert out.iloc[0]["rank"] == 1
     assert out.iloc[1]["snapped"]
 
 
@@ -159,18 +266,26 @@ def test_reprojects_angular(lines):
     pts = gpd.GeoDataFrame(geometry=[Point(0.0003, 0.00004)], crs="EPSG:4326")
     lines_ll = lines.to_crs("EPSG:4326")
     out = _run(pts, lines_ll, crs_meters="EPSG:3857")
-    assert str(out.crs).endswith("4326")        # back to the input CRS
-    assert out.iloc[0]["measure"] > 0           # measured in meters, not degrees
+    assert str(out.crs).endswith("4326")  # back to the input CRS
+    assert out.iloc[0]["measure"] > 0  # measured in meters, not degrees
     assert out.iloc[0]["offset_distance"] > 0
 
 
 def test_registered_via_apply(lines):
     pts = gpd.GeoDataFrame(geometry=[Point(30, 5)], crs="EPSG:3857")
-    out = gispulse.apply(
-        "snap_points_to_lines", pts, ref_gdf=lines, ref_id_col="eid"
-    )
+    out = gispulse.apply("snap_points_to_lines", pts, ref_gdf=lines, ref_id_col="eid")
     assert "edge_id" in out.columns
     assert out.iloc[0]["edge_id"] == "E1"
+
+
+def test_top_k_registered_via_apply(lines):
+    pts = gpd.GeoDataFrame(geometry=[Point(30, 20)], crs="EPSG:3857")
+
+    out = gispulse.apply("snap_points_to_lines", pts, ref_gdf=lines, ref_id_col="eid", k=2)
+
+    assert len(out) == 2
+    assert list(out["edge_id"]) == ["E1", "E2"]
+    assert list(out["rank"]) == [1, 2]
 
 
 # --- DoD #8 : large input does not explode quadratically ------------------
