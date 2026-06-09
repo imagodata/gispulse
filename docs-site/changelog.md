@@ -18,6 +18,7 @@ La source de vérité de ce fichier est [`CHANGELOG.md`](https://github.com/imag
 ### Ajouté
 
 - **Tiling PMTiles (`gispulse.tiling.write_pmtiles`).** Writer GeoParquet → PMTiles statiques via DuckDB `ST_AsMVT`, avec le nouvel extra `tiling` (`pmtiles`, `pyarrow`). Porte la dernière capability de la branche `milou` dans la mainline.
+- **VectorFileFetcher / `AccessProtocol.LOCAL_FILE`.** Le roster des protocoles cœur sait désormais lire des fichiers vecteur locaux (KML/KMZ, GeoPackage, GeoJSON, Shapefile, FlatGeobuf, ...) via `gispulse.persistence.io.read_vector()` et retourne un `SourceResult` avec le GeoDataFrame matérialisé et son CRS. Cela préserve l'ingestion KMZ locale de type MILOU sur le package officiel `imagodata/gispulse`.
 
 ### Corrigé
 

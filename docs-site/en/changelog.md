@@ -18,6 +18,7 @@ The authoritative version of this file lives at [`CHANGELOG.md`](https://github.
 ### Added
 
 - **PMTiles tiling (`gispulse.tiling.write_pmtiles`).** GeoParquet → static PMTiles writer backed by DuckDB `ST_AsMVT`, with the new `tiling` extra (`pmtiles`, `pyarrow`). Ports the last `milou`-branch capability into mainline.
+- **VectorFileFetcher / `AccessProtocol.LOCAL_FILE`.** The core protocol roster can now read local vector files (KML/KMZ, GeoPackage, GeoJSON, Shapefile, FlatGeobuf, ...) through `gispulse.persistence.io.read_vector()` and returns a `SourceResult` carrying the materialized GeoDataFrame and CRS. This keeps MILOU-style local KMZ ingestion on the official `imagodata/gispulse` package.
 
 ### Fixed
 
