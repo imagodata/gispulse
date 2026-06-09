@@ -98,22 +98,6 @@ def test_reference_scan_zip_csv_escapes_archive_member_sql_literal() -> None:
     )
 
 
-def test_reference_scan_zip_csv_escapes_archive_member_sql_literal() -> None:
-    result = TableFileFetcher().virtual_table(
-        _access(
-            "https://host.example.org/iris_csv.zip",
-            archive_format="zip",
-            table_format="csv",
-            archive_member="tables/l'iris.csv",
-        )
-    )
-
-    assert result.metadata[DUCKDB_SCAN_KEY] == (
-        "read_csv_auto("
-        "'/vsizip//vsicurl/https://host.example.org/iris_csv.zip/tables/l''iris.csv')"
-    )
-
-
 def test_materialize_streams_remote_table_file_to_disk(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
