@@ -10,6 +10,7 @@ adapters registered by the core roster are:
 * ``stac``           (A5 #231) — ``AccessProtocol.STAC``
 * ``http_file``      (A6 #232) — ``AccessProtocol.DOWNLOAD``
 * ``table_file``     — ``AccessProtocol.TABLE_FILE``
+* ``vector_file``    — ``AccessProtocol.LOCAL_FILE``
 
 Calling :func:`register_core_fetchers` is always safe: adapters are built
 only when the roster function runs, not at module import time.
@@ -19,7 +20,12 @@ from __future__ import annotations
 
 from gispulse.core.fetchers.base import DUCKDB_SCAN_KEY, LazyFetcher
 from gispulse.core.logging import get_logger
-from gispulse.core.sources import PROTOCOLS, Fetcher, ProtocolRegistry
+from gispulse.core.sources import (
+    PROTOCOLS,
+    Fetcher,
+    ProtocolNotSupported,
+    ProtocolRegistry,
+)
 
 log = get_logger(__name__)
 
@@ -42,6 +48,7 @@ def _core_fetchers() -> list[Fetcher]:
     from .ogc_features import OGCFeaturesFetcher  # A4 #230 — OGC_FEATURES
     from .stac import STACFetcher  # A5 #231 — STAC
     from .table_file import TableFileFetcher
+    from .vector_file import VectorFileFetcher  # LOCAL_FILE
 
     return [
         GeoParquetS3Fetcher(),
@@ -50,6 +57,7 @@ def _core_fetchers() -> list[Fetcher]:
         STACFetcher(),
         HttpFileFetcher(),
         TableFileFetcher(),
+        VectorFileFetcher(),
     ]
 
 
@@ -71,6 +79,12 @@ def register_core_fetchers(
     target = registry if registry is not None else PROTOCOLS
     count = 0
     for fetcher in _core_fetchers():
+        if not override:
+            try:
+                target.get_fetcher(fetcher.protocol)
+                continue
+            except ProtocolNotSupported:
+                pass
         target.register(fetcher, override=override)
         count += 1
     log.info("core_fetchers_registered", count=count)

@@ -161,22 +161,29 @@ def test_guard_leaves_local_file_paths_alone() -> None:
 
 
 def test_register_core_fetchers_registers_the_full_roster() -> None:
-    # A3-A6 (#229-#232), table-file, plus the classic WFS adapter (#192)
+    # A3-A6 (#229-#232), table-file, local-file, plus the classic WFS adapter (#192)
     # populate the roster: every first-party protocol used by the catalogue.
     reg = ProtocolRegistry()
-    assert register_core_fetchers(reg) == 6
+    assert register_core_fetchers(reg) == 7
     for protocol in (
         AccessProtocol.REMOTE_TABLE,
         AccessProtocol.OGC_FEATURES,
         AccessProtocol.STAC,
         AccessProtocol.DOWNLOAD,
         AccessProtocol.TABLE_FILE,
+        AccessProtocol.LOCAL_FILE,
     ):
         assert isinstance(reg.get_fetcher(protocol), LazyFetcher)
 
     from gispulse.adapters.ogc.wfs_fetcher import WfsFetcher
 
     assert isinstance(reg.get_fetcher(AccessProtocol.WFS), WfsFetcher)
+
+
+def test_register_core_fetchers_override_false_is_idempotent() -> None:
+    reg = ProtocolRegistry()
+    assert register_core_fetchers(reg, override=False) == 7
+    assert register_core_fetchers(reg, override=False) == 0
 
 
 def test_register_core_fetchers_resolves_wfs_for_declarative_source(
@@ -216,7 +223,7 @@ def test_register_core_fetchers_defaults_to_global_registry() -> None:
     saved_fetchers = dict(PROTOCOLS._fetchers)
     saved_writers = dict(PROTOCOLS._writers)
     try:
-        assert register_core_fetchers() == 6  # touches PROTOCOLS
+        assert register_core_fetchers() == 7  # touches PROTOCOLS
         assert isinstance(PROTOCOLS, ProtocolRegistry)
         assert isinstance(PROTOCOLS.get_fetcher(AccessProtocol.REMOTE_TABLE), LazyFetcher)
     finally:
