@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.3]
+
+### Added
+
+- **PMTiles tiling (`gispulse.tiling.write_pmtiles`).** GeoParquet → static
+  PMTiles writer backed by DuckDB `ST_AsMVT`, with the new `tiling` extra
+  (`pmtiles`, `pyarrow`). Ports the last `milou`-branch capability into mainline.
+
+### Fixed
+
+- **Line-volume memory corruption in tiling.** Tile encoding ran one `ST_AsMVT`
+  query per coverage tile on a single DuckDB connection; past a few hundred line
+  features the spatial extension corrupted memory → non-deterministic segfault or
+  `ST_AsMVTGeom: tile width and height must be positive`. Rewritten as a single
+  grouped query (features × tiles spatial join → `GROUP BY` tile). Robust and much
+  faster.
+- **Unsupported MVT property types.** A `DATE`/`TIMESTAMP` (or other non-numeric)
+  column made tiling fail (`ST_AsMVT` accepts only VARCHAR/FLOAT/DOUBLE/INTEGER/
+  BIGINT/BOOLEAN). Properties are now coerced (wide ints → BIGINT, decimals →
+  DOUBLE, everything else → VARCHAR).
+
 ## [2.2.2]
 
 ### Changed
