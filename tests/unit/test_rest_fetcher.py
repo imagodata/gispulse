@@ -40,15 +40,18 @@ def mock_get(monkeypatch: pytest.MonkeyPatch) -> list:
         calls.append({"url": url, "timeout": timeout})
         return _feature_collection(3)
 
-    monkeypatch.setattr(
-        "gispulse.adapters.rest.rest_fetcher._get_geojson", fake
-    )
+    monkeypatch.setattr("gispulse.adapters.rest.rest_fetcher._get_geojson", fake)
     return calls
 
 
 def _query_of(url: str) -> dict:
     """Return the parsed query string of ``url`` as a flat dict."""
     return {k: v[0] for k, v in parse_qs(urlsplit(url).query).items()}
+
+
+def _assert_url_not_forwarding_retry(url: str) -> None:
+    query = _query_of(url)
+    assert "retry" not in query
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +139,44 @@ def test_vendor_params_forwarded_verbatim(mock_get: list) -> None:
     assert mock_get[0]["timeout"] == 5.0
 
 
+def test_retry_transient_transport_error_before_geojson_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    from gispulse.adapters.rest import rest_fetcher
+
+    calls: list[dict[str, object]] = []
+    sleeps: list[float] = []
+
+    def fake(url: str, timeout: float) -> dict:
+        calls.append({"url": url, "timeout": timeout})
+        if len(calls) == 1:
+            raise httpx.ConnectTimeout("temporary blip")
+        return _feature_collection(1)
+
+    monkeypatch.setattr(rest_fetcher, "_get_geojson", fake)
+    monkeypatch.setattr(rest_fetcher, "_sleep", sleeps.append, raising=False)
+
+    access = AccessSpec(
+        protocol=AccessProtocol.REST_API,
+        endpoint="https://apicarto.example.org/api/cadastre/parcelle",
+        params={
+            "code_insee": "44109",
+            "timeout": 5,
+            "retry": {"max_attempts": 2, "backoff_seconds": 0.5},
+        },
+    )
+    result = RestGeoJsonFetcher().fetch(access)
+
+    assert result.payload is Payload.VECTOR
+    assert result.metadata["feature_count"] == 1
+    assert len(calls) == 2
+    assert {call["timeout"] for call in calls} == {5.0}
+    assert sleeps == [0.5]
+    _assert_url_not_forwarding_retry(str(calls[0]["url"]))
+
+
 def test_endpoint_with_existing_query_appends_with_ampersand(
     mock_get: list,
 ) -> None:
@@ -206,9 +247,7 @@ def test_rest_fetcher_self_registered_in_global_protocols() -> None:
     """Importing the module wired the fetcher into the shared registry."""
     from gispulse.core.sources import PROTOCOLS
 
-    assert isinstance(
-        PROTOCOLS.get_fetcher(AccessProtocol.REST_API), RestGeoJsonFetcher
-    )
+    assert isinstance(PROTOCOLS.get_fetcher(AccessProtocol.REST_API), RestGeoJsonFetcher)
 
 
 def test_dispatch_fetch_routes_to_rest_fetcher(mock_get: list) -> None:

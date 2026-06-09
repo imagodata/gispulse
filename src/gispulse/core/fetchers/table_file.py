@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
+from gispulse.core.fetchers._http_download import stream_http_to_file
 from gispulse.core.fetchers.base import LazyFetcher, resolve_s3_materialize_uri
 from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
@@ -108,9 +109,7 @@ class TableFileFetcher(LazyFetcher):
 
             select = self._reference_scan(access, extent)
             dest = s3_destination.replace("'", "''")
-            copy_sql = (
-                f"COPY (SELECT * FROM {select}) TO '{dest}' (FORMAT PARQUET)"
-            )
+            copy_sql = f"COPY (SELECT * FROM {select}) TO '{dest}' (FORMAT PARQUET)"
             with DuckDBSession() as session:
                 session.conn.execute(copy_sql)
             log.info("table_file_materialized", path=s3_destination)
@@ -135,8 +134,6 @@ class TableFileFetcher(LazyFetcher):
 
         import tempfile
 
-        import httpx
-
         local_path = access.params.get("local_path")
         if not local_path:
             suffix = "." + access.endpoint.split("?")[0].rsplit(".", 1)[-1]
@@ -144,11 +141,11 @@ class TableFileFetcher(LazyFetcher):
             handle.close()
             local_path = handle.name
 
-        with httpx.stream("GET", access.endpoint, follow_redirects=True) as resp:
-            resp.raise_for_status()
-            with open(local_path, "wb") as fh:
-                for chunk in resp.iter_bytes():
-                    fh.write(chunk)
+        stream_http_to_file(
+            access.endpoint,
+            local_path,
+            retry_log_event="table_file_download_retry",
+        )
         log.info("table_file_materialized", path=local_path)
         return SourceResult(
             payload=self.payload,

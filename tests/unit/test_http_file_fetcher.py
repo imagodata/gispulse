@@ -25,9 +25,7 @@ pytestmark = pytest.mark.usefixtures("offline_ssrf")
 
 
 def _access(endpoint: str, **params: object) -> AccessSpec:
-    return AccessSpec(
-        protocol=AccessProtocol.DOWNLOAD, endpoint=endpoint, params=params
-    )
+    return AccessSpec(protocol=AccessProtocol.DOWNLOAD, endpoint=endpoint, params=params)
 
 
 # -- contract ---------------------------------------------------------------
@@ -42,9 +40,7 @@ def test_protocol_and_payload() -> None:
 
 
 def test_reference_scan_geojson_via_vsicurl_st_read() -> None:
-    result = HttpFileFetcher().virtual_table(
-        _access("https://host.example.org/cities.geojson")
-    )
+    result = HttpFileFetcher().virtual_table(_access("https://host.example.org/cities.geojson"))
     assert result.metadata[DUCKDB_SCAN_KEY] == (
         "ST_Read('/vsicurl/https://host.example.org/cities.geojson')"
     )
@@ -75,19 +71,15 @@ def test_reference_scan_pushdown_bbox_for_spatial_file() -> None:
 
 def test_reference_scan_csv_builds_st_point_geometry() -> None:
     result = HttpFileFetcher().virtual_table(
-        _access(
-            "https://host.example.org/sites.csv", lat="lat", lon="lng"
-        )
+        _access("https://host.example.org/sites.csv", lat="lat", lon="lng")
     )
     scan = result.metadata[DUCKDB_SCAN_KEY]
-    assert 'read_csv_auto(' in scan
+    assert "read_csv_auto(" in scan
     assert 'ST_Point("lng", "lat") AS geometry' in scan
 
 
 def test_reference_scan_csv_default_lat_lon_columns() -> None:
-    result = HttpFileFetcher().virtual_table(
-        _access("https://host.example.org/sites.csv")
-    )
+    result = HttpFileFetcher().virtual_table(_access("https://host.example.org/sites.csv"))
     assert 'ST_Point("longitude", "latitude")' in result.metadata[DUCKDB_SCAN_KEY]
 
 
@@ -232,6 +224,4 @@ def test_fetch_materialize_builds_s3_uri_from_configured_bucket(
 @pytest.mark.parametrize("mode", [FetchMode.REFERENCE, FetchMode.MATERIALIZE])
 def test_fetch_rejects_private_address(mode: FetchMode) -> None:
     with pytest.raises(SSRFError):
-        HttpFileFetcher().fetch(
-            _access("http://127.0.0.1/data.geojson"), mode=mode
-        )
+        HttpFileFetcher().fetch(_access("http://127.0.0.1/data.geojson"), mode=mode)

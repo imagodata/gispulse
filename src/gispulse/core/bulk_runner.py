@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 from zipfile import ZipFile
 
+from gispulse.core.fetchers._http_download import stream_http_to_file
 from gispulse.core.bulk_ingest import (
     BULK_RAW_PREFIX,
     BULK_STAGE_PREFIX,
@@ -640,14 +641,10 @@ def _is_spatial_gzip_download(entry: SourceEntryRef, access: AccessSpec) -> bool
 def _download_to_path(endpoint: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     if endpoint.startswith(("http://", "https://")):
-        import httpx
-
-        with httpx.stream("GET", endpoint, follow_redirects=True) as resp:
-            resp.raise_for_status()
-            with dest.open("wb") as out:
-                for chunk in resp.iter_bytes():
-                    if chunk:
-                        out.write(chunk)
+        # Bulk archives can be 100s of MB; a single transient blip must not abort
+        # a national run. Reuse the shared streamed-download helper (timeout +
+        # bounded retries) instead of a one-shot httpx stream.
+        stream_http_to_file(endpoint, dest, retry_log_event="bulk_download_retry")
         return
     shutil.copyfile(Path(endpoint), dest)
 
