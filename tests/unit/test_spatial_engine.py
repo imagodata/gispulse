@@ -331,3 +331,53 @@ class TestTriggerManager:
         ]
         count = mgr.install_all(triggers)
         assert count == 1  # only t1 is DML + enabled
+
+    def _install_and_capture_sql(self, conditions: dict) -> str:
+        from gispulse.adapters.esb.trigger_manager import TriggerManager
+
+        mock_engine = MagicMock()
+        mgr = TriggerManager(engine=mock_engine)
+        trigger = Trigger(
+            name="t",
+            trigger_type=TriggerType.DML,
+            conditions=conditions,
+        )
+        mgr.install(trigger)
+        assert mock_engine.execute_sql.call_count == 1
+        return mock_engine.execute_sql.call_args[0][0]
+
+    def test_install_covers_delete_and_default_pk(self):
+        # #402: the trigger must fire on DELETE too, default PK is "id",
+        # and the function must survive a NULL NEW row (DELETE).
+        sql = self._install_and_capture_sql({"table": "parcelles", "schema": "public"})
+        assert "AFTER INSERT OR UPDATE OR DELETE" in sql
+        assert 'COALESCE(NEW."id"::text, OLD."id"::text, \'\')' in sql
+        assert "RETURN COALESCE(NEW, OLD)" in sql
+
+    def test_install_custom_pk(self):
+        # #402: PK column is configurable via conditions['pk'].
+        sql = self._install_and_capture_sql(
+            {"table": "lots", "schema": "public", "pk": "gid"}
+        )
+        assert 'COALESCE(NEW."gid"::text, OLD."gid"::text, \'\')' in sql
+        assert '"id"' not in sql.split("json_build_object")[1].split("timestamp")[0]
+
+    def test_install_composite_pk(self):
+        # #403/#402: composite key joins every column instead of the first.
+        sql = self._install_and_capture_sql(
+            {"table": "ods", "schema": "public", "pk": ["dept", "commune"]}
+        )
+        assert (
+            "concat_ws(',', NEW.\"dept\"::text, NEW.\"commune\"::text)" in sql
+        )
+        assert (
+            "concat_ws(',', OLD.\"dept\"::text, OLD.\"commune\"::text)" in sql
+        )
+
+    def test_install_rejects_unsafe_pk(self):
+        import pytest
+
+        with pytest.raises(ValueError):
+            self._install_and_capture_sql(
+                {"table": "t", "schema": "public", "pk": "id; DROP TABLE t"}
+            )
