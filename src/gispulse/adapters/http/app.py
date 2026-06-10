@@ -12,6 +12,7 @@ variable (comma-separated list of valid keys). Absent or empty = auth disabled
 
 from __future__ import annotations
 
+import hmac
 import inspect
 import os
 from contextlib import asynccontextmanager
@@ -770,7 +771,7 @@ def create_app(
         def metrics(request: Request) -> PlainTextResponse:
             if _metrics_token:
                 auth = request.headers.get("Authorization", "")
-                if auth != f"Bearer {_metrics_token}":
+                if not hmac.compare_digest(auth, f"Bearer {_metrics_token}"):
                     from fastapi.responses import JSONResponse
                     return JSONResponse(
                         status_code=401,
@@ -851,22 +852,24 @@ def create_app(
         app.include_router(relations_router, **write_protected)
         app.include_router(sessions_router, **protected)
         app.include_router(portal_router, **protected)
-        app.include_router(catalog_router)
-        app.include_router(filter_router)
+        app.include_router(catalog_router, **protected)
+        app.include_router(filter_router, **protected)
         app.include_router(schedules_router, **write_protected)
         app.include_router(pipelines_router, **write_protected)
         app.include_router(system_router, **protected)
         app.include_router(watchers_router, **read_protected)
 
-        # Marketplace (read endpoints open, install/uninstall admin-gated internally)
-        app.include_router(marketplace_router)
+        # Marketplace: require a valid API key. Read endpoints stay usable for
+        # any authenticated caller; install/uninstall are additionally fail-closed
+        # behind RBAC admin role inside the router.
+        app.include_router(marketplace_router, **protected)
 
         # Admin (RBAC) and Billing (Stripe) routers ship in the gispulse-enterprise
         # plugin and are mounted by the ExtensionHub block below via
         # ``gispulse.routers`` entry-points — no legacy try/except needed.
 
         from gispulse.adapters.http.routers.ogc_features_router import router as ogc_features_router
-        app.include_router(ogc_features_router)
+        app.include_router(ogc_features_router, **read_protected)
 
         if cfg.engine.backend == "postgis":
             from gispulse.adapters.http.routers.tiles_router import router as tiles_router

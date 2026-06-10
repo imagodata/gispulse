@@ -36,7 +36,7 @@ def _make_app(admin_keys: set[str] | None = None) -> FastAPI:
     def rule_validate(rid: str):
         return {"valid": True}
 
-    @app.post("/filter/apply")
+    @app.post("/api/filter/apply")
     def filter_apply():
         return {"ok": True}
 
@@ -77,7 +77,7 @@ def test_compute_only_post_allowed():
     client = TestClient(_make_app())
     assert client.post("/capabilities/sql-preview", json={"sql": "SELECT 1"}).status_code == 200
     assert client.post("/rules/abc/validate", json={}).status_code == 200
-    assert client.post("/filter/apply", json={}).status_code == 200
+    assert client.post("/api/filter/apply", json={}).status_code == 200
 
 
 def test_upload_post_blocked_because_persistent():

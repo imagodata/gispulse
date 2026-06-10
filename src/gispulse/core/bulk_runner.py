@@ -1267,7 +1267,7 @@ def _extract_zip_archive(archive_path: Path, extract_dir: Path) -> list[Path]:
     with ZipFile(archive_path) as archive:
         for info in archive.infolist():
             dest = (extract_dir / info.filename).resolve()
-            if not str(dest).startswith(str(root)):
+            if not dest.is_relative_to(root):
                 raise ValueError(f"unsafe archive member path: {info.filename!r}")
             if info.is_dir():
                 dest.mkdir(parents=True, exist_ok=True)
@@ -1279,13 +1279,22 @@ def _extract_zip_archive(archive_path: Path, extract_dir: Path) -> list[Path]:
     return extracted
 
 
+def _assert_member_within(name: str, root: Path) -> None:
+    dest = (root / name).resolve()
+    if not dest.is_relative_to(root):
+        raise ValueError(f"unsafe archive member path: {name!r}")
+
+
 def _extract_7z_archive(archive_path: Path, extract_dir: Path) -> None:
+    root = extract_dir.resolve()
     try:
         import py7zr  # type: ignore[import-not-found]
     except ImportError:
         py7zr = None
     if py7zr is not None:
         with py7zr.SevenZipFile(archive_path, mode="r") as archive:
+            for name in archive.getnames():
+                _assert_member_within(name, root)
             archive.extractall(path=extract_dir)
         return
 
@@ -1294,13 +1303,31 @@ def _extract_7z_archive(archive_path: Path, extract_dir: Path) -> None:
         None,
     )
     if binary is None:
-        raise RuntimeError("7z DOWNLOAD archives require py7zr or a local 7zz/7z/7za binary")
-    subprocess.run(
-        [binary, "x", str(archive_path), f"-o{extract_dir}", "-y"],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+        raise RuntimeError(
+            "7z DOWNLOAD archives require py7zr or a local 7zz/7z/7za binary"
+        )
+    # Extract into a temporary staging directory, validate every produced
+    # member stays under extract_dir, then move it into place. This prevents a
+    # malicious archive member (e.g. ``../../x``) from escaping extract_dir.
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=extract_dir) as staging:
+        staging_root = Path(staging).resolve()
+        subprocess.run(
+            [binary, "x", str(archive_path), f"-o{staging_root}", "-y"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        for member in sorted(staging_root.rglob("*")):
+            rel = member.relative_to(staging_root)
+            dest = (root / rel).resolve()
+            if not dest.is_relative_to(root):
+                raise ValueError(f"unsafe archive member path: {str(rel)!r}")
+            if member.is_dir():
+                dest.mkdir(parents=True, exist_ok=True)
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(member), str(dest))
 
 
 def _vector_members(extract_dir: Path, extracted: Iterable[Path]) -> list[Path]:

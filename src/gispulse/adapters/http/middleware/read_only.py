@@ -14,6 +14,7 @@ Health/metrics/options/preflight always pass through.
 
 from __future__ import annotations
 
+import hmac
 import re
 from typing import Iterable
 
@@ -35,7 +36,10 @@ _COMPUTE_ALLOWLIST: tuple[re.Pattern[str], ...] = tuple(
         r"^/pipelines/execute-steps$",
         r"^/rules/[^/]+/validate$",
         r"^/rules/from-node$",
-        r"^/filter/(apply|preview|validate|chain)$",
+        # The filter router is mounted under the ``/api`` prefix
+        # (``APIRouter(prefix="/api/filter")``), so the real compute-only
+        # routes are ``/api/filter/...`` — not ``/filter/...``.
+        r"^/api/filter/(apply|preview|validate|chain)$",
         r"^/triggers/[^/]+/evaluate$",
         r"^/scenarios/[^/]+/run-node$",
         r"^/projects/[^/]+/detect-relations$",
@@ -78,7 +82,17 @@ class ReadOnlyMiddleware(BaseHTTPMiddleware):
             auth = request.headers.get("Authorization", "")
             if auth.startswith("Bearer "):
                 provided = auth[7:].strip()
-        return bool(provided) and provided in self._admin_keys
+        if not provided:
+            return False
+        provided_bytes = provided.encode("utf-8")
+        # Constant-time comparison against every configured key. We do not
+        # short-circuit on the first match nor on length mismatch so the
+        # response time does not leak which (if any) key was hit.
+        matched = False
+        for key in self._admin_keys:
+            if hmac.compare_digest(provided_bytes, key.encode("utf-8")):
+                matched = True
+        return matched
 
     async def dispatch(self, request: Request, call_next):
         method = request.method.upper()
