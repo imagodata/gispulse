@@ -42,6 +42,7 @@ from gispulse.adapters.http.routers.portal_router import router as portal_router
 from gispulse.adapters.http.routers.projects_router import router as projects_router
 from gispulse.adapters.http.routers.rules_router import router as rules_router
 from gispulse.adapters.http.routers.runs_router import router as runs_router
+from gispulse.adapters.http.routers.saved_maps_router import router as saved_maps_router
 from gispulse.adapters.http.routers.scenarios_router import router as scenarios_router
 from gispulse.adapters.http.routers.sessions_router import router as sessions_router
 from gispulse.adapters.http.routers.schedules_router import router as schedules_router
@@ -56,7 +57,7 @@ from gispulse.adapters.http.routers.ws_router import router as ws_router
 from gispulse.adapters.http.schemas import CapabilityInfo, HealthResponse
 from gispulse.capabilities import registry
 from gispulse.core.logging import get_logger
-from gispulse.core.models import Dataset, Job, Project, Rule, Scenario, TableRelation, Trigger
+from gispulse.core.models import Dataset, Job, Project, Rule, SavedMap, Scenario, TableRelation, Trigger
 from gispulse.core.observability import MetricsCollector
 from gispulse.orchestration.runner import JobRunner
 from gispulse.persistence.engine_factory import create_spatial_engine
@@ -114,6 +115,7 @@ def _setup_repos(app: FastAPI, storage_mode: str, db_path: Path) -> None:
         app.state.scenario_repo = SQLiteRepository(Scenario, db_path=db_path)
         app.state.trigger_repo = SQLiteRepository(Trigger, db_path=db_path)
         app.state.project_repo = SQLiteRepository(Project, db_path=db_path)
+        app.state.saved_map_repo = SQLiteRepository(SavedMap, db_path=db_path)
         app.state.relation_repo = SQLiteRepository(TableRelation, db_path=db_path)
     else:
         app.state.rule_repo = InMemoryRepository()
@@ -122,6 +124,7 @@ def _setup_repos(app: FastAPI, storage_mode: str, db_path: Path) -> None:
         app.state.scenario_repo = InMemoryRepository()
         app.state.trigger_repo = InMemoryRepository()
         app.state.project_repo = InMemoryRepository()
+        app.state.saved_map_repo = InMemoryRepository()
         app.state.relation_repo = InMemoryRepository()
 
     # RBAC auth repository (opt-in via GISPULSE_RBAC=true)
@@ -879,6 +882,7 @@ def create_app(
         app.include_router(jobs_router)
         app.include_router(runs_router)
         app.include_router(scenarios_router)
+        app.include_router(saved_maps_router)
         app.include_router(capabilities_router)
         app.include_router(templates_router)
         app.include_router(marketplace_router)
@@ -919,6 +923,7 @@ def create_app(
         app.include_router(datasets_router, **protected)
         app.include_router(projects_router, **protected)
         app.include_router(scenarios_router, **protected)
+        app.include_router(saved_maps_router, **protected)
         app.include_router(triggers_router, **write_protected)
         app.include_router(relations_router, **write_protected)
         app.include_router(sessions_router, **protected)
