@@ -14,7 +14,7 @@ import json
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -31,6 +31,7 @@ from gispulse.core.bulk_ingest import (
 )
 from gispulse.core.config import settings
 from gispulse.core.fetchers import register_core_fetchers
+from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
     AccessProtocol,
     AccessSpec,
@@ -44,6 +45,8 @@ from gispulse.core.ssrf import guard_outbound_url
 from gispulse.persistence.storage import DatasetStorage, S3Storage
 
 __all__ = ["BulkIngestResult", "BulkIngestRunner"]
+
+log = get_logger(__name__)
 
 _VECTOR_SUFFIXES = (".gpkg", ".shp", ".geojson", ".json", ".fgb", ".gml")
 _SPATIAL_GZIP_ARCHIVE_FORMATS = {"geojson.gz", "json.gz"}
@@ -61,6 +64,7 @@ class BulkIngestResult:
     access: AccessSpec
     fetch_result: SourceResult
     manifest: dict[str, object]
+    skipped: bool = field(default=False)
 
 
 class BulkIngestRunner:
@@ -75,7 +79,30 @@ class BulkIngestRunner:
         key_prefix: str | None = None,
         write_table_raw: bool = False,
         temp_dir: str | Path | None = None,
+        skip_if_staged: bool = False,
     ) -> None:
+        """Initialise the runner.
+
+        Args:
+            skip_if_staged: When ``True``, check whether the stage object already
+                exists in S3 before fetching or uploading.  If it does, the entry
+                is returned as ``BulkIngestResult(skipped=True)`` without any
+                network or compute work.  Defaults to ``False`` (current behaviour
+                preserved).
+
+                **Failure semantics of the existence check**: depending on the
+                storage backend, a transient error during the check may surface
+                differently.  With the local or fake backends the exception
+                propagates and is caught by the runner, which logs
+                ``bulk_ingest.skip_check_failed`` and falls through to the
+                nominal path.  With the real S3 backend
+                (:class:`~gispulse.persistence.storage.S3Storage`), head-object
+                errors are caught internally and the method returns ``False``
+                instead, so the runner proceeds nominally without logging a
+                warning.  In both cases the skip optimisation is never a cause
+                of failure or of a false-positive skip — the safe direction is
+                always to run the full fetch/upload.
+        """
         if registry is None:
             registry = ProtocolRegistry()
             register_core_fetchers(registry)
@@ -85,6 +112,7 @@ class BulkIngestRunner:
         self._key_prefix = key_prefix
         self._write_table_raw = write_table_raw
         self._temp_dir = Path(temp_dir) if temp_dir is not None else None
+        self._skip_if_staged = skip_if_staged
 
     def run_registered(
         self,
@@ -95,6 +123,7 @@ class BulkIngestRunner:
         partition: object | None = None,
         revision: object | None = None,
         params: dict[str, Any] | None = None,
+        force: bool = False,
     ) -> BulkIngestResult:
         """Run an entry from the process-wide source registry."""
         from gispulse.core.sources import SOURCES
@@ -107,6 +136,7 @@ class BulkIngestRunner:
             partition=partition,
             revision=revision,
             params=params,
+            force=force,
         )
 
     def run_entry(
@@ -118,6 +148,7 @@ class BulkIngestRunner:
         partition: object | None = None,
         revision: object | None = None,
         params: dict[str, Any] | None = None,
+        force: bool = False,
     ) -> BulkIngestResult:
         """Materialize one declarative source entry to the N3 S3 layout."""
         entry = _entry_from_source(source, entry_id)
@@ -139,6 +170,7 @@ class BulkIngestRunner:
                 departement=scope_departement,
                 partition=partition,
                 revision=revision_token,
+                force=force,
             )
         if access.protocol is AccessProtocol.DOWNLOAD:
             return self._run_download_archive(
@@ -149,6 +181,7 @@ class BulkIngestRunner:
                 partition=partition,
                 revision=revision_token,
                 source_schema=_source_schema(source, entry.id),
+                force=force,
             )
         raise NotImplementedError(
             "N3 bulk runner currently supports TABLE_FILE and DOWNLOAD entries; "
@@ -212,6 +245,7 @@ class BulkIngestRunner:
         departement: object | None,
         partition: object | None,
         revision: str,
+        force: bool = False,
     ) -> BulkIngestResult:
         stage_filename = _stage_filename(entry)
         raw_filename = _raw_filename(entry, access)
@@ -236,6 +270,64 @@ class BulkIngestRunner:
             filename=raw_filename,
         )
         stage_uri = bulk_s3_uri(key=stage_key, bucket=self._bucket)
+
+        # --- skip-if-staged optimisation (opt-in via skip_if_staged=True) ---
+        if self._skip_if_staged and not force:
+            try:
+                storage_for_check = self._storage or _create_s3_storage(self._bucket)
+                already_staged = _await_storage(storage_for_check.exists(stage_key))
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "bulk_ingest.skip_check_failed",
+                    source=source_name,
+                    entry=entry.id,
+                    stage_key=stage_key,
+                    error=str(exc),
+                )
+                already_staged = False
+            if already_staged:
+                log.info(
+                    "bulk_ingest.skipped",
+                    source=source_name,
+                    entry=entry.id,
+                    stage_key=stage_key,
+                )
+                resolved_access_skip = resolve_access_endpoint(access)
+                params_skip = dict(resolved_access_skip.params)
+                params_skip["s3_key"] = stage_key
+                params_skip["s3_bucket"] = self._bucket
+                stage_access_skip = replace(resolved_access_skip, params=params_skip)
+                result_skip = SourceResult(
+                    payload=entry.payload or Payload.TABLE,
+                    mode=FetchMode.MATERIALIZE,
+                    data=stage_uri,
+                    reference=stage_uri,
+                    metadata={"s3_uri": stage_uri},
+                )
+                manifest_skip = bulk_ingest_manifest_record(
+                    key_prefix=self._key_prefix,
+                    bucket=self._bucket,
+                    source=source_name,
+                    entry=entry.id,
+                    departement=departement,
+                    partition=partition,
+                    revision=revision,
+                    raw_filename=raw_filename,
+                    stage_filename=stage_filename,
+                    status="skipped",
+                )
+                manifest_skip["skipped"] = True
+                manifest_skip["reason"] = "stage_exists"
+                return BulkIngestResult(
+                    source=source_name,
+                    entry=entry.id,
+                    access=stage_access_skip,
+                    fetch_result=result_skip,
+                    manifest=manifest_skip,
+                    skipped=True,
+                )
+        # --- end skip-if-staged ---
+
         resolved_access = resolve_access_endpoint(access)
         guard_outbound_url(resolved_access.endpoint)
 
@@ -321,7 +413,22 @@ class BulkIngestRunner:
         partition: object | None,
         revision: str,
         source_schema: dict[str, Any] | None,
+        force: bool = False,
     ) -> BulkIngestResult:
+        """Download and stage an archive entry.
+
+        Skip behaviour (``skip_if_staged=True`` on the runner):
+
+        - **Spatial gzip** (``.geojson.gz`` / ``.json.gz``): the single stage key
+          is deterministic before any download, so the skip check is performed
+          upfront — if the stage object already exists the archive is never
+          fetched.
+        - **ZIP / 7z archives**: stage keys are derived from the names of the
+          vector members extracted from the archive, which are only known *after*
+          download.  These archives are always re-fetched; the skip optimisation
+          does not apply.  This is intentional — archives with content-determined
+          stage keys are always re-fetched.
+        """
         resolved_access = resolve_access_endpoint(access)
         guard_outbound_url(resolved_access.endpoint)
 
@@ -337,6 +444,73 @@ class BulkIngestRunner:
             filename=raw_filename,
         )
         storage = self._storage or _create_s3_storage(self._bucket)
+
+        # --- skip-if-staged: spatial gzip only (deterministic stage key) ---
+        if self._skip_if_staged and not force and _is_spatial_gzip_download(entry, resolved_access):
+            stage_filename_skip = _stage_filename(entry)
+            stage_key_skip = bulk_s3_key(
+                key_prefix=self._key_prefix,
+                kind=BULK_STAGE_PREFIX,
+                source=source_name,
+                entry=entry.id,
+                departement=departement,
+                partition=partition,
+                revision=revision,
+                filename=stage_filename_skip,
+            )
+            stage_uri_skip = bulk_s3_uri(key=stage_key_skip, bucket=self._bucket)
+            try:
+                already_staged = _await_storage(storage.exists(stage_key_skip))
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "bulk_ingest.skip_check_failed",
+                    source=source_name,
+                    entry=entry.id,
+                    stage_key=stage_key_skip,
+                    error=str(exc),
+                )
+                already_staged = False
+            if already_staged:
+                log.info(
+                    "bulk_ingest.skipped",
+                    source=source_name,
+                    entry=entry.id,
+                    stage_key=stage_key_skip,
+                )
+                result_skip = SourceResult(
+                    payload=entry.payload or Payload.VECTOR,
+                    mode=FetchMode.MATERIALIZE,
+                    data=stage_uri_skip,
+                    reference=stage_uri_skip,
+                    metadata={
+                        "raw_s3_uri": bulk_s3_uri(key=raw_key, bucket=self._bucket),
+                        "stage_s3_uris": [stage_uri_skip],
+                    },
+                )
+                manifest_skip = bulk_ingest_manifest_record(
+                    key_prefix=self._key_prefix,
+                    bucket=self._bucket,
+                    source=source_name,
+                    entry=entry.id,
+                    departement=departement,
+                    partition=partition,
+                    revision=revision,
+                    raw_filename=raw_filename,
+                    stage_filename=stage_filename_skip,
+                    status="skipped",
+                )
+                manifest_skip["stage_s3_uris"] = [stage_uri_skip]
+                manifest_skip["skipped"] = True
+                manifest_skip["reason"] = "stage_exists"
+                return BulkIngestResult(
+                    source=source_name,
+                    entry=entry.id,
+                    access=resolved_access,
+                    fetch_result=result_skip,
+                    manifest=manifest_skip,
+                    skipped=True,
+                )
+        # --- end skip-if-staged ---
 
         copy_sqls: list[str] = []
         stage_uris: list[str] = []
