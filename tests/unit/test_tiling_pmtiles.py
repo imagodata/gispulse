@@ -212,3 +212,28 @@ def test_tilelayer_rejects_duplicate_layer_names(tmp_path: Path) -> None:
     ]
     with pytest.raises(ValueError, match="layer names must be unique"):
         write_pmtiles_pyramid(layers, tmp_path / "x.pmtiles")
+
+
+def test_pyramid_writes_two_layers_disjoint_zooms_one_archive(tmp_path: Path) -> None:
+    tiling = import_module("gispulse.tiling")
+    source = _toy_geoparquet(tmp_path)
+    out = tmp_path / "pyramid.pmtiles"
+
+    report = tiling.write_pmtiles_pyramid(
+        [
+            tiling.TileLayer(source=source, layer="coarse", min_zoom=4, max_zoom=5),
+            tiling.TileLayer(source=source, layer="fine", min_zoom=8, max_zoom=8),
+        ],
+        out,
+    )
+
+    header, metadata, tiles = _read_pmtiles(out)
+    assert header["min_zoom"] == 4
+    assert header["max_zoom"] == 8
+    ids = {vl["id"] for vl in metadata["vector_layers"]}
+    assert ids == {"coarse", "fine"}
+    zooms = {zxy[0] for zxy, _ in tiles}
+    assert zooms <= {4, 5, 8}
+    assert {4, 8} <= zooms
+    assert report.created is True
+    assert report.rows_written == header["addressed_tiles_count"]

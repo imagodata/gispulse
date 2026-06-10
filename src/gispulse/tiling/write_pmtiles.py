@@ -125,7 +125,80 @@ def write_pmtiles_pyramid(
     session: DuckDBSession | None = None,
 ) -> WriteReport:
     _validate_pyramid_layers(layers, extent=extent, buffer=buffer)
-    raise NotImplementedError
+    destination = Path(out_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    owns_session = session is None
+    duck = session or DuckDBSession()
+    if owns_session:
+        duck.open()
+
+    encoded: list[tuple[int, bytes]] = []
+    vector_layers: list[dict[str, Any]] = []
+    bounds_acc: tuple[float, float, float, float] | None = None
+    try:
+        for item in layers:
+            prepared = _prepare_source(
+                duck,
+                item.source,
+                geometry_column=item.geometry_column,
+                source_crs=item.source_crs,
+            )
+            columns = _describe_relation(duck, prepared.relation)
+            geometry = _resolve_geometry_column(columns, prepared.geometry_column)
+            count = _materialize_features(duck, prepared, columns, geometry)
+            if count == 0:
+                raise ValueError(f"layer {item.layer!r}: source contains no geometries")
+            bounds = _features_bounds_4326(duck)
+            bounds_acc = bounds if bounds_acc is None else _union_bounds(bounds_acc, bounds)
+            field_types = _metadata_field_types(columns, geometry.name)
+            tile_coords = _coverage_tiles(bounds, item.min_zoom, item.max_zoom)
+            layer_tiles = _encode_layer_tiles(
+                duck,
+                tile_coords,
+                layer=item.layer,
+                field_types=field_types,
+                simplify_tolerance=item.simplify_tolerance,
+                extent=extent,
+                buffer=buffer,
+            )
+            if not layer_tiles:
+                raise ValueError(
+                    f"layer {item.layer!r}: produced no non-empty MVT tiles in "
+                    f"zoom range [{item.min_zoom},{item.max_zoom}]"
+                )
+            encoded.extend(layer_tiles)
+            vector_layers.append({"id": item.layer, "fields": field_types})
+            _cleanup_temp_relation(duck)
+        if not encoded:
+            raise ValueError("PMTiles pyramid produced no non-empty MVT tiles")
+        assert bounds_acc is not None
+        tile_count = _finalize_archive(
+            destination,
+            encoded,
+            bounds_4326=bounds_acc,
+            vector_layers=vector_layers,
+        )
+    finally:
+        _cleanup_temp_relation(duck)
+        if owns_session:
+            duck.close()
+
+    detail = json.dumps(
+        {
+            "tiles_written": tile_count,
+            "min_zoom": min(item.min_zoom for item in layers),
+            "max_zoom": max(item.max_zoom for item in layers),
+            "layers": [item.layer for item in layers],
+        },
+        sort_keys=True,
+    )
+    return WriteReport(
+        destination=str(destination),
+        rows_written=tile_count,
+        created=True,
+        detail=detail,
+    )
 
 
 class PmtilesWriter:
@@ -480,6 +553,13 @@ def _features_bounds_4326(session: DuckDBSession) -> tuple[float, float, float, 
         max(-180.0, min(180.0, maxx)),
         max(-_WEB_MERCATOR_LIMIT, min(_WEB_MERCATOR_LIMIT, maxy)),
     )
+
+
+def _union_bounds(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
 
 
 def _metadata_field_types(columns: Sequence[_Column], geometry_name: str) -> dict[str, str]:
