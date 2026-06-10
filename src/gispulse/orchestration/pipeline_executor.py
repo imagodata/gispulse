@@ -26,6 +26,7 @@ import geopandas as gpd
 from gispulse.core.graph import EdgeDef, NodeDef, NodeType
 from gispulse.core.logging import get_logger
 from gispulse.core.pipeline import PipelineSpec, StepSpec
+from gispulse.orchestration.event_sink import NoOpSink, RunEventSink
 
 log = get_logger(__name__)
 
@@ -116,23 +117,32 @@ class PipelineExecutor:
         spec: PipelineSpec,
         inputs: dict[str, gpd.GeoDataFrame],
         params: dict[str, Any] | None = None,
+        *,
+        event_sink: RunEventSink | None = None,
+        run_id: str | None = None,
     ) -> dict[str, gpd.GeoDataFrame]:
         """Execute a pipeline specification.
 
         Args:
-            spec:   The pipeline to execute.
-            inputs: Named input GeoDataFrames. For linear pipelines, the
-                    first value is used as the primary input. For DAG
-                    pipelines, keys must match dataset node ids.
-            params: Template parameters for ``$var`` substitution.
+            spec:       The pipeline to execute.
+            inputs:     Named input GeoDataFrames. For linear pipelines, the
+                        first value is used as the primary input. For DAG
+                        pipelines, keys must match dataset node ids.
+            params:     Template parameters for ``$var`` substitution.
+            event_sink: Optional sink for lifecycle events (run.step.started,
+                        run.step.completed, run.step.failed). Defaults to
+                        NoOpSink — backward-compat: all existing callers that
+                        omit this parameter are unaffected.
+            run_id:     Optional run identifier included in emitted events.
 
         Returns:
             Dict of step-id → result GeoDataFrame for all steps that
             produced output.
         """
+        sink = event_sink if event_sink is not None else NoOpSink()
         if spec.is_dag:
-            return self._execute_dag(spec, inputs, params)
-        return self._execute_linear(spec, inputs)
+            return self._execute_dag(spec, inputs, params, event_sink=sink, run_id=run_id)
+        return self._execute_linear(spec, inputs, event_sink=sink, run_id=run_id)
 
     # ------------------------------------------------------------------
     # Linear execution (simple pipeline, no DAG)
@@ -142,8 +152,14 @@ class PipelineExecutor:
         self,
         spec: PipelineSpec,
         inputs: dict[str, gpd.GeoDataFrame],
+        *,
+        event_sink: RunEventSink | None = None,
+        run_id: str | None = None,
     ) -> dict[str, gpd.GeoDataFrame]:
         """Run steps sequentially, piping output of each to the next."""
+        from datetime import datetime, timezone
+
+        sink = event_sink if event_sink is not None else NoOpSink()
         # Use the first input as the primary GeoDataFrame
         gdf = next(iter(inputs.values()))
         results: dict[str, gpd.GeoDataFrame] = {}
@@ -159,43 +175,69 @@ class PipelineExecutor:
                 results[step.id] = gdf
                 continue
 
-            cap = self._get_cap(step.capability)
+            step_started_at = datetime.now(timezone.utc)
+            sink.emit("run.step.started", {
+                "run_id": run_id or "",
+                "step_id": step.id,
+                "started_at": step_started_at.isoformat(),
+            })
 
-            # Resolve ref_layer from spec.ref_layers if present. ``pop``
-            # (not ``get``) so the original alias key doesn't leak into
-            # the capability call — execute_safe rejects unknown kwargs,
-            # and ``ref_layer`` is a pipeline-level routing field that
-            # capabilities never see directly (they consume ``ref_gdf``).
-            params = dict(step.params)
-            ref_layer_alias = params.pop("ref_layer", None)
-            if ref_layer_alias and ref_layer_alias in inputs:
-                params["ref_gdf"] = inputs[ref_layer_alias]
+            try:
+                cap = self._get_cap(step.capability)
 
-            # Plural variant: list of ref layers → list of GeoDataFrames. Used
-            # by merge_layers to stack N layers at once; sibling of the scalar
-            # ``ref_layer``/``ref_gdf`` plumbing above. Silently skips aliases
-            # not yet produced so the capability can tolerate partial inputs.
-            ref_layers_aliases = params.pop("ref_layers", None)
-            if isinstance(ref_layers_aliases, list) and ref_layers_aliases:
-                params["ref_gdfs"] = [
-                    inputs[a] for a in ref_layers_aliases if a in inputs
-                ]
+                # Resolve ref_layer from spec.ref_layers if present. ``pop``
+                # (not ``get``) so the original alias key doesn't leak into
+                # the capability call — execute_safe rejects unknown kwargs,
+                # and ``ref_layer`` is a pipeline-level routing field that
+                # capabilities never see directly (they consume ``ref_gdf``).
+                params = dict(step.params)
+                ref_layer_alias = params.pop("ref_layer", None)
+                if ref_layer_alias and ref_layer_alias in inputs:
+                    params["ref_gdf"] = inputs[ref_layer_alias]
 
-            _auto_inject_crs_meters(cap, step.id, params, gdf)
-            _validate_step_params(cap, step.id, params)
+                # Plural variant: list of ref layers → list of GeoDataFrames. Used
+                # by merge_layers to stack N layers at once; sibling of the scalar
+                # ``ref_layer``/``ref_gdf`` plumbing above. Silently skips aliases
+                # not yet produced so the capability can tolerate partial inputs.
+                ref_layers_aliases = params.pop("ref_layers", None)
+                if isinstance(ref_layers_aliases, list) and ref_layers_aliases:
+                    params["ref_gdfs"] = [
+                        inputs[a] for a in ref_layers_aliases if a in inputs
+                    ]
 
-            if self._execution_context is not None and hasattr(cap, "execute_with_context"):
-                from gispulse.capabilities.strategy import ExecutionContext
-                ctx = ExecutionContext(
-                    engine=self._execution_context.engine,
-                    feature_count=len(gdf),
-                    has_spatial_index=self._execution_context.has_spatial_index,
-                    params=params,
-                )
-                gdf = cap.execute_with_context(gdf, ctx)
-            else:
-                from gispulse.capabilities.base import safe_execute
-                gdf = safe_execute(cap, gdf, **params)
+                _auto_inject_crs_meters(cap, step.id, params, gdf)
+                _validate_step_params(cap, step.id, params)
+
+                if self._execution_context is not None and hasattr(cap, "execute_with_context"):
+                    from gispulse.capabilities.strategy import ExecutionContext
+                    ctx = ExecutionContext(
+                        engine=self._execution_context.engine,
+                        feature_count=len(gdf),
+                        has_spatial_index=self._execution_context.has_spatial_index,
+                        params=params,
+                    )
+                    gdf = cap.execute_with_context(gdf, ctx)
+                else:
+                    from gispulse.capabilities.base import safe_execute
+                    gdf = safe_execute(cap, gdf, **params)
+            except Exception as exc:
+                step_ended_at = datetime.now(timezone.utc)
+                sink.emit("run.step.failed", {
+                    "run_id": run_id or "",
+                    "step_id": step.id,
+                    "status": "failed",
+                    "ended_at": step_ended_at.isoformat(),
+                    "error": str(exc),
+                })
+                raise
+
+            step_ended_at = datetime.now(timezone.utc)
+            sink.emit("run.step.completed", {
+                "run_id": run_id or "",
+                "step_id": step.id,
+                "status": "completed",
+                "ended_at": step_ended_at.isoformat(),
+            })
 
             results[step.id] = gdf
             log.debug("pipeline_step_done", step_id=step.id, features=len(gdf))
@@ -211,6 +253,9 @@ class PipelineExecutor:
         spec: PipelineSpec,
         inputs: dict[str, gpd.GeoDataFrame],
         params: dict[str, Any] | None = None,
+        *,
+        event_sink: RunEventSink | None = None,
+        run_id: str | None = None,
     ) -> dict[str, gpd.GeoDataFrame]:
         """Convert PipelineSpec to NodeDef/EdgeDef and run via GraphExecutor."""
         from gispulse.orchestration.graph_executor import GraphExecutor
@@ -220,6 +265,8 @@ class PipelineExecutor:
         executor = GraphExecutor(
             capability_getter=self._get_cap,
             execution_context=self._execution_context,
+            event_sink=event_sink,
+            run_id=run_id,
         )
         return executor.execute(nodes, edges, dataset_inputs, params or {})
 

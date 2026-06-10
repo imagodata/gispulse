@@ -91,6 +91,9 @@ from gispulse.core.relations import (  # noqa: F401
 # Session
 from gispulse.core.session import EphemeralSession  # noqa: F401
 
+# Pipeline run entity
+from gispulse.core.run_models import PipelineRun, PipelineRunStep  # noqa: F401
+
 # Geo-spatial domain models
 from gispulse.core.geo_models import (  # noqa: F401
     AnalysisTrace,

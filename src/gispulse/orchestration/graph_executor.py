@@ -16,6 +16,7 @@ import pandas as pd
 
 from gispulse.core.logging import get_logger
 from gispulse.core.models import EdgeDef, NodeDef, NodeType
+from gispulse.orchestration.event_sink import NoOpSink, RunEventSink
 
 log = get_logger(__name__)
 
@@ -45,10 +46,14 @@ class GraphExecutor:
         *,
         max_workers: int = 4,
         execution_context: Any | None = None,
+        event_sink: "RunEventSink | None" = None,
+        run_id: str | None = None,
     ) -> None:
         self._get_cap = capability_getter
         self._max_workers = max_workers
         self._execution_context = execution_context
+        self._event_sink = event_sink if event_sink is not None else NoOpSink()
+        self._run_id = run_id or ""
 
     # ------------------------------------------------------------------
     # Public
@@ -73,6 +78,8 @@ class GraphExecutor:
             Mapping of node-id → result GeoDataFrame for every node that
             produced output.
         """
+        from datetime import datetime, timezone
+
         params = params or {}
         node_map = {n.id: n for n in nodes}
         adj, in_degree = self._build_adjacency(nodes, edges)
@@ -85,10 +92,40 @@ class GraphExecutor:
             node = node_map[nid]
             node_inputs = self._collect_inputs(nid, edge_index, results)
 
+            # Only emit step events for capability/rule nodes (not dataset/artifact sinks)
+            is_capability_node = node.node_type in (NodeType.CAPABILITY, NodeType.RULE)
+            step_started_at = datetime.now(timezone.utc)
+            if is_capability_node:
+                self._event_sink.emit("run.step.started", {
+                    "run_id": self._run_id,
+                    "step_id": nid,
+                    "started_at": step_started_at.isoformat(),
+                })
+
             # Pass the live ``results`` dict (not just initial ``inputs``) so
             # ``ref_layer`` can resolve to a prior step's output — enables
             # patterns like "filter a ref layer first, then use it as ref".
-            result = self._execute_node(node, node_inputs, params, results)
+            try:
+                result = self._execute_node(node, node_inputs, params, results)
+            except Exception as exc:
+                if is_capability_node:
+                    self._event_sink.emit("run.step.failed", {
+                        "run_id": self._run_id,
+                        "step_id": nid,
+                        "status": "failed",
+                        "ended_at": datetime.now(timezone.utc).isoformat(),
+                        "error": str(exc),
+                    })
+                raise
+
+            if is_capability_node:
+                self._event_sink.emit("run.step.completed", {
+                    "run_id": self._run_id,
+                    "step_id": nid,
+                    "status": "completed",
+                    "ended_at": datetime.now(timezone.utc).isoformat(),
+                })
+
             if result is not None:
                 results[nid] = result
 
