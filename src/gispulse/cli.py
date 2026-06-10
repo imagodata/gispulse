@@ -1549,6 +1549,15 @@ app.command(name="mcp")(cmd_mcp)
 
 
 # ---------------------------------------------------------------------------
+# source — unified source catalog / ingest / artifact management
+# ---------------------------------------------------------------------------
+
+from gispulse.cli_source import source_app  # noqa: E402
+
+app.add_typer(source_app, name="source")
+
+
+# ---------------------------------------------------------------------------
 # migrate — rewrite a v1/v2 pipeline file as a v3 manifest (ADR 0005)
 # ---------------------------------------------------------------------------
 
@@ -1673,6 +1682,15 @@ def explain(
         typer.echo(_json.dumps(asdict(explanation), indent=2, ensure_ascii=False))
     else:
         typer.echo(format_explanation_text(explanation))
+
+
+# ---------------------------------------------------------------------------
+# postgis — PostGIS lifecycle utilities (column shed, etc.)
+# ---------------------------------------------------------------------------
+
+from gispulse.cli_postgis import postgis_app  # noqa: E402
+
+app.add_typer(postgis_app, name="postgis")
 
 
 def main() -> None:

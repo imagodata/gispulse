@@ -184,7 +184,10 @@ def _read_via_duckdb(
         return _read_via_geopandas(path, bbox=bbox, columns=columns, **kwargs)
 
     try:
+        from gispulse.core.duckdb_limits import configure_duckdb_limits
+
         conn = duckdb.connect(":memory:")
+        configure_duckdb_limits(conn)
         conn.execute("INSTALL spatial; LOAD spatial;")
         conn.execute("INSTALL parquet; LOAD parquet;")
     except Exception:

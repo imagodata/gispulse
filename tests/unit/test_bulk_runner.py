@@ -207,8 +207,7 @@ def test_runner_materializes_table_file_entry_to_stage_s3_key(
         "s3://gispulse/raw/georisques/sis-bulk/millesime=sis-2026/national/sis.csv"
     )
     assert result.manifest["stage_s3_uri"] == (
-        "s3://gispulse/stage/georisques/sis-bulk/millesime=sis-2026/national/"
-        "sis.parquet"
+        "s3://gispulse/stage/georisques/sis-bulk/millesime=sis-2026/national/sis.parquet"
     )
     assert result.fetch_result.reference == result.manifest["stage_s3_uri"]
 
@@ -292,23 +291,20 @@ def test_runner_can_prefix_and_upload_raw_table_file_entry(
     assert "s3_key" not in access.params
     assert "s3_bucket" not in access.params
     assert result.access.params["s3_key"] == (
-        "smoke-n3/stage/georisques/sis-bulk/millesime=smoke/"
-        "departement=63/sis.parquet"
+        "smoke-n3/stage/georisques/sis-bulk/millesime=smoke/departement=63/sis.parquet"
     )
     assert len(executed) == 1
     assert "read_csv_auto('" in executed[0]
     assert "/vsicurl/" not in executed[0]
     assert storage.uploads == [
         (
-            "smoke-n3/raw/georisques/sis-bulk/millesime=smoke/"
-            "departement=63/sis.csv",
+            "smoke-n3/raw/georisques/sis-bulk/millesime=smoke/departement=63/sis.csv",
             b"code\n63000\n",
             "text/csv",
         )
     ]
     assert result.manifest["raw_s3_uri"] == (
-        "s3://gispulse/smoke-n3/raw/georisques/sis-bulk/millesime=smoke/"
-        "departement=63/sis.csv"
+        "s3://gispulse/smoke-n3/raw/georisques/sis-bulk/millesime=smoke/departement=63/sis.csv"
     )
     assert result.manifest["stage_s3_uri"] == (
         "s3://gispulse/smoke-n3/stage/georisques/sis-bulk/millesime=smoke/"
@@ -441,6 +437,99 @@ def test_runner_injects_department_partition_and_resolves_endpoint_before_fetch(
     )
 
 
+@pytest.mark.parametrize(
+    ("source_name", "entry_id", "member", "base_key"),
+    [
+        ("gpu", "gpu_documents_bulk_index", "CNIG/zone_urba.shp", "zone_urba"),
+        ("sup", "pack_sup", "SUP/assiette_sup_s.shp", "assiette_sup_s"),
+        ("georisques", "rga-bulk", "RGA/alearg_25.shp", "alearg_25"),
+        ("georisques", "tri-bulk", "TRI/tri_2020.shp", "tri_2020"),
+    ],
+)
+def test_bulk_download_entry_can_stamp_dept_scope_column(
+    monkeypatch: pytest.MonkeyPatch,
+    source_name: str,
+    entry_id: str,
+    member: str,
+    base_key: str,
+) -> None:
+    from gispulse.core.bulk_runner import BulkIngestRunner
+
+    payload = _zip_bytes({member: b"fake-shp"})
+    _patch_http_stream(monkeypatch, payload)
+    executed = _patch_duckdb(monkeypatch)
+    storage = _FakeStorage()
+    source = _StaticSource(
+        SourceEntryRef(
+            id=entry_id,
+            name="Bulk scope fixture",
+            access=AccessSpec(
+                protocol=AccessProtocol.DOWNLOAD,
+                endpoint="https://host.example.org/{departement}/archive.zip",
+                params={"departement": "69"},
+                format="application/zip",
+            ),
+            payload=Payload.VECTOR,
+            metadata={
+                "archive_format": "zip",
+                "data_format": "shapefile",
+                "scope_stamp_dept": True,
+                "scope_dept_column": "dept",
+            },
+        ),
+        name=source_name,
+    )
+
+    result = BulkIngestRunner(storage=storage).run_entry(
+        source,
+        entry_id,
+        departement="69",
+        revision="scope-rev",
+    )
+
+    assert len(executed) == 1
+    assert "SELECT *, '69' AS dept FROM" in executed[0]
+    assert f"{base_key}.shp')" in executed[0]
+    assert result.fetch_result.metadata["copy_sql"] == executed[0]
+    assert f"departement=69/{base_key}.parquet" in result.manifest["stage_s3_uri"]
+
+
+def test_bulk_download_stamp_dept_is_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from gispulse.core.bulk_runner import BulkIngestRunner
+
+    payload = _zip_bytes({"RGA/alearg_25.shp": b"fake-shp"})
+    _patch_http_stream(monkeypatch, payload)
+    executed = _patch_duckdb(monkeypatch)
+    storage = _FakeStorage()
+    source = _StaticSource(
+        SourceEntryRef(
+            id="rga-bulk",
+            name="RGA bulk",
+            access=AccessSpec(
+                protocol=AccessProtocol.DOWNLOAD,
+                endpoint="https://host.example.org/{departement}/archive.zip",
+                params={"departement": "69"},
+                format="application/zip",
+            ),
+            payload=Payload.VECTOR,
+            metadata={"archive_format": "zip", "data_format": "shapefile"},
+        ),
+        name="georisques",
+    )
+
+    BulkIngestRunner(storage=storage).run_entry(
+        source,
+        "rga-bulk",
+        departement="69",
+        revision="scope-rev",
+    )
+
+    assert len(executed) == 1
+    assert " AS dept " not in executed[0]
+
+
 def test_download_archive_uploads_raw_zip_and_copies_shapefile_to_stage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -491,12 +580,10 @@ def test_download_archive_uploads_raw_zip_and_copies_shapefile_to_stage(
         "departement=69/tri_2020.parquet' (FORMAT PARQUET)"
     ) in executed[0]
     assert result.manifest["raw_s3_uri"] == (
-        "s3://gispulse/raw/georisques/tri-bulk/millesime=2020/departement=69/"
-        "archive.zip"
+        "s3://gispulse/raw/georisques/tri-bulk/millesime=2020/departement=69/archive.zip"
     )
     assert result.manifest["stage_s3_uri"] == (
-        "s3://gispulse/stage/georisques/tri-bulk/millesime=2020/departement=69/"
-        "tri_2020.parquet"
+        "s3://gispulse/stage/georisques/tri-bulk/millesime=2020/departement=69/tri_2020.parquet"
     )
     assert result.manifest["status"] == "success"
 
@@ -576,10 +663,7 @@ def test_download_archive_derives_iris_zone_and_reads_gpkg_layer(
             name="IRIS bulk",
             access=AccessSpec(
                 protocol=AccessProtocol.DOWNLOAD,
-                endpoint=(
-                    "https://host.example.org/IRIS-GE_3-0__GPKG_LAMB93_{zone}_"
-                    "2026-01-01.7z"
-                ),
+                endpoint=("https://host.example.org/IRIS-GE_3-0__GPKG_LAMB93_{zone}_2026-01-01.7z"),
                 params={"zone": "D075", "layer": "iris_ge"},
                 format="application/x-7z-compressed",
             ),
@@ -602,17 +686,14 @@ def test_download_archive_derives_iris_zone_and_reads_gpkg_layer(
         revision="2026-01-01",
     )
 
-    assert requested == [
-        "GET https://host.example.org/IRIS-GE_3-0__GPKG_LAMB93_D075_2026-01-01.7z"
-    ]
+    assert requested == ["GET https://host.example.org/IRIS-GE_3-0__GPKG_LAMB93_D075_2026-01-01.7z"]
     assert storage.uploads[0][0] == (
         "raw/insee/iris_bulk/millesime=2026-01-01/departement=75/archive.7z"
     )
     assert "ST_Read('" in executed[0]
     assert "IRIS_GE.gpkg', layer='iris_ge')" in executed[0]
     assert result.manifest["stage_s3_uri"] == (
-        "s3://gispulse/stage/insee/iris_bulk/millesime=2026-01-01/"
-        "departement=75/iris.parquet"
+        "s3://gispulse/stage/insee/iris_bulk/millesime=2026-01-01/departement=75/iris.parquet"
     )
 
 
@@ -733,9 +814,7 @@ def test_download_spatial_json_gz_uploads_raw_and_streams_geojson_to_stage(
         "s3://gispulse/smoke-n3/stage/cadastre/parcelles_bulk/"
         "millesime=cadastre-smoke/departement=63/parcelles.parquet"
     )
-    assert result.fetch_result.metadata["stage_s3_uris"] == [
-        result.manifest["stage_s3_uri"]
-    ]
+    assert result.fetch_result.metadata["stage_s3_uris"] == [result.manifest["stage_s3_uri"]]
     assert result.fetch_result.metadata["stage_rows"] == 2
 
 
@@ -1136,3 +1215,83 @@ def test_skip_if_staged_result_manifest_compatible_with_nominal(
     # Skipped result has no DuckDB/fetch side effects.
     assert fetcher.calls  # nominal fetched
     assert executed  # nominal ran DuckDB
+
+def test_download_spatial_json_gz_can_alias_scope_column_from_feature_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from gispulse.core.bulk_runner import BulkIngestRunner
+
+    geojson = (
+        b'{"type":"FeatureCollection","features":['
+        b'{"type":"Feature","properties":{"id":"63000","nom":"Clermont-Ferrand"},'
+        b'"geometry":{"type":"Polygon","coordinates":[[[3.0,45.0],'
+        b"[3.1,45.0],[3.1,45.1],[3.0,45.1],[3.0,45.0]]]}}]}"
+    )
+    payload = gzip.compress(geojson)
+    _patch_http_stream(monkeypatch, payload)
+
+    class _NoDuckDBSession:
+        def __enter__(self) -> "_NoDuckDBSession":
+            raise AssertionError("json.gz cadastre path must not call DuckDB ST_Read")
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    import gispulse.persistence.duckdb_engine as duckdb_engine
+
+    monkeypatch.setattr(duckdb_engine, "DuckDBSession", _NoDuckDBSession)
+    storage = _FakeStorage()
+    source = _StaticSource(
+        SourceEntryRef(
+            id="communes_bulk",
+            name="Communes bulk",
+            access=AccessSpec(
+                protocol=AccessProtocol.DOWNLOAD,
+                endpoint=(
+                    "https://cadastre.data.gouv.fr/data/etalab-cadastre/latest/"
+                    "geojson/departements/{departement}/"
+                    "cadastre-{departement}-communes.json.gz"
+                ),
+                params={"departement": "63", "layer": "communes"},
+                format="application/geo+json+gzip",
+            ),
+            payload=Payload.VECTOR,
+            metadata={
+                "base_key": "communes",
+                "archive_format": "json.gz",
+                "scope_column_aliases": {"code_insee": "id"},
+            },
+        ),
+        name="cadastre",
+    )
+    source.schema = lambda entry_id: {  # type: ignore[method-assign]
+        "id": "str",
+        "code_insee": "str",
+        "geometry": "geometry",
+        "nom": "str",
+    }
+
+    BulkIngestRunner(
+        storage=storage,
+        temp_dir=tmp_path,
+    ).run_entry(
+        source,
+        "communes_bulk",
+        departement="63",
+        revision="cadastre-smoke",
+    )
+
+    stage_path = tmp_path / "communes-stage.parquet"
+    stage_path.write_bytes(storage.uploads[1][1])
+    import duckdb
+
+    rows = (
+        duckdb.connect(":memory:")
+        .execute(
+            "SELECT id, code_insee FROM read_parquet(?)",
+            [str(stage_path)],
+        )
+        .fetchall()
+    )
+    assert rows == [("63000", "63000")]

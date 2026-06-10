@@ -107,8 +107,10 @@ class SpatiaLiteEngine(GeoPackageEngine):
         if self._use_duckdb_accel:
             try:
                 import duckdb
+                from gispulse.core.duckdb_limits import configure_duckdb_limits
 
                 self._duckdb_conn = duckdb.connect(":memory:")
+                configure_duckdb_limits(self._duckdb_conn)
                 self._duckdb_conn.install_extension("spatial")
                 self._duckdb_conn.load_extension("spatial")
             except Exception as exc:
