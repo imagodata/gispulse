@@ -20,7 +20,9 @@ from gispulse.core.models import Job, JobStatus, Rule
 from gispulse.orchestration.event_sink import RunEventSink
 from gispulse.persistence.repository import Repository
 from gispulse.rules.engine import RuleEngine
-from gispulse.runtime.manifest_runner import run_manifest
+# run_manifest is imported locally inside _execute_manifest to avoid a
+# circular import: manifest_runner → orchestration.event_sink →
+# orchestration.__init__ → runner → manifest_runner.
 
 # Key injected by PipelineScheduler._enqueue_pipeline into job.parameters.
 _PIPELINE_CONFIG_KEY = "pipeline_config"
@@ -450,7 +452,7 @@ class JobRunner:
             if not uri or uri.startswith("memory://"):
                 return gdf
             try:
-                return _load_source(uri, layer=src.layer or None)
+                return _load_source(uri, layer=src.layer or None, geometry=None)
             except (FileNotFoundError, ValueError) as exc:
                 raise ValueError(
                     f"Job {job.id}: cannot load source '{uri}' "
@@ -458,6 +460,8 @@ class JobRunner:
                 ) from exc
 
         # --- Execute with timeout -----------------------------------------
+        from gispulse.runtime.manifest_runner import run_manifest  # local to avoid circular import
+
         pool = ThreadPoolExecutor(max_workers=1)
         try:
             future = pool.submit(
