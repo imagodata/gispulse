@@ -91,6 +91,8 @@ class TriggerType(str, Enum):
     WEBHOOK_IN = "webhook_in"
     # --- External-source freshness (issue #186) ---
     SOURCE_CHANGED = "source_changed"
+    # --- Run-completion chaining (issue #440-c) ---
+    ON_RUN_COMPLETED = "on_run_completed"
 
 
 class ChangeOperation(str, Enum):

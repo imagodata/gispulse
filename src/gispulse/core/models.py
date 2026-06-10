@@ -55,6 +55,7 @@ from gispulse.core.conditions import (  # noqa: F401
     SpatialConstraintConditions,
     CompositeConditions,
     ScheduleConditions,
+    OnRunCompletedConditions,
     TriggerConditions,
     parse_conditions,
     _CONDITIONS_TYPE_MAP,

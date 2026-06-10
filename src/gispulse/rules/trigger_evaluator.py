@@ -28,6 +28,7 @@ from gispulse.core.models import (
     CompositeConditions,
     DMLConditions,
     FiredTrigger,
+    OnRunCompletedConditions,
     SpatialConstraintConditions,
     ThresholdConditions,
     TopologyConditions,
@@ -523,6 +524,58 @@ class TriggerEvaluator:
         """Generic handler for schedule, api, esb_event, webhook_in — always matches."""
         return True
 
+    def _eval_on_run_completed(
+        self, record: ChangeRecord, trigger: Trigger, typed_cond: Any = None
+    ) -> bool:
+        """ON_RUN_COMPLETED: fires when a run.completed/run.failed event arrives.
+
+        The ChangeRecord is synthetic, built by RunCompletionTriggerSink with::
+
+            table_name  = "run.events"
+            operation   = ChangeOperation.INSERT  (synthetic, ignored by this handler)
+            new_values  = {
+                "run_id":   str,
+                "status":   "completed" | "failed",
+                "source":   str,          # PipelineRun.source
+                "spec_ref": str,          # PipelineRun.spec_ref
+                "scope":    str,          # PipelineRun.scope
+                "depth":    int,          # trigger chain depth (0 = first-order)
+            }
+        """
+        if isinstance(typed_cond, OnRunCompletedConditions):
+            cond = typed_cond
+        else:
+            raw = trigger.conditions or {}
+            cond = OnRunCompletedConditions(
+                status=raw.get("status", "completed"),
+                source=raw.get("source", ""),
+                spec_ref=raw.get("spec_ref", ""),
+                scope=raw.get("scope", ""),
+                max_depth=int(raw.get("max_depth", 5)),
+            )
+
+        values = record.new_values or {}
+        event_status = values.get("status", "")
+        event_depth = int(values.get("depth", 0))
+
+        # Depth guard: reject if we are already at or beyond the max
+        if event_depth >= cond.max_depth:
+            return False
+
+        # Status filter: "any" matches both completed and failed
+        if cond.status != "any" and event_status != cond.status:
+            return False
+
+        # Optional filters (empty string = match all)
+        if cond.source and values.get("source", "") != cond.source:
+            return False
+        if cond.spec_ref and cond.spec_ref not in values.get("spec_ref", ""):
+            return False
+        if cond.scope and values.get("scope", "") != cond.scope:
+            return False
+
+        return True
+
     def _eval_source_changed(
         self, record: ChangeRecord, trigger: Trigger, typed_cond: Any = None
     ) -> bool:
@@ -569,6 +622,7 @@ class TriggerEvaluator:
         "esb_event": _eval_generic,
         "webhook_in": _eval_generic,
         "source_changed": _eval_source_changed,
+        "on_run_completed": _eval_on_run_completed,
     }
 
 

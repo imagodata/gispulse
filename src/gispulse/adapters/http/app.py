@@ -365,13 +365,43 @@ def create_app(
 
             hub_sink = EventHubSink(app.state.event_hub)
 
+            # RunCompletionTriggerSink (issue #440-c): évalue les triggers
+            # on_run_completed sur chaque run.completed/run.failed et
+            # enqueue les jobs déclenchés. Vit ici (adapters layer) pour la
+            # même raison qu'EventHubSink : orchestration ne doit pas
+            # dépendre de adapters/.
+            # Sans triggers déclarés, comportement strictement identique
+            # à l'injection d'hub_sink seul (no-op conditionnel).
+            from gispulse.orchestration.trigger_bridge import TriggerJobBridge
+            from gispulse.orchestration.run_trigger_sink import RunCompletionTriggerSink
+
+            trigger_bridge = TriggerJobBridge(
+                job_queue=app.state.job_queue,
+                dataset_repo=app.state.dataset_repo,
+            )
+            # Capture the running event loop now (inside the async lifespan)
+            # so RunCompletionTriggerSink can schedule coroutines from sync
+            # FastAPI handler threads via asyncio.run_coroutine_threadsafe.
+            import asyncio as _asyncio
+            _lifespan_loop = _asyncio.get_running_loop()
+            run_trigger_sink = RunCompletionTriggerSink(
+                trigger_repo=app.state.trigger_repo,
+                bridge=trigger_bridge,
+                inner=hub_sink,
+                loop=_lifespan_loop,
+            )
+            app.state.trigger_bridge = trigger_bridge
+            # Expose the composite sink on app.state so scenario/manifest routers
+            # can emit run.* events through the same pipeline (EventHub + triggers).
+            app.state.event_sink = run_trigger_sink
+
             worker = JobWorker(
                 queue=app.state.job_queue,
                 runner=app.state.job_runner,
                 dataset_repo=app.state.dataset_repo,
                 job_repo=app.state.job_repo,
                 run_repo=run_repo,
-                event_sink=hub_sink,
+                event_sink=run_trigger_sink,
                 results_dir=_results_path,
             )
             app.state.job_worker = worker

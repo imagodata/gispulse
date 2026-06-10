@@ -32,9 +32,15 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     started_at TEXT NOT NULL,
     ended_at TEXT,
     error TEXT NOT NULL DEFAULT '',
-    steps TEXT NOT NULL DEFAULT '[]'
+    steps TEXT NOT NULL DEFAULT '[]',
+    depth INTEGER NOT NULL DEFAULT 0
 )
 """
+
+# Idempotent migration for existing DBs created before depth was added.
+_MIGRATE_ADD_DEPTH_SQL = (
+    "ALTER TABLE pipeline_runs ADD COLUMN depth INTEGER NOT NULL DEFAULT 0"
+)
 
 
 class RunRepository:
@@ -48,6 +54,12 @@ class RunRepository:
         self._lock = threading.Lock()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._execute(_CREATE_TABLE_SQL)
+        # Idempotent migration: add depth column if it was created by an older schema.
+        try:
+            self._execute(_MIGRATE_ADD_DEPTH_SQL)
+        except Exception:
+            # Column already exists — OperationalError "duplicate column name".
+            pass
 
     # ------------------------------------------------------------------
     # Connection helpers
@@ -119,6 +131,7 @@ class RunRepository:
             "ended_at": run.ended_at.isoformat() if run.ended_at else None,
             "error": run.error,
             "steps": RunRepository._steps_to_json(run.steps),
+            "depth": run.depth,
         }
 
     @classmethod
@@ -135,6 +148,7 @@ class RunRepository:
         run.ended_at = datetime.fromisoformat(d["ended_at"]) if d.get("ended_at") else None
         run.error = d.get("error", "")
         run.steps = cls._steps_from_json(d.get("steps", "[]"))
+        run.depth = int(d.get("depth", 0))
         return run
 
     # ------------------------------------------------------------------
@@ -214,6 +228,10 @@ class RunRepository:
                     "status": "failed",
                     "ended_at": run.ended_at.isoformat(),
                     "error": "orphaned by worker restart",
+                    "depth": run.depth,
+                    "source": run.source,
+                    "spec_ref": run.spec_ref,
+                    "scope": run.scope,
                 })
             recovered += 1
             log.info("run_orphan_recovered", run_id=str(run.run_id))

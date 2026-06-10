@@ -115,12 +115,41 @@ class TriggerJobBridge:
 
     @staticmethod
     def _normalize_action(action: Any) -> tuple[str, dict]:
-        """Normalize an action to (action_type, action_dict)."""
+        """Normalize an action to (action_type_upper, action_dict).
+
+        Accepts:
+        - dict with ``action_type`` key (may be "RUN_JOB" or "run_job")
+        - str / ActionType enum (str subclass) — converted to UPPER for comparison
+        """
         if isinstance(action, dict):
-            return action.get("action_type", ""), action
-        if isinstance(action, str):
-            return action, {}
-        return str(getattr(action, "action_type", "")), {}
+            raw_type = action.get("action_type", "")
+            # Normalize: enum value "run_job" → "RUN_JOB"; already upper stays upper
+            if hasattr(raw_type, "value"):
+                raw_type = raw_type.value
+            return str(raw_type).upper(), action
+        # str / ActionType enum subclass
+        raw = getattr(action, "value", None) or str(action)
+        return str(raw).upper(), {}
+
+    @staticmethod
+    def _extract_run_context(ft: FiredTrigger, action: dict) -> dict:
+        """Extract run-chain context (depth, scope) from a FiredTrigger action.
+
+        These keys are injected by RunCompletionTriggerSink when an
+        on_run_completed trigger fires, so downstream jobs know their depth
+        in the trigger chain and can parameterize (e.g. inherit scope).
+        """
+        ctx: dict = {}
+        depth = action.get("trigger_depth")
+        if depth is not None:
+            ctx["trigger_depth"] = int(depth)
+        scope = action.get("scope") or ft.result_summary.get("scope")
+        if scope:
+            ctx["scope"] = str(scope)
+        run_id = ft.result_summary.get("run_id")
+        if run_id:
+            ctx["source_run_id"] = str(run_id)
+        return ctx
 
     def _create_job_from_trigger(
         self, ft: FiredTrigger, action: Any
@@ -131,14 +160,16 @@ class TriggerJobBridge:
             log.warning("trigger_run_job_no_rule_id", trigger_id=ft.trigger_id)
             return None
 
+        params = {
+            "rule_ids": [str(rule_id)],
+            "triggered_by": "trigger",
+            "trigger_id": str(ft.trigger_id),
+            "change_record_id": str(ft.change_record_id) if ft.change_record_id else None,
+        }
+        params.update(self._extract_run_context(ft, action if isinstance(action, dict) else {}))
         return Job(
             name=f"trigger_{ft.trigger_id}",
-            parameters={
-                "rule_ids": [str(rule_id)],
-                "triggered_by": "trigger",
-                "trigger_id": str(ft.trigger_id),
-                "change_record_id": str(ft.change_record_id) if ft.change_record_id else None,
-            },
+            parameters=params,
         )
 
     def _create_graph_job_from_trigger(
@@ -150,12 +181,14 @@ class TriggerJobBridge:
             log.warning("trigger_run_graph_no_graph_id", trigger_id=ft.trigger_id)
             return None
 
+        params = {
+            "graph_id": str(graph_id),
+            "triggered_by": "trigger",
+            "trigger_id": str(ft.trigger_id),
+            "change_record_id": str(ft.change_record_id) if ft.change_record_id else None,
+        }
+        params.update(self._extract_run_context(ft, action if isinstance(action, dict) else {}))
         return Job(
             name=f"trigger_graph_{ft.trigger_id}",
-            parameters={
-                "graph_id": str(graph_id),
-                "triggered_by": "trigger",
-                "trigger_id": str(ft.trigger_id),
-                "change_record_id": str(ft.change_record_id) if ft.change_record_id else None,
-            },
+            parameters=params,
         )
