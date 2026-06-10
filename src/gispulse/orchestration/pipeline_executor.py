@@ -276,8 +276,11 @@ class PipelineExecutor:
         from datetime import datetime, timezone
 
         sink = event_sink if event_sink is not None else NoOpSink()
-        # Use the first input as the primary GeoDataFrame
-        gdf = next(iter(inputs.values()))
+        # Use the first input as the primary GeoDataFrame.
+        # For pipelines that contain only non-capability steps (e.g. manifests
+        # whose models have select=None), inputs may be empty — initialize gdf
+        # lazily so those pipelines don't raise here.
+        gdf: gpd.GeoDataFrame | None = next(iter(inputs.values()), None)
         results: dict[str, gpd.GeoDataFrame] = {}
 
         for step in spec.enabled_steps:

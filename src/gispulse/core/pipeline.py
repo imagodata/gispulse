@@ -49,7 +49,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from gispulse.core.predicates import AnyPredicate, AttrPredicate, CompoundPredicate, GeomPredicate
 
@@ -89,7 +89,7 @@ class StepSpec:
     """
 
     id: str = ""
-    type: Literal["capability", "filter", "spatial_op", "custom_sql"] = "capability"
+    type: str = "capability"  # "capability" | "filter" | "spatial_op" | "custom_sql" | <app-kind>
     capability: str | None = None
     params: dict[str, Any] = field(default_factory=dict)
     input: str | list[str] | None = None
