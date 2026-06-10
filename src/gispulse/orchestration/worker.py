@@ -237,11 +237,70 @@ class JobWorker:
 
             # Execute in thread pool (CPU-bound)
             loop = asyncio.get_running_loop()
+
+            # Provide a synchronous heartbeat callable for non-capability step
+            # handlers that run in the thread-pool executor.  Using
+            # run_coroutine_threadsafe ensures the asyncio queue.heartbeat()
+            # is called from the executor thread without blocking the event loop.
+            _hb_warned: list[bool] = [False]
+
+            def _heartbeat_sync() -> None:
+                if loop.is_closed():
+                    if not _hb_warned[0]:
+                        log.warning("heartbeat_loop_closed", job_id=job_id)
+                        _hb_warned[0] = True
+                    return
+                coro = self._send_heartbeat(job_id)
+                try:
+                    future_hb = asyncio.run_coroutine_threadsafe(coro, loop)
+                except RuntimeError:
+                    coro.close()
+                    if not _hb_warned[0]:
+                        log.warning("heartbeat_loop_closed", job_id=job_id)
+                        _hb_warned[0] = True
+                    return
+                try:
+                    future_hb.result(timeout=5.0)
+                except Exception:  # noqa: BLE001 — heartbeat failure must never abort execution
+                    pass
+
+            # cancel_check polls the queue status synchronously — also safe
+            # from the executor thread via run_coroutine_threadsafe.
+            _cc_warned: list[bool] = [False]
+
+            def _cancel_check_sync() -> bool:
+                if loop.is_closed():
+                    if not _cc_warned[0]:
+                        log.warning("cancel_check_loop_closed", job_id=job_id)
+                        _cc_warned[0] = True
+                    return False
+                coro = self._queue.get_status(job_id)
+                try:
+                    future_cs = asyncio.run_coroutine_threadsafe(coro, loop)
+                except RuntimeError:
+                    coro.close()
+                    if not _cc_warned[0]:
+                        log.warning("cancel_check_loop_closed", job_id=job_id)
+                        _cc_warned[0] = True
+                    return False
+                try:
+                    status_data = future_cs.result(timeout=5.0)
+                    return bool(
+                        status_data
+                        and status_data.get("status") == JobStatus.FAILED.value
+                    )
+                except Exception:  # noqa: BLE001
+                    return False
+
             run_fn = functools.partial(
                 self._runner.run, job, gdf,
                 layer_resolver=_layer_resolver,
                 event_sink=run_sink,
                 run_id=str(run.run_id),
+                heartbeat=_heartbeat_sync,
+                cancel_check=_cancel_check_sync,
+                scope=str(job.parameters.get("scope", "")),
+                run_repo=self._run_repo,
             )
             updated_job, result_gdf = await loop.run_in_executor(
                 self._executor, run_fn
