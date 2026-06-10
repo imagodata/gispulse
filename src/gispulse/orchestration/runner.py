@@ -38,6 +38,40 @@ DEFAULT_JOB_TIMEOUT = 300
 DEFAULT_MAX_RETRIES = 0
 
 
+def _compute_effective_timeout(job_timeout: int, spec: Any) -> int:
+    """Compute the effective execution timeout for a pipeline spec.
+
+    Non-capability steps (external, dbt_build, …) declare their own
+    ``timeout_seconds`` in ``params``.  A job-level timeout of 300 s would
+    silently kill a dbt step that declares ``timeout_seconds=14400``.
+
+    Formula::
+
+        effective = max(job_timeout, sum(step.params["timeout_seconds"]
+                                         for non-capability steps) + 60)
+
+    The 60-second margin covers orchestration overhead (subprocess spawn,
+    heartbeat thread, final I/O).  If no non-capability step declares a
+    timeout, the job-level timeout is returned unchanged (backward-compatible).
+
+    Args:
+        job_timeout: Timeout from job.parameters["timeout"] or DEFAULT_JOB_TIMEOUT.
+        spec:        Parsed PipelineSpec (must expose ``.steps`` iterable with
+                     ``.kind`` and ``.params`` attributes on each step).
+
+    Returns:
+        Effective timeout in seconds (always >= job_timeout).
+    """
+    step_sum = sum(
+        int(s.params.get("timeout_seconds", 0))
+        for s in spec.steps
+        if s.kind != "capability"
+    )
+    if step_sum <= 0:
+        return job_timeout
+    return max(job_timeout, step_sum + 60)
+
+
 class JobRunner:
     """
     Exécuteur de Jobs GISPulse.
@@ -73,6 +107,10 @@ class JobRunner:
         *,
         event_sink: RunEventSink | None = None,
         run_id: str | None = None,
+        heartbeat: Any | None = None,
+        cancel_check: Any | None = None,
+        scope: str = "",
+        run_repo: Any | None = None,
     ) -> tuple[Job, gpd.GeoDataFrame]:
         """Execute a Job against a GeoDataFrame.
 
@@ -150,6 +188,10 @@ class JobRunner:
                             job, gdf, timeout,
                             event_sink=event_sink,
                             run_id=run_id,
+                            heartbeat=heartbeat,
+                            cancel_check=cancel_check,
+                            scope=scope,
+                            run_repo=run_repo,
                         )
                         steps_count = len(
                             job.parameters[_PIPELINE_CONFIG_KEY].get("steps", [])
@@ -219,6 +261,10 @@ class JobRunner:
         *,
         event_sink: RunEventSink | None = None,
         run_id: str | None = None,
+        heartbeat: Any | None = None,
+        cancel_check: Any | None = None,
+        scope: str = "",
+        run_repo: Any | None = None,
     ) -> gpd.GeoDataFrame:
         """Execute a job whose parameters contain a ``pipeline_config`` dict.
 
@@ -251,7 +297,7 @@ class JobRunner:
             on the rule_ids path; a proper fix requires a process-level interrupt
             which is out of scope for this PR).
         """
-        from gispulse.core.pipeline import _parse_v2
+        from gispulse.core.pipeline import _parse_v2, validate_step_kind_inputs
         from gispulse.core.pipeline_schema import validate_pipeline_json
         from gispulse.orchestration.pipeline_executor import PipelineExecutor
 
@@ -292,6 +338,18 @@ class JobRunner:
                 f"Job {job.id}: pipeline_config could not be parsed — {exc}"
             ) from exc
 
+        # --- Compile-time step-kind validation -----------------------------
+        # Detects capability steps that depend on non-capability steps at
+        # plan time — before any subprocess is spawned.
+        kind_errors = validate_step_kind_inputs(spec)
+        if kind_errors:
+            summary = "; ".join(kind_errors[:5])
+            if len(kind_errors) > 5:
+                summary += f" … and {len(kind_errors) - 5} more"
+            raise ValueError(
+                f"Job {job.id}: pipeline_config step-kind validation failed — {summary}"
+            )
+
         # --- Zero runnable steps guard ------------------------------------
         runnable = spec.enabled_steps
         if not runnable:
@@ -309,8 +367,27 @@ class JobRunner:
                 "load real data before executing the pipeline."
             )
 
+        # --- Compute effective timeout -------------------------------------
+        # Non-capability steps (external, dbt_build, …) declare their own
+        # timeout_seconds in params.  Their declared timeouts RAISE the job
+        # plafond automatically so the manifest is the single source of truth.
+        # Formula: max(job_timeout, sum(non-capability step timeout_seconds) + 60s).
+        effective_timeout = _compute_effective_timeout(timeout, spec)
+        if effective_timeout != timeout:
+            log.info(
+                "job_timeout_elevated",
+                job_id=str(job.id),
+                original_timeout=timeout,
+                effective_timeout=effective_timeout,
+            )
+
         # --- Execute with timeout -----------------------------------------
-        executor = PipelineExecutor()
+        executor = PipelineExecutor(
+            cancel_check=cancel_check,
+            heartbeat=heartbeat,
+            scope=scope,
+            run_repo=run_repo,
+        )
         pool = ThreadPoolExecutor(max_workers=1)
         try:
             future = pool.submit(
@@ -319,20 +396,35 @@ class JobRunner:
                 event_sink=event_sink,
                 run_id=run_id,
             )
-            results = future.result(timeout=timeout)
+            results = future.result(timeout=effective_timeout)
         except FuturesTimeoutError:
             # Avoid blocking the calling thread in pool.shutdown(wait=True).
             # The worker thread may still linger (same limitation as
             # _execute_with_timeout on the rule_ids path).
             pool.shutdown(wait=False, cancel_futures=True)
-            raise
+            # Re-raise with effective_timeout so the caller's error message
+            # reflects the actual limit that was applied (may differ from the
+            # raw job timeout when non-capability steps elevated the plafond).
+            raise FuturesTimeoutError(
+                f"pipeline execution exceeded effective timeout {effective_timeout}s"
+                + (
+                    f" (elevated from job timeout {timeout}s by step declarations)"
+                    if effective_timeout != timeout
+                    else ""
+                )
+            )
         finally:
             # Normal completion: shutdown is quick (worker already done).
             # Timeout path already called shutdown above; calling it again
             # with wait=False is a no-op on an already-shutdown pool.
             pool.shutdown(wait=False)
 
-        # Return the last step's output (linear pipeline convention).
+        # Return the last step's GeoDataFrame output (linear pipeline convention).
+        # When all steps are non-capability kinds (external, dbt_build, …), they
+        # produce no GeoDataFrame — return the input GDF unchanged so the caller
+        # has a well-typed result (the meaningful output is in step artifacts).
+        if not results:
+            return gdf
         last_step_gdf = list(results.values())[-1]
         return last_step_gdf
 

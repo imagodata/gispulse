@@ -90,6 +90,10 @@ class RecordingSink:
                     existing.status = JobStatus.COMPLETED if event_type == "run.step.completed" else JobStatus.FAILED
                     existing.ended_at = datetime.now(timezone.utc)
                     existing.error = data.get("error", "")
+                    # Persist artifacts from non-capability step kinds
+                    artifacts = data.get("artifacts")
+                    if artifacts and isinstance(artifacts, dict):
+                        existing.artifacts = artifacts
 
             if self._run_repo is not None:
                 self._run_repo.save(self._run)

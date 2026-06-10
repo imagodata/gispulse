@@ -162,6 +162,16 @@ SCHEMA_V2: dict[str, Any] = {
                     "enum": ["capability", "filter", "spatial_op", "custom_sql"],
                     "default": "capability",
                 },
+                "kind": {
+                    "type": "string",
+                    "default": "capability",
+                    "description": (
+                        "Step execution kind. 'capability' (default) uses the "
+                        "GeoDataFrame→GeoDataFrame capability registry. Other "
+                        "values are dispatched to the step-kind registry "
+                        "(e.g. 'external' for subprocess execution)."
+                    ),
+                },
                 "capability": {"type": "string"},
                 "params": {"type": "object"},
                 "config": {
