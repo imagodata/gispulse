@@ -86,13 +86,14 @@ def register_probe_kind(
 class ProbeSpec:
     """Machine-readable description of how source presence is checked.
 
-    *metadata* is an open mapping for probe-kind-specific parameters.  The
-    built-in kinds consume keys documented below; application kinds may add
-    whatever they need.
+    Template resolution inputs are first-class *fields*, not metadata keys:
+    ``env_names`` (env-var names tried in order) and ``default_template``
+    (fallback path template) — ``parquet_template`` reads the fields directly
+    and ignores same-named metadata keys.
 
-    Built-in keys consumed by ``parquet_template``:
-        - ``env_names`` (list[str]): env-var names tried in order.
-        - ``default_template`` (str | None): fallback path template.
+    *metadata* is an open mapping for the remaining probe-kind-specific
+    parameters.  The built-in kinds consume the keys documented below;
+    application kinds may add whatever they need.
 
     Built-in keys consumed by ``stage_status``:
         - ``required_entries`` (list[str] | None): entry names that must be
