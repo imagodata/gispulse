@@ -311,7 +311,7 @@ gispulse/
 
 ## Capabilities
 
-**117 registered capabilities** across 18 categories. Full reference: [capabilities guide](https://imagodata.github.io/gispulse/guide/capabilities).
+**128 registered capabilities** across 18 categories. Full reference: [capabilities guide](https://imagodata.github.io/gispulse/guide/capabilities).
 
 ### Vector — geometry & analysis
 
@@ -536,7 +536,7 @@ GISPULSE_TELEMETRY=0           # Disable via env var (CI-friendly)
 | Module | Status | Notes |
 |---|---|---|
 | Core models | Done | Dataset, Layer, Rule, Job, Artifact, Scenario, Trigger |
-| Vector capabilities | Done | 117 capabilities across 18 categories (geometry, overlay, attributes, classification, clustering, topology, temporal, 3D pointcloud, network), registry + strategy pattern |
+| Vector capabilities | Done | 128 capabilities across 18 categories (geometry, overlay, attributes, classification, clustering, topology, temporal, 3D pointcloud, network), registry + strategy pattern |
 | Rules engine | Done | JSON rules, sequential execution, predicates |
 | DuckDB session | Done | <100ms startup, GPKG native |
 | Multi-format I/O | Done | 13+ read formats, pyogrio |
@@ -547,7 +547,7 @@ GISPULSE_TELEMETRY=0           # Disable via env var (CI-friendly)
 | Portal API | Done | FastAPI, 27 routers, 100+ endpoints |
 | Python SDK | Done | httpx + pydantic, 10 endpoint modules, async client, WebSocket/SSE |
 | QGIS plugin | Done | Dataset browser, jobs, OGC/PostGIS/MVT layer factories |
-| Tauri desktop app | Done | Tauri 2 + React 19 + MapLibre GL JS, splash screen, file import |
+| Tauri desktop app | Beta | Tauri 2 + React 19 + MapLibre GL JS, splash screen, file import — not yet packaged for distribution |
 | ArcGIS Pro add-in | Done | Dockpanes, 3 GP tools |
 | PostGIS + ESB | Done | PostGIS adapter, pg_notify triggers, circuit breaker, DLQ |
 | VPS deploy | Done | Caddy TLS, Prometheus, Grafana, pg-backup |

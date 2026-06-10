@@ -76,9 +76,28 @@ MODEL_TABLE_MAPPING = build_model_table_mapping(prefix="_gispulse_")
 # Change tracking trigger templates
 # ---------------------------------------------------------------------------
 
+def _row_pk_expr(ref: str, pk_cols: list[str]) -> str:
+    """Build the SQL expression that fills ``_gispulse_change_log.row_pk``.
+
+    Single-column PK → the bare ``ref."col"`` value (unchanged from the
+    pre-#403 behaviour, so existing single-PK change logs stay
+    byte-identical). Composite PK → a JSON array
+    ``json_array(ref."a", ref."b", ...)`` so the change log carries
+    *every* key column instead of silently dropping all but the first.
+    :func:`gispulse.persistence.change_log_watcher` decodes the array to
+    rebuild the full ``WHERE "a"=? AND "b"=?`` lookup.
+
+    Callers MUST validate every column name first (no DDL parameter binding).
+    """
+    if len(pk_cols) == 1:
+        return f'{ref}."{pk_cols[0]}"'
+    parts = ", ".join(f'{ref}."{c}"' for c in pk_cols)
+    return f"json_array({parts})"
+
+
 def _build_change_triggers(
     table_name: str,
-    pk_col: str = "fid",
+    pk_col: str | list[str] = "fid",
     *,
     columns: list[str] | None = None,
     geom_col: str | None = None,
@@ -108,7 +127,13 @@ def _build_change_triggers(
         ValueError: If any identifier is unsafe.
     """
     _validate_identifier(table_name)
-    _validate_identifier(pk_col)
+    pk_cols = [pk_col] if isinstance(pk_col, str) else list(pk_col)
+    if not pk_cols:
+        raise ValueError("pk_col must name at least one column")
+    for c in pk_cols:
+        _validate_identifier(c)
+    new_pk_expr = _row_pk_expr("NEW", pk_cols)
+    old_pk_expr = _row_pk_expr("OLD", pk_cols)
     cols = list(columns or [])
     for c in cols:
         _validate_identifier(c)
@@ -144,7 +169,7 @@ def _build_change_triggers(
         f"  INSERT INTO _gispulse_change_log"
         f"(table_name, operation, row_pk, new_values, geom_changed)\n"
         f"  VALUES ('{table_name}', 'INSERT', "
-        f'NEW."{pk_col}", {_json_obj("NEW")}, {gc_insert});\n'
+        f'{new_pk_expr}, {_json_obj("NEW")}, {gc_insert});\n'
         f"END"
     )
 
@@ -172,7 +197,7 @@ def _build_change_triggers(
         f"  INSERT INTO _gispulse_change_log"
         f"(table_name, operation, row_pk, new_values, old_values, geom_changed)\n"
         f"  VALUES ('{table_name}', 'UPDATE', "
-        f'NEW."{pk_col}", {_json_obj("NEW")}, {_json_obj("OLD")}, {gc_update});\n'
+        f'{new_pk_expr}, {_json_obj("NEW")}, {_json_obj("OLD")}, {gc_update});\n'
         f"END"
     )
 
@@ -183,7 +208,7 @@ def _build_change_triggers(
         f"  INSERT INTO _gispulse_change_log"
         f"(table_name, operation, row_pk, old_values, geom_changed)\n"
         f"  VALUES ('{table_name}', 'DELETE', "
-        f'OLD."{pk_col}", {_json_obj("OLD")}, {gc_delete});\n'
+        f'{old_pk_expr}, {_json_obj("OLD")}, {gc_delete});\n'
         f"END"
     )
 
@@ -191,7 +216,7 @@ def _build_change_triggers(
 
 
 def _inspect_layer(
-    conn: sqlite3.Connection, layer_name: str, pk_col: str
+    conn: sqlite3.Connection, layer_name: str, pk_col: str | list[str]
 ) -> tuple[list[str], str | None]:
     """Return (non-pk non-geom columns, geom_col_name) for a spatial layer.
 
@@ -221,11 +246,12 @@ def _inspect_layer(
         "GEOMETRY", "GEOMCOLLECTION", "GEOMETRYCOLLECTION",
     )
 
+    pk_set = {pk_col} if isinstance(pk_col, str) else set(pk_col)
     non_pk_cols: list[str] = []
     for cid, name, ctype, *_ in conn.execute(
         f'PRAGMA table_info("{layer_name}")'
     ).fetchall():
-        if name == pk_col:
+        if name in pk_set:
             continue
         if geom_col is None and ctype:
             if ctype.upper() in geometry_type_keywords:
@@ -423,8 +449,8 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection) -> int:
         # with ``NEW."fid"`` and break tables whose PK is named
         # otherwise.
         try:
-            pk_col = _detect_pk_col(conn, layer)
-            install_change_tracking(conn, layer, pk_col=pk_col)
+            pk_cols = _detect_pk_cols(conn, layer)
+            install_change_tracking(conn, layer, pk_col=pk_cols)
         except ValueError as exc:
             # A pre-B-05 GPKG could conceivably hold a layer name that
             # is now rejected by ``validate_layer_name`` (control char,
@@ -519,7 +545,7 @@ def bootstrap_spatialite_project(conn: sqlite3.Connection) -> None:
 def install_change_tracking(
     conn: sqlite3.Connection,
     layer_name: str,
-    pk_col: str = "fid",
+    pk_col: str | list[str] = "fid",
     *,
     columns: list[str] | None = None,
     geom_col: str | None = None,
@@ -544,7 +570,9 @@ def install_change_tracking(
         layer_name: Spatial table to track. Any string except those
                     containing ``"``, ``'``, ``;``, ``\\`` or control
                     chars — see :func:`_validate_identifier`.
-        pk_col:     Primary key column (default ``fid`` per GPKG spec).
+        pk_col:     Primary key column (default ``fid`` per GPKG spec),
+                    or a list of columns for a composite key. A composite
+                    key is stored in ``row_pk`` as a ``json_array`` (#403).
         columns:    Optional explicit list of columns to capture in the
                     JSON payload. When ``None``, all non-pk non-geom
                     columns of the layer are inspected and included.
@@ -557,10 +585,14 @@ def install_change_tracking(
         ValueError: If any identifier is unsafe.
     """
     _validate_identifier(layer_name)
-    _validate_identifier(pk_col)
+    pk_cols = [pk_col] if isinstance(pk_col, str) else list(pk_col)
+    if not pk_cols:
+        raise ValueError("pk_col must name at least one column")
+    for _c in pk_cols:
+        _validate_identifier(_c)
 
     if columns is None or geom_col is None:
-        auto_cols, auto_geom = _inspect_layer(conn, layer_name, pk_col)
+        auto_cols, auto_geom = _inspect_layer(conn, layer_name, pk_cols)
         if columns is None:
             columns = auto_cols
         if geom_col is None:
@@ -618,25 +650,16 @@ def _ensure_origin_column(conn: sqlite3.Connection, layer_name: str) -> bool:
     return True
 
 
-def _detect_pk_col(conn: sqlite3.Connection, layer_name: str) -> str:
-    """Return the layer's primary key column name (defaults to ``"fid"``).
-
-    B-02 (#103): the v2→v3 migration re-installs change tracking on
-    every previously tracked layer. The legacy default of
-    ``pk_col="fid"`` would silently rewrite the trigger DDL with
-    ``NEW."fid"`` even on tables whose PK is named otherwise (``id``,
-    ``rowid``, ...) — breaking ``test_set_field_e2e`` and any caller
-    that originally passed an explicit ``pk_col=`` to
-    :func:`install_change_tracking`.
+def _detect_pk_cols(conn: sqlite3.Connection, layer_name: str) -> list[str]:
+    """Return the layer's primary-key columns, ordered by key position.
 
     SQLite's ``PRAGMA table_info`` reports the PK position in column 5
-    (``pk``) — non-zero means PK, with the position when composite. We
-    pick the *first* PK column; for single-column PKs that's always
-    correct. For multi-column PKs (rare in GPKG layers) the change-log
-    can only carry one ``row_pk`` value, so taking the first is the
-    conservative compromise.
+    (``pk``) — non-zero means PK, with the position when composite. A
+    composite key returns every column in declaration order; #403: the
+    change-log ``row_pk`` then carries all of them (via ``json_array``)
+    instead of silently keeping only the first.
 
-    Falls back to ``"fid"`` when PRAGMA returns no PK (legacy GPKG
+    Falls back to ``["fid"]`` when PRAGMA returns no PK (legacy GPKG
     layers without a declared primary key would have failed install
     too — keep the legacy default for graceful degradation).
     """
@@ -645,14 +668,26 @@ def _detect_pk_col(conn: sqlite3.Connection, layer_name: str) -> str:
             f'PRAGMA table_info("{layer_name}")'
         ).fetchall()
     except Exception:
-        return "fid"
+        return ["fid"]
     pk_cols = sorted(
         ((row[5], row[1]) for row in rows if row[5]),
         key=lambda t: t[0],
     )
     if pk_cols:
-        return str(pk_cols[0][1])
-    return "fid"
+        return [str(name) for _, name in pk_cols]
+    return ["fid"]
+
+
+def _detect_pk_col(conn: sqlite3.Connection, layer_name: str) -> str:
+    """Return the layer's first primary-key column (defaults to ``"fid"``).
+
+    Thin wrapper over :func:`_detect_pk_cols` kept for callers that only
+    need a single column name. B-02 (#103): the v2→v3 migration honours
+    the original PK column name rather than the legacy ``fid`` default,
+    which would otherwise rewrite the trigger DDL with ``NEW."fid"`` and
+    break tables whose PK is named otherwise (``id``, ``rowid``, ...).
+    """
+    return _detect_pk_cols(conn, layer_name)[0]
 
 
 def _list_gispulse_triggers(

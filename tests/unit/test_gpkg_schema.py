@@ -88,6 +88,21 @@ class TestBuildChangeTriggers:
         triggers = _build_change_triggers("x")
         assert all('."fid"' in t for t in triggers)
 
+    def test_composite_pk_uses_json_array(self):
+        # #403: a composite key must journal every column via json_array,
+        # not silently keep only the first.
+        triggers = _build_change_triggers("ods", pk_col=["dept", "commune"])
+        assert any(
+            'json_array(NEW."dept", NEW."commune")' in t for t in triggers
+        )
+        assert any(
+            'json_array(OLD."dept", OLD."commune")' in t for t in triggers
+        )
+
+    def test_empty_pk_list_rejected(self):
+        with pytest.raises(ValueError):
+            _build_change_triggers("x", pk_col=[])
+
 
 # ---------------------------------------------------------------------------
 # _ensure_gpkg_extensions_table
@@ -313,6 +328,31 @@ class TestInstallChangeTracking:
             "SELECT row_pk FROM _gispulse_change_log WHERE table_name='t'"
         ).fetchone()
         assert row["row_pk"] == "42"
+
+    def test_install_composite_pk_roundtrip(self, conn):
+        # #403: a composite PK is journalled as a JSON array carrying
+        # every key column, and _detect_pk_cols discovers both columns.
+        import json as _json
+
+        from gispulse.persistence.gpkg_schema import _detect_pk_cols
+
+        bootstrap_gpkg_project(conn)
+        conn.execute(
+            'CREATE TABLE "ods" '
+            '(dept INTEGER, commune TEXT, val INTEGER, '
+            "PRIMARY KEY (dept, commune))"
+        )
+        conn.commit()
+        assert _detect_pk_cols(conn, "ods") == ["dept", "commune"]
+        install_change_tracking(conn, "ods", pk_col=["dept", "commune"])
+        conn.execute(
+            'INSERT INTO "ods" (dept, commune, val) VALUES (33, \'075056\', 7)'
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT row_pk FROM _gispulse_change_log WHERE table_name='ods'"
+        ).fetchone()
+        assert _json.loads(row["row_pk"]) == [33, "075056"]
 
 
 # ---------------------------------------------------------------------------
