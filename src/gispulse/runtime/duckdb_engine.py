@@ -93,7 +93,7 @@ def get_spatial_connection(database: str = ":memory:") -> "DuckDBPyConnection":
         ) from exc
 
     conn = duckdb.connect(database)
-    from gispulse.persistence.duckdb_limits import configure_duckdb_limits
+    from gispulse.core.duckdb_limits import configure_duckdb_limits
 
     configure_duckdb_limits(conn)
     _ensure_spatial_loaded(conn, getattr(duckdb, "__file__", ""))

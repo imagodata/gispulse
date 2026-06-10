@@ -160,7 +160,7 @@ class FileBlobChangeDetector:
     def _get_duckdb(self) -> Any:
         if self._duckdb is None:
             import duckdb
-            from gispulse.persistence.duckdb_limits import configure_duckdb_limits
+            from gispulse.core.duckdb_limits import configure_duckdb_limits
 
             self._duckdb = duckdb.connect(":memory:")
             configure_duckdb_limits(self._duckdb)
@@ -419,7 +419,7 @@ class FileBlobChangeDetector:
         if not self._snapshot_path.exists():
             return {}
         import duckdb
-        from gispulse.persistence.duckdb_limits import configure_duckdb_limits
+        from gispulse.core.duckdb_limits import configure_duckdb_limits
 
         try:
             with duckdb.connect(str(self._snapshot_path), read_only=True) as conn:
@@ -453,7 +453,7 @@ class FileBlobChangeDetector:
         recreated and populated row-by-row.
         """
         import duckdb
-        from gispulse.persistence.duckdb_limits import configure_duckdb_limits
+        from gispulse.core.duckdb_limits import configure_duckdb_limits
 
         # We always recreate the file to avoid leaving a stale
         # ``snapshot`` table around if the schema ever evolves.

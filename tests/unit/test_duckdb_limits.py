@@ -1,4 +1,4 @@
-"""Tests for persistence.duckdb_limits."""
+"""Tests for core.duckdb_limits."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import duckdb
 
 import gispulse.core.config as cfg_mod
-from gispulse.persistence.duckdb_limits import (
+from gispulse.core.duckdb_limits import (
     DuckDBLimitSettings,
     _limits_from_settings,
     _sql_literal,

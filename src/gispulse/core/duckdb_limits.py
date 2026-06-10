@@ -7,7 +7,7 @@ which preserves the current behaviour for existing installs.
 
 Typical usage::
 
-    from gispulse.persistence.duckdb_limits import configure_duckdb_limits
+    from gispulse.core.duckdb_limits import configure_duckdb_limits
     conn = duckdb.connect(":memory:")
     configure_duckdb_limits(conn)          # reads settings.jobs automatically
 

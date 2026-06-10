@@ -121,7 +121,7 @@ class DuckDBSession(SpatialEngine):
     # -- lifecycle ---------------------------------------------------------
 
     def open(self) -> None:
-        from gispulse.persistence.duckdb_limits import configure_duckdb_limits
+        from gispulse.core.duckdb_limits import configure_duckdb_limits
 
         self._conn = duckdb.connect(self.database)
         configure_duckdb_limits(self._conn)
