@@ -289,7 +289,9 @@ def test_validate_reports_webhook_without_url(
 
 def test_module_does_not_call_unsafe_yaml_load() -> None:
     """Static grep: ensure the module never reaches for ``yaml.load``."""
-    src = Path(__file__).resolve().parents[2] / "gispulse" / "runtime" / "config_loader.py"
+    import gispulse.runtime.config_loader as config_loader_module
+
+    src = Path(config_loader_module.__file__).resolve()
     text = src.read_text(encoding="utf-8")
     # Reject ``yaml.load(`` exactly. ``yaml.safe_load`` is fine.
     bad_patterns = ["yaml.load(", "yaml.unsafe_load(", "yaml.full_load("]
