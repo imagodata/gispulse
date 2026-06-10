@@ -62,3 +62,4 @@ class PipelineRun:
     ended_at: datetime | None = None
     error: str = ""
     steps: list[PipelineRunStep] = field(default_factory=list)
+    depth: int = 0
