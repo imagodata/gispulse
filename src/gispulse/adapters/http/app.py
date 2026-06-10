@@ -40,6 +40,7 @@ from gispulse.adapters.http.routers.jobs_router import router as jobs_router, re
 from gispulse.adapters.http.routers.portal_router import router as portal_router
 from gispulse.adapters.http.routers.projects_router import router as projects_router
 from gispulse.adapters.http.routers.rules_router import router as rules_router
+from gispulse.adapters.http.routers.runs_router import router as runs_router
 from gispulse.adapters.http.routers.scenarios_router import router as scenarios_router
 from gispulse.adapters.http.routers.sessions_router import router as sessions_router
 from gispulse.adapters.http.routers.schedules_router import router as schedules_router
@@ -327,11 +328,49 @@ def create_app(
 
             # Start the job worker (polls the queue and executes jobs)
             from gispulse.orchestration.worker import JobWorker
+            from gispulse.persistence.run_repository import RunRepository
+
+            run_repo = RunRepository(db_path=db_path)
+            app.state.run_repo = run_repo
+
+            # Recover runs left RUNNING by a prior crash (emit via EventHub once wired)
+            try:
+                n_stale = run_repo.recover_stale_runs()
+                if n_stale:
+                    log.info("stale_runs_recovered", count=n_stale)
+            except Exception as exc:
+                log.warning("stale_run_recovery_failed", error=str(exc))
+
+            # EventHubSink: bridges RunEventSink -> EventHub.broadcast.
+            # Lives here (adapters layer) so orchestration stays decoupled
+            # from adapters/http — orchestration never imports adapters/.
+            class EventHubSink:
+                def __init__(self, hub):
+                    self._hub = hub
+
+                def emit(self, event_type: str, data: dict) -> None:
+                    import uuid as _uuid
+                    from datetime import datetime as _dt
+                    # Make data JSON-safe: UUID/datetime -> str
+                    safe: dict = {}
+                    for k, v in data.items():
+                        if isinstance(v, _uuid.UUID):
+                            safe[k] = str(v)
+                        elif isinstance(v, _dt):
+                            safe[k] = v.isoformat()
+                        else:
+                            safe[k] = v
+                    self._hub.broadcast(event_type, safe)
+
+            hub_sink = EventHubSink(app.state.event_hub)
+
             worker = JobWorker(
                 queue=app.state.job_queue,
                 runner=app.state.job_runner,
                 dataset_repo=app.state.dataset_repo,
                 job_repo=app.state.job_repo,
+                run_repo=run_repo,
+                event_sink=hub_sink,
                 results_dir=_results_path,
             )
             app.state.job_worker = worker
@@ -807,6 +846,7 @@ def create_app(
         app.include_router(rules_router)
         app.include_router(triggers_router)
         app.include_router(jobs_router)
+        app.include_router(runs_router)
         app.include_router(scenarios_router)
         app.include_router(capabilities_router)
         app.include_router(templates_router)
@@ -844,6 +884,7 @@ def create_app(
         app.include_router(templates_router, **read_protected)
         app.include_router(rules_router, **write_protected)
         app.include_router(jobs_router, **protected)
+        app.include_router(runs_router, **protected)
         app.include_router(datasets_router, **protected)
         app.include_router(projects_router, **protected)
         app.include_router(scenarios_router, **protected)

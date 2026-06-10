@@ -301,6 +301,9 @@ def run_manifest(
             "source nor a previously materialized model"
         )
 
+    # NOTE: event_sink not propagated here — manifest runs are not yet surfaced as
+    # PipelineRun entities. Pass event_sink= when wiring manifest execution through
+    # the job layer (volet c, issue #440).
     executor = PipelineExecutor(execution_context=None)
     assertion_warnings: list = []
 

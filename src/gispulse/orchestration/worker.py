@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import functools
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,6 +31,8 @@ import geopandas as gpd
 
 from gispulse.core.logging import get_logger
 from gispulse.core.models import Job, JobStatus
+from gispulse.core.run_models import PipelineRun
+from gispulse.orchestration.event_sink import NoOpSink, RecordingSink, RunEventSink
 from gispulse.orchestration.job_queue import JobQueue
 from gispulse.orchestration.runner import JobRunner
 from gispulse.persistence.repository import Repository
@@ -65,6 +68,8 @@ class JobWorker:
         dataset_repo: Repository,
         job_repo: Repository,
         *,
+        run_repo: Any | None = None,
+        event_sink: RunEventSink | None = None,
         results_dir: Path | None = None,
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         max_concurrent: int = 2,
@@ -73,6 +78,8 @@ class JobWorker:
         self._runner = runner
         self._dataset_repo = dataset_repo
         self._job_repo = job_repo
+        self._run_repo = run_repo
+        self._event_sink = event_sink if event_sink is not None else NoOpSink()
         self._results_dir = results_dir or Path("results")
         self._poll_interval = poll_interval
         self._running = False
@@ -154,10 +161,49 @@ class JobWorker:
         job_id = str(job.id)
         log.info("worker_processing", job_id=job_id, job_name=job.name)
 
+        # Determine run source from triggered_by parameter
+        triggered_by = job.parameters.get("triggered_by", "job")
+        source = "schedule" if triggered_by == "scheduler" else "job"
+
+        # Create PipelineRun record
+        run = PipelineRun(
+            source=source,
+            spec_ref=job.name,
+            scope=str(job.parameters.get("scope", "")),
+        )
+
+        # RecordingSink keeps PipelineRunStep entries in sync with the run entity
+        # and persists after each step event. The outer _event_sink (e.g. EventHubSink)
+        # is used as the inner delegate so broadcasts still reach WebSocket clients.
+        run_sink = RecordingSink(run=run, run_repo=self._run_repo, inner=self._event_sink)
+
+        if self._run_repo is not None:
+            self._run_repo.save(run)
+
+        run_sink.emit("run.started", {
+            "run_id": str(run.run_id),
+            "job_id": job_id,
+            "source": source,
+            "spec_ref": job.name,
+            "started_at": run.started_at.isoformat(),
+        })
+
         # Check if cancelled before we start
         queue_status = await self._queue.get_status(job_id)
         if queue_status and queue_status.get("status") == JobStatus.FAILED.value:
             log.info("worker_skip_cancelled", job_id=job_id)
+            run.status = JobStatus.FAILED
+            run.error = "cancelled"
+            run.ended_at = datetime.now(timezone.utc)
+            if self._run_repo is not None:
+                self._run_repo.save(run)
+            run_sink.emit("run.failed", {
+                "run_id": str(run.run_id),
+                "job_id": job_id,
+                "status": "failed",
+                "ended_at": run.ended_at.isoformat(),
+                "error": "cancelled",
+            })
             return
 
         await self._queue.update_status(job_id, JobStatus.RUNNING)
@@ -181,7 +227,12 @@ class JobWorker:
 
             # Execute in thread pool (CPU-bound)
             loop = asyncio.get_running_loop()
-            run_fn = functools.partial(self._runner.run, job, gdf, layer_resolver=_layer_resolver)
+            run_fn = functools.partial(
+                self._runner.run, job, gdf,
+                layer_resolver=_layer_resolver,
+                event_sink=run_sink,
+                run_id=str(run.run_id),
+            )
             updated_job, result_gdf = await loop.run_in_executor(
                 self._executor, run_fn
             )
@@ -190,6 +241,18 @@ class JobWorker:
             final_status = await self._queue.get_status(job_id)
             if final_status and final_status.get("status") == JobStatus.FAILED.value:
                 log.info("worker_job_cancelled_while_running", job_id=job_id)
+                run.status = JobStatus.FAILED
+                run.error = "cancelled"
+                run.ended_at = datetime.now(timezone.utc)
+                if self._run_repo is not None:
+                    self._run_repo.save(run)
+                run_sink.emit("run.failed", {
+                    "run_id": str(run.run_id),
+                    "job_id": job_id,
+                    "status": "failed",
+                    "ended_at": run.ended_at.isoformat(),
+                    "error": "cancelled",
+                })
                 return
 
             # Persist result (only if not cancelled)
@@ -216,6 +279,12 @@ class JobWorker:
             job.completed_at = datetime.now(timezone.utc)
             self._job_repo.save(job)
 
+            # Update PipelineRun to COMPLETED
+            run.status = JobStatus.COMPLETED
+            run.ended_at = datetime.now(timezone.utc)
+            if self._run_repo is not None:
+                self._run_repo.save(run)
+
             # Record metering for all job sources (HTTP, scheduler, triggers)
             metering = getattr(self, "_metering", None)
             if metering is not None:
@@ -226,6 +295,12 @@ class JobWorker:
                 except Exception as meter_exc:
                     log.warning("worker_metering_failed", job_id=job_id, error=str(meter_exc))
 
+            run_sink.emit("run.completed", {
+                "run_id": str(run.run_id),
+                "job_id": job_id,
+                "status": "completed",
+                "ended_at": run.ended_at.isoformat(),
+            })
             log.info("worker_job_completed", job_id=job_id)
 
         except Exception as exc:
@@ -250,6 +325,21 @@ class JobWorker:
                 self._job_repo.save(job)
             except Exception as repo_exc:
                 log.error("worker_repo_save_failed", job_id=job_id, error=str(repo_exc))
+
+            # Update PipelineRun to FAILED
+            run.status = JobStatus.FAILED
+            run.error = error_msg
+            run.ended_at = datetime.now(timezone.utc)
+            if self._run_repo is not None:
+                self._run_repo.save(run)
+
+            run_sink.emit("run.failed", {
+                "run_id": str(run.run_id),
+                "job_id": job_id,
+                "status": "failed",
+                "ended_at": run.ended_at.isoformat(),
+                "error": error_msg,
+            })
             log.error("worker_job_failed", job_id=job_id, error=error_msg)
         finally:
             heartbeat_task.cancel()

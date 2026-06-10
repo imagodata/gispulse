@@ -17,6 +17,7 @@ import geopandas as gpd
 from gispulse.core.observability import MetricsCollector
 from gispulse.core.logging import get_logger
 from gispulse.core.models import Job, JobStatus, Rule
+from gispulse.orchestration.event_sink import RunEventSink
 from gispulse.persistence.repository import Repository
 from gispulse.rules.engine import RuleEngine
 
@@ -64,6 +65,9 @@ class JobRunner:
         job: Job,
         gdf: gpd.GeoDataFrame,
         layer_resolver: Any | None = None,
+        *,
+        event_sink: RunEventSink | None = None,
+        run_id: str | None = None,
     ) -> tuple[Job, gpd.GeoDataFrame]:
         """Execute a Job against a GeoDataFrame.
 
@@ -116,7 +120,9 @@ class JobRunner:
                 with _metrics.timer("job_duration_seconds"):
                     if use_pipeline_config:
                         result_gdf = self._execute_pipeline_config(
-                            job, gdf, timeout
+                            job, gdf, timeout,
+                            event_sink=event_sink,
+                            run_id=run_id,
                         )
                         steps_count = len(
                             job.parameters[_PIPELINE_CONFIG_KEY].get("steps", [])
@@ -183,6 +189,9 @@ class JobRunner:
         job: Job,
         gdf: gpd.GeoDataFrame,
         timeout: int,
+        *,
+        event_sink: RunEventSink | None = None,
+        run_id: str | None = None,
     ) -> gpd.GeoDataFrame:
         """Execute a job whose parameters contain a ``pipeline_config`` dict.
 
@@ -277,7 +286,12 @@ class JobRunner:
         executor = PipelineExecutor()
         pool = ThreadPoolExecutor(max_workers=1)
         try:
-            future = pool.submit(executor.execute, spec, {"input": gdf})
+            future = pool.submit(
+                executor.execute, spec, {"input": gdf},
+                None,  # params
+                event_sink=event_sink,
+                run_id=run_id,
+            )
             results = future.result(timeout=timeout)
         except FuturesTimeoutError:
             # Avoid blocking the calling thread in pool.shutdown(wait=True).
