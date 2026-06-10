@@ -196,3 +196,61 @@ class TestDeleteMap:
     def test_delete_404(self, client: TestClient) -> None:
         resp = client.delete(f"/maps/{uuid4()}")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Publication (#406)
+# ---------------------------------------------------------------------------
+
+
+class TestPublishMap:
+    def test_publish_returns_token(self, client: TestClient) -> None:
+        mid = client.post("/maps", json=_payload()).json()["id"]
+        resp = client.post(f"/maps/{mid}/publish")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["token"].startswith("pub_")
+        assert body["url"] == f"/public/maps/{body['token']}"
+        assert body["layer_count"] == 1
+        # the map now reports as published
+        got = client.get(f"/maps/{mid}").json()
+        assert got["is_published"] is True
+        assert got["public_token"] == body["token"]
+
+    def test_publish_404(self, client: TestClient) -> None:
+        assert client.post(f"/maps/{uuid4()}/publish").status_code == 404
+
+    def test_republish_keeps_token(self, client: TestClient) -> None:
+        mid = client.post("/maps", json=_payload()).json()["id"]
+        t1 = client.post(f"/maps/{mid}/publish").json()["token"]
+        t2 = client.post(f"/maps/{mid}/publish").json()["token"]
+        assert t1 == t2
+
+    def test_unpublish_invalidates(self, client: TestClient) -> None:
+        mid = client.post("/maps", json=_payload()).json()["id"]
+        token = client.post(f"/maps/{mid}/publish").json()["token"]
+        assert client.get(f"/public/maps/{token}").status_code == 200
+        assert client.delete(f"/maps/{mid}/publish").status_code == 204
+        # token invalid immediately
+        assert client.get(f"/public/maps/{token}").status_code == 404
+        assert client.get(f"/maps/{mid}").json()["is_published"] is False
+
+    def test_unpublish_404(self, client: TestClient) -> None:
+        assert client.delete(f"/maps/{uuid4()}/publish").status_code == 404
+
+    def test_community_quota_enforced(self, client: TestClient, monkeypatch) -> None:
+        # The shared test suite defaults to Pro (unlimited); force community
+        # so the published-map quota (3) applies. get_current_tier() reads the
+        # env live, so this takes effect for the publish requests below.
+        monkeypatch.setenv("GISPULSE_TIER", "community")
+        ids = [client.post("/maps", json=_payload(name=f"m{i}")).json()["id"] for i in range(4)]
+        for mid in ids[:3]:
+            assert client.post(f"/maps/{mid}/publish").status_code == 200
+        # 4th distinct publish exceeds the quota
+        resp = client.post(f"/maps/{ids[3]}/publish")
+        assert resp.status_code == 402
+        # re-publishing an already-published one is still allowed
+        assert client.post(f"/maps/{ids[0]}/publish").status_code == 200
+        # freeing a slot lets the 4th publish
+        assert client.delete(f"/maps/{ids[0]}/publish").status_code == 204
+        assert client.post(f"/maps/{ids[3]}/publish").status_code == 200

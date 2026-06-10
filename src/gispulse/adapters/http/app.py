@@ -42,6 +42,7 @@ from gispulse.adapters.http.routers.portal_router import router as portal_router
 from gispulse.adapters.http.routers.projects_router import router as projects_router
 from gispulse.adapters.http.routers.rules_router import router as rules_router
 from gispulse.adapters.http.routers.runs_router import router as runs_router
+from gispulse.adapters.http.routers.public_maps_router import router as public_maps_router
 from gispulse.adapters.http.routers.saved_maps_router import router as saved_maps_router
 from gispulse.adapters.http.routers.scenarios_router import router as scenarios_router
 from gispulse.adapters.http.routers.sessions_router import router as sessions_router
@@ -883,6 +884,7 @@ def create_app(
         app.include_router(runs_router)
         app.include_router(scenarios_router)
         app.include_router(saved_maps_router)
+        app.include_router(public_maps_router)
         app.include_router(capabilities_router)
         app.include_router(templates_router)
         app.include_router(marketplace_router)
@@ -924,6 +926,9 @@ def create_app(
         app.include_router(projects_router, **protected)
         app.include_router(scenarios_router, **protected)
         app.include_router(saved_maps_router, **protected)
+        # Public read-only published-map surface — intentionally NO auth
+        # (explicit GET-only allowlist, served by token). See #406/#399.
+        app.include_router(public_maps_router)
         app.include_router(triggers_router, **write_protected)
         app.include_router(relations_router, **write_protected)
         app.include_router(sessions_router, **protected)

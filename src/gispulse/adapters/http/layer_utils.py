@@ -90,6 +90,86 @@ def sanitize_datetime_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return gdf
 
 
+def gdf_to_feature_collection(
+    gdf: gpd.GeoDataFrame | pd.DataFrame,
+    *,
+    bbox: str | None = None,
+    limit: int = 10000,
+    offset: int = 0,
+    simplify: float | None = None,
+) -> dict:
+    """Render a (Geo)DataFrame to a GeoJSON ``FeatureCollection`` dict.
+
+    Applies bbox filtering, offset/limit pagination, optional simplification,
+    reprojection to EPSG:4326 and datetime sanitisation — the same pipeline
+    the portal ``/datasets/{id}/layers/{layer}/features`` endpoint uses, so
+    public map serving (#406) and the portal share one implementation.
+
+    Non-spatial tables return ``{"type": "Table", "records": [...],
+    "total_count": n}``. ``ValueError`` is raised on a malformed ``bbox`` so
+    the HTTP caller can map it to a 400.
+    """
+    import json
+
+    is_spatial = (
+        isinstance(gdf, gpd.GeoDataFrame)
+        and "geometry" in gdf.columns
+        and not gdf.geometry.isna().all()
+    )
+
+    if not is_spatial:
+        total = len(gdf)
+        df_slice = gdf.iloc[offset: offset + limit]
+        records = json.loads(df_slice.to_json(orient="records"))
+        return {"type": "Table", "records": records, "total_count": total}
+
+    if bbox:
+        parts = [float(x) for x in bbox.split(",")]
+        if len(parts) != 4:
+            raise ValueError("bbox must be minx,miny,maxx,maxy")
+        minx, miny, maxx, maxy = parts
+        if gdf.crs and not gdf.crs.equals("EPSG:4326"):
+            from pyproj import Transformer
+            transformer = Transformer.from_crs("EPSG:4326", gdf.crs, always_xy=True)
+            minx, miny = transformer.transform(minx, miny)
+            maxx, maxy = transformer.transform(maxx, maxy)
+        gdf = gdf.cx[minx:maxx, miny:maxy]
+
+    total = len(gdf)
+    gdf = gdf.iloc[offset: offset + limit]
+
+    if simplify and simplify > 0:
+        gdf = gdf.copy()
+        original_geom_types = gdf.geometry.geom_type
+        gdf["geometry"] = gdf.geometry.simplify(simplify, preserve_topology=True)
+
+        def _geom_family(t: str) -> str:
+            t = t.lower()
+            if "polygon" in t:
+                return "polygon"
+            if "line" in t:
+                return "line"
+            if "point" in t:
+                return "point"
+            return t
+
+        new_geom_types = gdf.geometry.geom_type
+        mask = original_geom_types.map(_geom_family) == new_geom_types.map(_geom_family)
+        gdf = gdf[mask]
+
+    if gdf.crs and not gdf.crs.equals("EPSG:4326"):
+        gdf = gdf.to_crs(epsg=4326)
+
+    gdf = gdf[~gdf.geometry.isna() & ~gdf.geometry.is_empty]
+    if hasattr(gdf.geometry, "make_valid"):
+        gdf["geometry"] = gdf.geometry.make_valid()
+
+    gdf = sanitize_datetime_columns(gdf)
+    geojson = json.loads(gdf.to_json())
+    geojson["total_count"] = total
+    return geojson
+
+
 def load_layers(file_path: str, name: str) -> tuple[list[dict], dict[str, gpd.GeoDataFrame]]:
     """Load all layers from a spatial file. Returns (layer_metas, layer_gdfs)."""
     path_obj = Path(file_path)

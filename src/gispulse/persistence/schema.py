@@ -144,6 +144,7 @@ _TABLE_DEFS: dict[str, list[tuple[str, str]]] = {
         ("filters", "TEXT DEFAULT '{}'"),
         ("basemap", "TEXT DEFAULT ''"),
         ("metadata", "TEXT DEFAULT '{}'"),
+        ("publication", "TEXT DEFAULT '{}'"),
         ("created_at", "TEXT"),
         ("updated_at", "TEXT"),
     ],
@@ -199,8 +200,8 @@ JSON_COLUMNS = frozenset({
     "predicates", "actions", "jobs", "rules", "graph",
     "datasets", "triggers", "ogc_source",
     "spatial_config", "computed_fields",
-    # saved_maps (#405)
-    "layers", "styles", "view", "filters",
+    # saved_maps (#405, #406)
+    "layers", "styles", "view", "filters", "publication",
 })
 
 # Columns that store datetimes (serialised as ISO text)
@@ -286,4 +287,6 @@ def build_model_table_mapping(prefix: str = "_gispulse_") -> dict[str, str]:
 #                                  row with ``trigger:<id>`` (origin-tagging M1).
 # v3 → v4 (2026-06-10, #405): added the ``saved_maps`` entity table (web-map
 #                             compositions: layers + styles + view + filters).
-SCHEMA_VERSION = 4
+# v4 → v5 (2026-06-10, #406): saved_maps grows a ``publication`` JSON column
+#                             (frozen public-permalink snapshot + token).
+SCHEMA_VERSION = 5

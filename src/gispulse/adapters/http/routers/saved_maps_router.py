@@ -17,6 +17,7 @@ Endpoints::
 
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -28,8 +29,43 @@ from gispulse.adapters.http.dependencies import get_saved_map_repo
 from gispulse.adapters.http.rate_limit import limiter
 from gispulse.core.models import SavedMap
 from gispulse.persistence.repository import Repository
+from gispulse.persistence.tier import get_current_tier
 
 router = APIRouter(prefix="/maps", tags=["maps"])
+
+
+# Number of *published* maps allowed per tier. ``None`` = unlimited.
+# Mirrors the count-gate convention of projects_router._PROJECT_LIMITS;
+# keep in sync with pricing_catalog.yml if a dedicated limit is added there.
+_PUBLISHED_MAP_LIMITS: dict[str, int | None] = {
+    "community": 3,
+    "pro": None,
+    "team": None,
+    "enterprise": None,
+}
+
+
+def _enforce_publish_limit(repo: Repository, current: SavedMap) -> None:
+    """Block a *new* publication when the tier's published-map quota is hit.
+
+    Re-publishing an already-published map is always allowed (it does not
+    grow the count).
+    """
+    tier = get_current_tier()
+    limit = _PUBLISHED_MAP_LIMITS.get(tier, _PUBLISHED_MAP_LIMITS["community"])
+    if limit is None:
+        return
+    if current.publication:  # already published → re-publish, no new slot
+        return
+    published = sum(1 for m in repo.list_all() if m.publication)
+    if published >= limit:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"Published-map limit reached for tier '{tier}' "
+                f"({published}/{limit}). Upgrade for unlimited published maps."
+            ),
+        )
 
 
 # ------------------------------------------------------------------
@@ -68,8 +104,20 @@ class SavedMapResponse(BaseModel):
     filters: dict[str, Any]
     basemap: str
     metadata: dict[str, Any]
+    is_published: bool
+    public_token: str | None
     created_at: str
     updated_at: str
+
+
+class PublicationResponse(BaseModel):
+    """Returned by POST /maps/{id}/publish."""
+
+    map_id: str
+    token: str
+    url: str
+    published_at: str
+    layer_count: int
 
 
 class PaginatedSavedMaps(BaseModel):
@@ -91,6 +139,8 @@ def _to_response(m: SavedMap) -> SavedMapResponse:
         filters=m.filters,
         basemap=m.basemap,
         metadata=m.metadata,
+        is_published=bool(m.publication),
+        public_token=m.publication.get("token") if m.publication else None,
         created_at=m.created_at.isoformat(),
         updated_at=m.updated_at.isoformat(),
     )
@@ -183,3 +233,82 @@ def delete_map(
 ) -> None:
     if not repo.delete(map_id):
         raise HTTPException(status_code=404, detail="Saved map not found")
+
+
+# ------------------------------------------------------------------
+# Publication (#406) — public permalink by token
+# ------------------------------------------------------------------
+
+
+def find_map_by_token(repo: Repository, token: str) -> SavedMap | None:
+    """Return the published map whose public token matches, or None.
+
+    Used by the unauthenticated public router. The repository is small
+    (published maps are quota-limited), so a linear scan is acceptable.
+    """
+    if not token:
+        return None
+    for m in repo.list_all():
+        pub = m.publication
+        if pub and pub.get("token") == token:
+            return m
+    return None
+
+
+@router.post("/{map_id}/publish", response_model=PublicationResponse)
+@limiter.limit("20/minute")
+def publish_map(
+    request: Request,
+    map_id: UUID,
+    repo: Repository = Depends(get_saved_map_repo),
+) -> PublicationResponse:
+    """Publish a saved map under a non-guessable public token.
+
+    Freezes a snapshot of the current layers/styles/view/basemap — the
+    public endpoints serve only this snapshot (an explicit allowlist), so
+    later edits to the live map don't leak until it is re-published.
+    Re-publishing keeps the same token but refreshes the snapshot.
+    """
+    saved = repo.get(map_id)
+    if saved is None:
+        raise HTTPException(status_code=404, detail="Saved map not found")
+
+    _enforce_publish_limit(repo, saved)
+
+    token = saved.publication.get("token") if saved.publication else None
+    if not token:
+        token = f"pub_{secrets.token_urlsafe(24)}"
+    published_at = datetime.now(timezone.utc).isoformat()
+    saved.publication = {
+        "token": token,
+        "published_at": published_at,
+        "layers": saved.layers,
+        "styles": saved.styles,
+        "view": saved.view,
+        "basemap": saved.basemap,
+    }
+    saved.updated_at = datetime.now(timezone.utc)
+    repo.save(saved)
+
+    return PublicationResponse(
+        map_id=str(saved.id),
+        token=token,
+        url=f"/public/maps/{token}",
+        published_at=published_at,
+        layer_count=len(saved.layers),
+    )
+
+
+@router.delete("/{map_id}/publish", status_code=204)
+def unpublish_map(
+    map_id: UUID,
+    repo: Repository = Depends(get_saved_map_repo),
+) -> None:
+    """Unpublish a map — the public token is invalidated immediately."""
+    saved = repo.get(map_id)
+    if saved is None:
+        raise HTTPException(status_code=404, detail="Saved map not found")
+    if saved.publication:
+        saved.publication = {}
+        saved.updated_at = datetime.now(timezone.utc)
+        repo.save(saved)

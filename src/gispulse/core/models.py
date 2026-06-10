@@ -383,5 +383,12 @@ class SavedMap:
     filters: dict[str, Any] = field(default_factory=dict)
     basemap: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Publication snapshot (#406). Empty dict = unpublished. When published,
+    # holds a frozen copy independent of later edits to the live map::
+    #   {"token": str, "published_at": iso, "layers": [...], "styles": {...},
+    #    "view": {...}, "basemap": str}
+    # The token is the public, non-guessable permalink id; the layer list is
+    # the allowlist of what the public endpoints may serve.
+    publication: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

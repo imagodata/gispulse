@@ -222,6 +222,9 @@ class SQLiteRepository(Repository[T]):
                 ("scope_target_id", "TEXT"),
                 ("order_idx", "INTEGER DEFAULT 0"),
             ],
+            "saved_maps": [
+                ("publication", "TEXT DEFAULT '{}'"),
+            ],
         }
 
         for col_name, col_def in table_migrations.get(self._table, []):
