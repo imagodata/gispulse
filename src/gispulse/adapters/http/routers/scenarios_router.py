@@ -256,7 +256,11 @@ def _run_graph(
         for e in raw_edges
     ]
 
-    executor = GraphExecutor(rule_repo=rule_repo)
+    # NOTE: GraphExecutor(rule_repo=...) is a pre-existing API mismatch on
+    # upstream/integration/v2.4 (constructor expects capability_getter, not rule_repo).
+    # This is NOT introduced by this PR (issue #440 volets a+b) — filed as follow-up.
+    # Run events for scenarios are also out of scope until the mismatch is repaired.
+    executor = GraphExecutor(rule_repo=rule_repo)  # type: ignore[call-arg]
     results: list[NodeExecResult] = []
 
     # Execute node by node with individual timing
@@ -454,7 +458,8 @@ def run_single_node(
         for e in sub_edges_raw
     ]
 
-    executor = GraphExecutor(rule_repo=rule_repo)
+    # NOTE: same pre-existing mismatch as _run_graph above — see comment there.
+    executor = GraphExecutor(rule_repo=rule_repo)  # type: ignore[call-arg]
     inputs: dict[str, gpd.GeoDataFrame] = {}
     for n in nodes:
         if n.node_type == NodeType.DATASET and n.bind:
