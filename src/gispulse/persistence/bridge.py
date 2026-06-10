@@ -60,7 +60,10 @@ class DuckDBPostGISBridge:
         Returns:
             Ready-to-use DuckDB connection.
         """
+        from gispulse.persistence.duckdb_limits import configure_duckdb_limits
+
         conn = duckdb.connect(":memory:")
+        configure_duckdb_limits(conn)
 
         # Load spatial extension
         try:

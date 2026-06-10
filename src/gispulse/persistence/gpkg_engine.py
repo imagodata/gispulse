@@ -116,7 +116,10 @@ class GeoPackageEngine(SpatialEngine):
         # Optional DuckDB accelerator
         if self._use_duckdb_accel:
             try:
+                from gispulse.persistence.duckdb_limits import configure_duckdb_limits
+
                 self._duckdb_conn = duckdb.connect(":memory:")
+                configure_duckdb_limits(self._duckdb_conn)
                 self._duckdb_conn.install_extension("spatial")
                 self._duckdb_conn.load_extension("spatial")
             except Exception as exc:
