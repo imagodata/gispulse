@@ -153,6 +153,16 @@ from gispulse.capabilities.vector.diff import (  # noqa: F401
     VectorDiffCapability,
 )
 
+# Spatial impact (clip + overlap measure) ------------------------------------
+from gispulse.capabilities.vector.spatial_impact import (  # noqa: F401
+    FULL_OVERLAP_PERCENT,
+    SPATIAL_IMPACT_METHOD,
+    MeasureSpatialImpactCapability,
+    clip_and_measure_matches,
+    measure_spatial_impact,
+    suggest_metric_crs,
+)
+
 # Multipart / boundary / projection / holes / force type --------------------
 from gispulse.capabilities.vector.parts import (  # noqa: F401
     MultipartToSinglepartsCapability,

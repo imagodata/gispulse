@@ -1,6 +1,6 @@
 ---
 title: Available Capabilities
-description: Full reference of the 117 GISPulse capabilities — vector, attributes, validation, classification, spatial statistics, topology, temporal, 3D pointcloud, raster, network, and PostGIS SQL.
+description: Full reference of the 118 GISPulse capabilities — vector, attributes, validation, classification, spatial statistics, topology, temporal, 3D pointcloud, raster, network, and PostGIS SQL.
 ---
 
 # Available Capabilities
@@ -31,7 +31,7 @@ REGISTRY.get("buffer")().get_schema()
 ```
 :::
 
-**Total registered capabilities: 117** — across 18 categories.
+**Total registered capabilities: 118** — across 18 categories.
 
 [[toc]]
 
@@ -238,6 +238,7 @@ Combine multiple layers into one — either geometrically (FME / QGIS-style over
 | `snap_points_to_lines` | Snaps points onto the nearest line, returning a **stable** `edge_id` (from `ref_id_col`), the along-line `measure`, the perpendicular `offset_distance` and a `snapped` flag; geometry becomes the projected point. | `ref_layer`, `ref_id_col`, `max_distance_m` |
 | `extract_vertices` | Emits one `Point` per vertex with indices. | — |
 | `extract_segments` | Splits each line / polygon boundary into 2-point segments. | — |
+| `measure_spatial_impact` | Clips each feature against a reference polygon layer and measures the intersection (`overlap_m2`, `parcel_percent`, `relation`). CRS is auto-projected to a metric UTM zone for accurate area computation. | `ref_layer`, `full_overlap_percent` |
 
 `snap_points_to_lines` is the stable-id evolution of `line_locate_point`: it returns the matched line's durable id rather than a positional row index, plus the projected point — everything needed to attach an event (accidents on roads, meters on a utility line, discharges on a watercourse) to an identified edge. A point beyond `max_distance_m` is left unsnapped (`snapped=False`, null `edge_id`/`measure`, original geometry kept, only `offset_distance` reported). Ties between equidistant lines break deterministically on the smallest `edge_id`. `ref_id_col` is required.
 
@@ -705,7 +706,7 @@ The DSN is never read from `config` — it is resolved from `GISPULSE_POSTGIS_DS
 | Vector — selection & join | 8 | Community | — |
 | Vector — overlay & combine | 5 | Community | — |
 | Vector — derived geometry | 10 | Community | — |
-| Vector — editing & metrology | 17 | Community | — |
+| Vector — editing & metrology | 18 | Community | — |
 | Vector — attribute manipulation | 9 | Community | — |
 | Vector — pivot / unpivot | 2 | Community | — |
 | Vector — ordered selection & sampling | 4 | Community | — |
@@ -724,7 +725,7 @@ The DSN is never read from `config` — it is resolved from `GISPULSE_POSTGIS_DS
 | Raster | 6 | **Pro** | `gispulse[raster]` (`rasterio`, `rasterstats`) |
 | Network analysis | 6 | **Pro** | `gispulse[network]` (`networkx`) |
 | PostGIS SQL | 1 | **Pro** | `gispulse[postgis]` + DSN |
-| **Total** | **117** | | |
+| **Total** | **118** | | |
 
 ---
 
