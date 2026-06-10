@@ -50,6 +50,7 @@ from gispulse.adapters.http.routers.templates_router import router as templates_
 from gispulse.adapters.http.routers.triggers_router import router as triggers_router
 from gispulse.adapters.http.routers.watchers_router import router as watchers_router
 from gispulse.adapters.http.routers.relations_router import router as relations_router
+from gispulse.adapters.http.routers.manifests_router import router as manifests_router
 from gispulse.adapters.http.routers.marketplace_router import router as marketplace_router
 from gispulse.adapters.http.routers.pipelines_router import router as pipelines_router
 from gispulse.adapters.http.routers.ws_router import router as ws_router
@@ -886,6 +887,7 @@ def create_app(
         app.include_router(filter_router)
         app.include_router(schedules_router)
         app.include_router(pipelines_router)
+        app.include_router(manifests_router)
         app.include_router(system_router)
         app.include_router(watchers_router)
         try:
@@ -927,6 +929,7 @@ def create_app(
         app.include_router(filter_router, **protected)
         app.include_router(schedules_router, **write_protected)
         app.include_router(pipelines_router, **write_protected)
+        app.include_router(manifests_router, **write_protected)
         app.include_router(system_router, **protected)
         app.include_router(watchers_router, **read_protected)
 

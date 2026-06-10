@@ -20,9 +20,12 @@ from gispulse.core.models import Job, JobStatus, Rule
 from gispulse.orchestration.event_sink import RunEventSink
 from gispulse.persistence.repository import Repository
 from gispulse.rules.engine import RuleEngine
+from gispulse.runtime.manifest_runner import run_manifest
 
 # Key injected by PipelineScheduler._enqueue_pipeline into job.parameters.
 _PIPELINE_CONFIG_KEY = "pipeline_config"
+# Key injected by POST /manifests/run into job.parameters.
+_MANIFEST_KEY = "manifest"
 
 log = get_logger(__name__)
 _metrics = MetricsCollector.get()
@@ -96,13 +99,26 @@ class JobRunner:
         attempt = 0
         last_exc: Exception | None = None
 
-        # Dispatch: pipeline_config (scheduler path) takes priority over rule_ids.
-        # If both are present, pipeline_config wins and a warning is emitted so the
-        # discrepancy is visible in logs. This is the safer choice: the scheduler
-        # never sets rule_ids, and a caller that sets both has an ambiguity that
-        # must not be silently resolved in the wrong direction.
+        # Dispatch priority: manifest > pipeline_config > rule_ids.
+        # If multiple keys are present, the highest-priority one wins and a
+        # warning is emitted so the discrepancy is visible in logs.
+        use_manifest = _MANIFEST_KEY in job.parameters
         use_pipeline_config = _PIPELINE_CONFIG_KEY in job.parameters
-        if use_pipeline_config and job.parameters.get("rule_ids"):
+        if use_manifest and use_pipeline_config:
+            log.warning(
+                "job_manifest_takes_priority",
+                job_id=str(job.id),
+                detail="Both manifest and pipeline_config are present; "
+                       "manifest takes priority.",
+            )
+        if use_manifest and job.parameters.get("rule_ids"):
+            log.warning(
+                "job_manifest_takes_priority_over_rule_ids",
+                job_id=str(job.id),
+                detail="Both manifest and rule_ids are present; "
+                       "manifest takes priority.",
+            )
+        if use_pipeline_config and not use_manifest and job.parameters.get("rule_ids"):
             log.warning(
                 "job_pipeline_config_takes_priority",
                 job_id=str(job.id),
@@ -118,7 +134,16 @@ class JobRunner:
 
             try:
                 with _metrics.timer("job_duration_seconds"):
-                    if use_pipeline_config:
+                    if use_manifest:
+                        result_gdf = self._execute_manifest(
+                            job, gdf, timeout,
+                            event_sink=event_sink,
+                            run_id=run_id,
+                        )
+                        steps_count = len(
+                            job.parameters[_MANIFEST_KEY].get("models", {})
+                        )
+                    elif use_pipeline_config:
                         result_gdf = self._execute_pipeline_config(
                             job, gdf, timeout,
                             event_sink=event_sink,
@@ -308,6 +333,154 @@ class JobRunner:
         # Return the last step's output (linear pipeline convention).
         last_step_gdf = list(results.values())[-1]
         return last_step_gdf
+
+    def _execute_manifest(
+        self,
+        job: Job,
+        gdf: gpd.GeoDataFrame,
+        timeout: int,
+        *,
+        event_sink: RunEventSink | None = None,
+        run_id: str | None = None,
+    ) -> gpd.GeoDataFrame:
+        """Execute a job whose parameters contain a ``manifest`` dict (v3 ManifestV3).
+
+        Validates the manifest dict through validate_pipeline_json (JSON Schema
+        SCHEMA_V3) then through validate_manifest (refs/cycles), parses it into
+        a ManifestV3 in-memory object, and delegates to run_manifest.
+
+        The source_loader routes each declared source to the job's loaded GDF.
+        For the common case (single dataset → single source), this is correct.
+        Multi-source manifests where sources point to different files require
+        explicit dataset_id wiring per source — a follow-up concern.
+
+        Raises:
+            ValueError: Invalid manifest (schema errors, unresolved refs, cycles,
+                        incremental mode). Caught by the caller's retry/FAILED path
+                        and stored as job.error_message.
+        """
+        from gispulse.core.manifest_v3 import (
+            ManifestV3,
+            _parse_sources,
+            _parse_staging,
+            _parse_models,
+            _parse_v3_triggers,
+            validate_manifest,
+        )
+        from gispulse.core.pipeline_schema import validate_pipeline_json
+
+        raw = job.parameters[_MANIFEST_KEY]
+
+        # --- Type guard ---------------------------------------------------
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"Job {job.id}: manifest must be a dict, "
+                f"got {type(raw).__name__}"
+            )
+
+        # --- Version guard ------------------------------------------------
+        received_version = raw.get("version")
+        if received_version != 3:
+            raise ValueError(
+                f"Job {job.id}: manifest must be version 3, "
+                f"got version={received_version!r}. "
+                'Use a v3 manifest ({"version": 3, "sources": {...}, "models": {...}}).'
+            )
+
+        # --- JSON Schema validation (SCHEMA_V3) ---------------------------
+        errors = validate_pipeline_json(raw)
+        if errors:
+            summary = "; ".join(errors[:5])
+            if len(errors) > 5:
+                summary += f" … and {len(errors) - 5} more"
+            raise ValueError(
+                f"Job {job.id}: manifest schema validation failed — {summary}"
+            )
+
+        # --- Parse into ManifestV3 ----------------------------------------
+        try:
+            manifest = ManifestV3(
+                name=raw.get("name", job.name),
+                description=raw.get("description", ""),
+                sources=_parse_sources(raw.get("sources", {})),
+                staging=_parse_staging(raw.get("staging")),
+                models=_parse_models(raw.get("models", {})),
+                triggers=_parse_v3_triggers(raw.get("triggers", [])),
+                security=dict(raw.get("security") or {}),
+                runtime=dict(raw.get("runtime") or {}),
+            )
+        except Exception as exc:
+            raise ValueError(
+                f"Job {job.id}: manifest could not be parsed — {exc}"
+            ) from exc
+
+        # --- Load-time graph check ----------------------------------------
+        # validate_manifest raises ManifestValidationError (subclass of ValueError)
+        # on unresolved refs / cycles — propagated directly to the FAILED path.
+        validate_manifest(manifest)
+
+        # --- Incremental guard — explicit FAILED before touching the GDF --
+        # run_manifest would raise NotImplementedError deep in the stack;
+        # we surface it as a clear ValueError with explicit "not implemented"
+        # so job.error_message is actionable.
+        for model_name, model in manifest.models.items():
+            if model.materialize == "incremental":
+                raise ValueError(
+                    f"Job {job.id}: model '{model_name}' uses materialize=incremental "
+                    "which is not implemented. Use materialize=view or materialize=table."
+                )
+
+        # --- Source loader: canonical URI-based loader with job-GDF fallback ---
+        # Priority: if the source URI is a real path or a remote URI that the
+        # persistence.loader.load() can resolve, use it directly.
+        # Fallback (memory:// scheme or any load failure): return the job's GDF
+        # loaded by the worker (useful for in-memory tests and pipeline_config
+        # datasets that arrive via dataset_id).
+        #
+        # This means manifests with real file/S3/WFS sources work WITHOUT a
+        # dataset_id — the source loader fetches each declared source URI.
+        # The empty-input guard (pipeline_config path) does NOT apply here.
+        def source_loader(src):
+            from gispulse.persistence.loader import load as _load_source
+
+            uri = src.uri if src.uri else ""
+            # memory:// URIs and blank URIs are test-only in-memory sources;
+            # fall back to the job GDF (loaded from dataset_id by the worker,
+            # or empty when no dataset_id is set).
+            if not uri or uri.startswith("memory://"):
+                return gdf
+            try:
+                return _load_source(uri, layer=src.layer or None)
+            except (FileNotFoundError, ValueError) as exc:
+                raise ValueError(
+                    f"Job {job.id}: cannot load source '{uri}' "
+                    f"(layer={src.layer!r}) — {exc}"
+                ) from exc
+
+        # --- Execute with timeout -----------------------------------------
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            future = pool.submit(
+                run_manifest,
+                manifest,
+                source_loader=source_loader,
+                event_sink=event_sink,
+                run_id=run_id,
+            )
+            result = future.result(timeout=timeout)
+        except FuturesTimeoutError:
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+        finally:
+            pool.shutdown(wait=False)
+
+        # Return the last materialized model's GeoDataFrame as the job result.
+        if result.materialized and result.execution_order:
+            last_model = result.execution_order[-1]
+            return result.materialized[last_model].result
+        if result.materialized:
+            return list(result.materialized.values())[-1].result
+        return gdf
 
     def _execute_with_timeout(
         self, rules: list[Rule], gdf: gpd.GeoDataFrame, timeout: int,

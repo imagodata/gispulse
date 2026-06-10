@@ -249,3 +249,38 @@ def test_run_manifest_with_clause_routes_ref_layer():
     # Inner-joined with the filtered set (vals >= 20) → 2 rows kept.
     assert len(joined) == 2
     assert sorted(joined["id"].tolist()) == [2, 3]
+
+
+def test_run_manifest_propagates_event_sink():
+    """event_sink and run_id are forwarded to PipelineExecutor — events are emitted."""
+    from gispulse.runtime.manifest_runner import run_manifest
+    from gispulse.core.manifest_v3 import ManifestV3, ModelSpec, SourceSpec
+
+    emitted = []
+
+    class _Sink:
+        def emit(self, event_type, data):
+            emitted.append((event_type, data))
+
+    src = _make_layer([1, 2], [10, 20])
+    manifest = ManifestV3(
+        sources={"s": SourceSpec(name="s", uri="memory://s")},
+        models={
+            "m": ModelSpec(
+                name="m",
+                select="s",
+                transform=[{"filter": {"expression": "val >= 10"}}],
+            )
+        },
+    )
+    result = run_manifest(
+        manifest,
+        source_loader=_source_loader_for({"s": src}),
+        event_sink=_Sink(),
+        run_id="test-run-123",
+    )
+    assert result.execution_order == ["m"]
+    # PipelineExecutor emits run.step.started and run.step.completed for each step
+    event_types = [e[0] for e in emitted]
+    assert "run.step.started" in event_types
+    assert "run.step.completed" in event_types

@@ -50,6 +50,7 @@ from gispulse.core.manifest_v3 import (
 )
 from gispulse.core.pipeline import PipelineSpec, StepSpec
 from gispulse.core.logging import get_logger
+from gispulse.orchestration.event_sink import NoOpSink, RunEventSink
 from gispulse.orchestration.pipeline_executor import PipelineExecutor
 
 log = get_logger(__name__)
@@ -233,6 +234,8 @@ def run_manifest(
     engine: Any | None = None,
     source_loader: SourceLoader | None = None,
     materializer: Materializer | None = None,
+    event_sink: RunEventSink | None = None,
+    run_id: str | None = None,
 ) -> ManifestRunResult:
     """Execute a v3 manifest end-to-end.
 
@@ -301,9 +304,7 @@ def run_manifest(
             "source nor a previously materialized model"
         )
 
-    # NOTE: event_sink not propagated here — manifest runs are not yet surfaced as
-    # PipelineRun entities. Pass event_sink= when wiring manifest execution through
-    # the job layer (volet c, issue #440).
+    _sink = event_sink if event_sink is not None else NoOpSink()
     executor = PipelineExecutor(execution_context=None)
     assertion_warnings: list = []
 
@@ -321,7 +322,7 @@ def run_manifest(
             if isinstance(alias, str) and alias not in inputs:
                 inputs[alias] = _resolve(alias)
 
-        results = executor.execute(sub_spec, inputs)
+        results = executor.execute(sub_spec, inputs, None, event_sink=_sink, run_id=run_id)
 
         # The model's output is the last step's result — fall back to
         # any single produced output, then to the primary, so a
