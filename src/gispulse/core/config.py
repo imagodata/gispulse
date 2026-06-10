@@ -610,6 +610,10 @@ class JobSettings(BaseSettings):
 
     job_timeout: int = 3600
     duckdb_threshold: int = 100_000
+    # DuckDB resource limits — all optional; empty / zero = not applied.
+    duckdb_memory_limit: str = ""
+    duckdb_temp_dir: str = ""
+    duckdb_threads: int = 0
 
     @model_validator(mode="before")
     @classmethod
@@ -619,6 +623,13 @@ class JobSettings(BaseSettings):
             values["job_timeout"] = int(_resolve("GISPULSE_JOB_TIMEOUT", S, "timeout", "3600"))
         if "duckdb_threshold" not in values:
             values["duckdb_threshold"] = int(_resolve("GISPULSE_DUCKDB_THRESHOLD", S, "duckdb_threshold", "100000"))
+        if "duckdb_memory_limit" not in values:
+            values["duckdb_memory_limit"] = _resolve("GISPULSE_DUCKDB_MEMORY_LIMIT", S, "duckdb_memory_limit", "")
+        if "duckdb_temp_dir" not in values:
+            values["duckdb_temp_dir"] = _resolve("GISPULSE_DUCKDB_TEMP_DIR", S, "duckdb_temp_dir", "")
+        if "duckdb_threads" not in values:
+            raw = _resolve("GISPULSE_DUCKDB_THREADS", S, "duckdb_threads", "0")
+            values["duckdb_threads"] = int(raw) if str(raw).strip() else 0
         return values
 
 
