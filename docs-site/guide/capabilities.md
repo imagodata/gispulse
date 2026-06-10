@@ -31,7 +31,7 @@ REGISTRY.get("buffer")().get_schema()
 ```
 :::
 
-**Nombre total de capabilities enregistrées : 117** — réparties en 18 catégories.
+**Nombre total de capabilities enregistrées : 118** — réparties en 18 catégories.
 
 [[toc]]
 
@@ -238,6 +238,7 @@ Combine plusieurs layers en une, soit géométriquement (overlay façon FME / QG
 | `snap_points_to_lines` | Projette les points sur la ligne la plus proche en restituant un `edge_id` **stable** (depuis `ref_id_col`), l'abscisse curviligne `measure`, la distance perpendiculaire `offset_distance` et un drapeau `snapped` ; la géométrie devient le point projeté. | `ref_layer`, `ref_id_col`, `max_distance_m` |
 | `extract_vertices` | Extrait un `Point` par vertex avec index. | — |
 | `extract_segments` | Découpe chaque ligne/bord en segments 2 points. | — |
+| `measure_spatial_impact` | Clip chaque feature contre une layer de polygones de référence et mesure l'intersection (`overlap_m2`, `parcel_percent`, `relation`). CRS auto-projeté en UTM pour la précision des aires. | `ref_layer`, `full_overlap_percent` |
 
 `snap_points_to_lines` est l'évolution « identifiant stable » de `line_locate_point` : il restitue l'id durable de la ligne (et non un index positionnel), plus le point projeté — tout ce qu'il faut pour rattacher un événement (accidents sur routes, compteurs sur réseau, rejets sur cours d'eau) à une arête identifiée. Un point au-delà de `max_distance_m` reste non-snappé (`snapped=False`, `edge_id`/`measure` nuls, géométrie d'origine conservée, seul `offset_distance` reporté). Les ex æquo sont départagés de façon déterministe sur le plus petit `edge_id`. `ref_id_col` est requis.
 
@@ -705,7 +706,7 @@ Le DSN n'est jamais lu depuis `config` — il est résolu depuis `GISPULSE_POSTG
 | Vecteur — sélection & jointure | 8 | Community | — |
 | Vecteur — overlay & combinaison | 5 | Community | — |
 | Vecteur — géométrie dérivée | 10 | Community | — |
-| Vecteur — édition & métrologie | 17 | Community | — |
+| Vecteur — édition & métrologie | 18 | Community | — |
 | Vecteur — manipulation d'attributs | 9 | Community | — |
 | Vecteur — pivot / unpivot | 2 | Community | — |
 | Vecteur — sélection ordonnée & échantillonnage | 4 | Community | — |
@@ -724,7 +725,7 @@ Le DSN n'est jamais lu depuis `config` — il est résolu depuis `GISPULSE_POSTG
 | Raster | 6 | **Pro** | `gispulse[raster]` (`rasterio`, `rasterstats`) |
 | Réseau — analyse | 6 | **Pro** | `gispulse[network]` (`networkx`) |
 | PostGIS SQL | 1 | **Pro** | `gispulse[postgis]` + DSN |
-| **Total** | **117** | | |
+| **Total** | **118** | | |
 
 ---
 
