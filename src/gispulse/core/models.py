@@ -345,3 +345,43 @@ class Project:
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# Saved web map (#405 — editor composition: layers + styles + view + filters)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SavedMap:
+    """A saved web map composition.
+
+    Captures everything needed to reload a map in the web editor (and, in
+    a later step, to publish it as a public permalink — #406):
+
+    * ``layers``  — ordered list of layer descriptors, each a dict such as
+      ``{"dataset_id": "...", "layer": "...", "visible": true,
+      "opacity": 1.0}``. A list of dicts (not bare UUIDs) because a map
+      layer carries display state beyond its identity.
+    * ``styles``  — per-layer style-def dicts keyed by layer id. The shape
+      is the one consumed by
+      :func:`gispulse.persistence.style_converter.style_def_to_qml`
+      (``renderer`` key + symbol/classes), so a saved map's styles can be
+      exported to QML/SLD unchanged.
+    * ``view``    — viewport: ``{"center": [lng, lat], "zoom": ...,
+      "bearing": ..., "pitch": ..., "bbox": [...]}``.
+    * ``filters`` — per-layer filter expressions keyed by layer id.
+    """
+
+    id: UUID = field(default_factory=uuid4)
+    name: str = ""
+    description: str = ""
+    project_id: UUID | None = None
+    layers: list[dict[str, Any]] = field(default_factory=list)
+    styles: dict[str, Any] = field(default_factory=dict)
+    view: dict[str, Any] = field(default_factory=dict)
+    filters: dict[str, Any] = field(default_factory=dict)
+    basemap: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
