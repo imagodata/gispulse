@@ -27,6 +27,7 @@ from gispulse.core.models import (
     Project,
     RefLayerDef,
     Rule,
+    SavedMap,
     Scenario,
     TableRelation,
     Trigger,
@@ -50,6 +51,7 @@ T = TypeVar(
     Trigger,
     Scenario,
     Project,
+    SavedMap,
     TableRelation,
     RefLayerDef,
 )
@@ -118,6 +120,7 @@ _MODEL_TABLE: dict[type, str] = {
     Dataset: "datasets",
     Scenario: "scenarios",
     Project: "projects",
+    SavedMap: "saved_maps",
     Trigger: "triggers",
     TableRelation: "table_relations",
     RefLayerDef: "ref_layers",

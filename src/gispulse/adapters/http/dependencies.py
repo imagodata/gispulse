@@ -84,6 +84,11 @@ def get_trigger_repo(request: Request) -> Repository:
     return request.app.state.trigger_repo  # type: ignore[return-value]
 
 
+def get_saved_map_repo(request: Request) -> Repository:
+    """Return the shared SavedMap repository from app state (#405)."""
+    return request.app.state.saved_map_repo  # type: ignore[return-value]
+
+
 def get_relation_repo(request: Request) -> Repository:
     """Return the shared TableRelation repository from app state."""
     return request.app.state.relation_repo  # type: ignore[return-value]

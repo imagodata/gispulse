@@ -133,6 +133,20 @@ _TABLE_DEFS: dict[str, list[tuple[str, str]]] = {
         ("created_at", "TEXT"),
         ("updated_at", "TEXT"),
     ],
+    "saved_maps": [
+        ("id", "TEXT PRIMARY KEY"),
+        ("name", "TEXT NOT NULL"),
+        ("description", "TEXT DEFAULT ''"),
+        ("project_id", "TEXT"),
+        ("layers", "TEXT DEFAULT '[]'"),
+        ("styles", "TEXT DEFAULT '{}'"),
+        ("view", "TEXT DEFAULT '{}'"),
+        ("filters", "TEXT DEFAULT '{}'"),
+        ("basemap", "TEXT DEFAULT ''"),
+        ("metadata", "TEXT DEFAULT '{}'"),
+        ("created_at", "TEXT"),
+        ("updated_at", "TEXT"),
+    ],
     "ref_layers": [
         ("id", "TEXT PRIMARY KEY"),
         ("name", "TEXT NOT NULL"),
@@ -185,6 +199,8 @@ JSON_COLUMNS = frozenset({
     "predicates", "actions", "jobs", "rules", "graph",
     "datasets", "triggers", "ogc_source",
     "spatial_config", "computed_fields",
+    # saved_maps (#405)
+    "layers", "styles", "view", "filters",
 })
 
 # Columns that store datetimes (serialised as ISO text)
@@ -197,7 +213,7 @@ DATETIME_COLUMNS = frozenset({
 UUID_COLUMNS = frozenset({
     "id", "dataset_id", "job_id", "rule_id",
     "source_layer_id", "target_layer_id", "trigger_id",
-    "scope_target_id",
+    "scope_target_id", "project_id",
 })
 
 # Columns that store booleans (serialised as INTEGER 0/1)
@@ -268,4 +284,6 @@ def build_model_table_mapping(prefix: str = "_gispulse_") -> dict[str, str]:
 #                                  WHEN clause that suppresses re-fires when
 #                                  an action_dispatcher write-back tagged the
 #                                  row with ``trigger:<id>`` (origin-tagging M1).
-SCHEMA_VERSION = 3
+# v3 → v4 (2026-06-10, #405): added the ``saved_maps`` entity table (web-map
+#                             compositions: layers + styles + view + filters).
+SCHEMA_VERSION = 4
