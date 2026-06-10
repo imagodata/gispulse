@@ -86,6 +86,7 @@ jobs:
           tests/unit/test_plugin_hub_records.py
           tests/unit/test_plugin_hub_gate.py
           tests/unit/test_src_cadastre.py
+          tests/unit/test_src_ocsge.py
 
   capability-matrix-drift:
     runs-on: ubuntu-latest
