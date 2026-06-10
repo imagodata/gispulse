@@ -42,6 +42,20 @@ _MIGRATE_ADD_DEPTH_SQL = (
     "ALTER TABLE pipeline_runs ADD COLUMN depth INTEGER NOT NULL DEFAULT 0"
 )
 
+# Idempotent migration — vague 5 run-control surface.
+# job_id:               UUID of the job that created the run (empty for legacy runs).
+# resumed_from_run_id:  Source run UUID when this is a resume (empty otherwise).
+# steps_filter:         JSON array of step IDs for partial runs (empty = full run).
+_MIGRATE_ADD_JOB_ID_SQL = (
+    "ALTER TABLE pipeline_runs ADD COLUMN job_id TEXT NOT NULL DEFAULT ''"
+)
+_MIGRATE_ADD_RESUMED_FROM_RUN_ID_SQL = (
+    "ALTER TABLE pipeline_runs ADD COLUMN resumed_from_run_id TEXT NOT NULL DEFAULT ''"
+)
+_MIGRATE_ADD_STEPS_FILTER_SQL = (
+    "ALTER TABLE pipeline_runs ADD COLUMN steps_filter TEXT NOT NULL DEFAULT '[]'"
+)
+
 # The `steps` column is JSON and already stores an array of step objects.
 # Individual step artifacts are stored inline in each step object (not a
 # separate column) — no schema migration is required; the serialiser below
@@ -59,12 +73,18 @@ class RunRepository:
         self._lock = threading.Lock()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._execute(_CREATE_TABLE_SQL)
-        # Idempotent migration: add depth column if it was created by an older schema.
-        try:
-            self._execute(_MIGRATE_ADD_DEPTH_SQL)
-        except Exception:
-            # Column already exists — OperationalError "duplicate column name".
-            pass
+        # Idempotent migrations: add columns if created by an older schema.
+        for migration_sql in (
+            _MIGRATE_ADD_DEPTH_SQL,
+            _MIGRATE_ADD_JOB_ID_SQL,
+            _MIGRATE_ADD_RESUMED_FROM_RUN_ID_SQL,
+            _MIGRATE_ADD_STEPS_FILTER_SQL,
+        ):
+            try:
+                self._execute(migration_sql)
+            except Exception:
+                # Column already exists — OperationalError "duplicate column name".
+                pass
 
     # ------------------------------------------------------------------
     # Connection helpers
@@ -139,6 +159,9 @@ class RunRepository:
             "error": run.error,
             "steps": RunRepository._steps_to_json(run.steps),
             "depth": run.depth,
+            "job_id": getattr(run, "job_id", ""),
+            "resumed_from_run_id": getattr(run, "resumed_from_run_id", ""),
+            "steps_filter": json.dumps(getattr(run, "steps_filter", [])),
         }
 
     @classmethod
@@ -156,6 +179,13 @@ class RunRepository:
         run.error = d.get("error", "")
         run.steps = cls._steps_from_json(d.get("steps", "[]"))
         run.depth = int(d.get("depth", 0))
+        run.job_id = d.get("job_id", "")
+        run.resumed_from_run_id = d.get("resumed_from_run_id", "")
+        raw_filter = d.get("steps_filter", "[]")
+        try:
+            run.steps_filter = json.loads(raw_filter) if raw_filter else []
+        except (json.JSONDecodeError, TypeError):
+            run.steps_filter = []
         return run
 
     # ------------------------------------------------------------------

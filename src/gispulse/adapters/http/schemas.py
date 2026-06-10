@@ -263,6 +263,7 @@ class JobCreate(BaseModel):
             "manifest": "POST /manifests/run",
             "pipeline_config": "POST /pipelines/<id>/run (or the scheduler)",
             "trigger_depth": "internal trigger bridge (not settable externally)",
+            "resume_from_run_id": "POST /runs/{run_id}/resume",
         }
         for key, hint in _RESERVED.items():
             if key in v:

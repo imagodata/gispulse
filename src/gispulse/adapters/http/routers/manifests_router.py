@@ -59,6 +59,15 @@ class ManifestRunRequest(BaseModel):
         description="Optional scope tag (e.g. department code '63'). "
         "Stored on PipelineRun.scope and used by monitoring platforms to filter runs.",
     )
+    steps: list[str] | None = Field(
+        None,
+        description=(
+            "Optional list of step IDs (from the compiled flat PipelineSpec) to "
+            "execute. When omitted or empty, all steps run. When provided, only the "
+            "listed steps execute. Unknown IDs or capability orphans return 422 "
+            "immediately without creating a job. Stored as job.parameters['steps_filter']."
+        ),
+    )
 
 
 class ManifestRunResponse(BaseModel):
@@ -215,12 +224,47 @@ async def run_manifest_job(
             detail={"valid": False, "errors": errors},
         )
 
+    # --- steps_filter validation (422 before enqueue) ---------------------
+    # Two validation passes:
+    # 1. _apply_steps_filter on the flat compiled spec → unknown IDs and intra-model
+    #    capability orphans (capability step whose step.input is excluded).
+    # 2. validate_steps_filter_models → inter-model orphans via select AND with:
+    #    (ref_layer) references to excluded models that have capability steps.
+    steps_filter: list[str] = payload.steps or []
+    if steps_filter:
+        try:
+            from gispulse.core.manifest_v3 import compile_to_pipeline, ManifestV3, _parse_sources, _parse_staging, _parse_models, _parse_v3_triggers
+            from gispulse.orchestration.runner import _apply_steps_filter
+            from gispulse.runtime.manifest_runner import validate_steps_filter_models
+            raw = payload.manifest
+            manifest_obj = ManifestV3(
+                name=raw.get("name", ""),
+                description=raw.get("description", ""),
+                sources=_parse_sources(raw.get("sources", {})),
+                staging=_parse_staging(raw.get("staging")),
+                models=_parse_models(raw.get("models", {})),
+                triggers=_parse_v3_triggers(raw.get("triggers", [])),
+                security=dict(raw.get("security") or {}),
+                runtime=dict(raw.get("runtime") or {}),
+            )
+            flat_spec = compile_to_pipeline(manifest_obj)
+            _apply_steps_filter(flat_spec, steps_filter, job_id="<manifest_run_validation>")
+            # Pass 2: inter-model with: (ref_layer) capability orphan check
+            validate_steps_filter_models(manifest_obj, steps_filter)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"valid": False, "errors": [str(exc)]},
+            )
+
     manifest_name = payload.manifest.get("name", "") or "manifest"
 
     # --- Build job parameters ---------------------------------------------
     parameters: dict[str, Any] = {"manifest": payload.manifest}
     if payload.scope:
         parameters["scope"] = payload.scope
+    if steps_filter:
+        parameters["steps_filter"] = steps_filter
 
     job = Job(
         name=manifest_name,

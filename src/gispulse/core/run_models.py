@@ -46,15 +46,27 @@ class PipelineRun:
     Steps are appended as the executor progresses.
 
     Attributes:
-        run_id:     Unique UUID for this run.
-        source:     Entry point: "job" | "schedule" | "scenario" | "manifest".
-        spec_ref:   Human-readable reference (job name, schedule name, etc.).
-        scope:      Optional scope string (e.g. department code for ingest jobs).
-        status:     Aggregate status (RUNNING -> COMPLETED | FAILED).
-        started_at: UTC timestamp when the run started.
-        ended_at:   UTC timestamp when the run finished.
-        error:      Top-level error message if status=FAILED.
-        steps:      Ordered list of step execution records.
+        run_id:               Unique UUID for this run.
+        source:               Entry point: "job" | "schedule" | "scenario" | "manifest".
+        spec_ref:             Human-readable reference (job name, schedule name, etc.).
+        scope:                Optional scope string (e.g. department code for ingest jobs).
+        status:               Aggregate status (RUNNING -> COMPLETED | FAILED).
+        started_at:           UTC timestamp when the run started.
+        ended_at:             UTC timestamp when the run finished.
+        error:                Top-level error message if status=FAILED.
+        steps:                Ordered list of step execution records.
+        depth:                Anti-loop trigger depth counter.
+        job_id:               UUID string of the job that created this run.
+                              Injected by the worker at run creation time.
+                              Empty string for legacy runs created before vague 5.
+        resumed_from_run_id:  When non-empty, this run is a resume of the
+                              referenced run.  Steps from the source run that
+                              were COMPLETED are replicated with
+                              ``artifacts["skipped_resume"]=True`` and not
+                              re-executed.
+        steps_filter:         When non-empty, this is a partial run — only the
+                              listed step IDs were executed.  Exposed in GET /runs
+                              so monitoring platforms can identify partial runs.
     """
 
     source: str
@@ -67,3 +79,6 @@ class PipelineRun:
     error: str = ""
     steps: list[PipelineRunStep] = field(default_factory=list)
     depth: int = 0
+    job_id: str = ""
+    resumed_from_run_id: str = ""
+    steps_filter: list[str] = field(default_factory=list)
