@@ -74,9 +74,14 @@ def test_catalog_lists_wfs_and_bulk_entries(source: CadastreSource) -> None:
     ids = {e.id for e in source.catalog()}
     assert ids == {
         # IGN Géoplateforme — WFS live
-        "parcelles", "communes", "batiments",
+        "parcelles",
+        "communes",
+        "batiments",
         # Etalab — bulk per département
-        "parcelles_bulk", "communes_bulk", "sections_bulk", "batiments_bulk",
+        "parcelles_bulk",
+        "communes_bulk",
+        "sections_bulk",
+        "batiments_bulk",
     }
 
 
@@ -154,6 +159,8 @@ def test_bulk_entry_declares_download_with_template(
     assert entry.metadata["base_key"] == layer
     assert entry.metadata["archive_format"] == "json.gz"
     assert entry.metadata["data_format"] == "geojson"
+    if entry_id == "communes_bulk":
+        assert entry.metadata["scope_column_aliases"] == {"code_insee": "id"}
 
 
 def test_bulk_entry_metadata_advertises_etalab(source: CadastreSource) -> None:
@@ -193,6 +200,9 @@ def test_schema_per_layer(source: CadastreSource) -> None:
     # Bulk family — Etalab GeoJSON column shape (verified live for dpt 75)
     p_bulk = source.schema("parcelles_bulk")
     assert "arpente" in p_bulk and "updated" in p_bulk
+    c_bulk = source.schema("communes_bulk")
+    assert c_bulk["id"] == "str"
+    assert c_bulk["code_insee"] == "str"
     assert source.schema("sections_bulk")["prefixe"] == "str"
     # Bâtiments have no feature-id — identity is decomposed across props.
     b_bulk = source.schema("batiments_bulk")
@@ -302,9 +312,7 @@ def test_bulk_revision_probes_datagouv_api(
 def test_bulk_revision_returns_none_on_network_error(
     source: CadastreSource, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        "httpx.get", lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("nope"))
-    )
+    monkeypatch.setattr("httpx.get", lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("nope")))
     assert source.revision("communes_bulk") is None
 
 

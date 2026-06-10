@@ -41,9 +41,7 @@ class FakeWFS:
 
     def fetch(self, access, *, extent=None, mode=FetchMode.MATERIALIZE):
         self.calls.append(access)
-        return SourceResult(
-            payload=Payload.VECTOR, mode=mode, data=access.params["typename"]
-        )
+        return SourceResult(payload=Payload.VECTOR, mode=mode, data=access.params["typename"])
 
 
 class FakeDownload:
@@ -179,8 +177,7 @@ def test_gpu_documents_bulk_entry_declares_cnig_partition_download(
 
     assert access.protocol is AccessProtocol.DOWNLOAD
     assert access.endpoint == (
-        "https://www.geoportail-urbanisme.gouv.fr/api/document/"
-        "download-by-partition/{partition}"
+        "https://www.geoportail-urbanisme.gouv.fr/api/document/download-by-partition/{partition}"
     )
     assert access.params == {"partition": "DU_200046977", "departement": "69"}
     assert access.format == "application/zip"
@@ -189,6 +186,8 @@ def test_gpu_documents_bulk_entry_declares_cnig_partition_download(
     assert entry.metadata["partition_prefix"] == "DU_"
     assert entry.metadata["partition_code_fields"] == ("insee", "siren")
     assert entry.metadata["join_keys"] == ("idurba", "insee")
+    assert entry.metadata["scope_stamp_dept"] is True
+    assert entry.metadata["scope_dept_column"] == "dept"
 
 
 def test_gpu_du_partition_helpers_keep_department_attachment() -> None:
@@ -252,9 +251,7 @@ def test_all_schemas_share_idurba_join_key(source: GpuSource) -> None:
         if entry.id == "gpu_documents_bulk_index":
             continue
         schema = source.schema(entry.id)
-        assert "idurba" in schema, (
-            f"{entry.id}: missing idurba join key in schema"
-        )
+        assert "idurba" in schema, f"{entry.id}: missing idurba join key in schema"
 
 
 def test_gpu_documents_bulk_schema_exposes_cnig_join_keys(source: GpuSource) -> None:
@@ -262,6 +259,7 @@ def test_gpu_documents_bulk_schema_exposes_cnig_join_keys(source: GpuSource) -> 
 
     assert schema["idurba"] == "str"
     assert schema["insee"] == "str"
+    assert schema["dept"] == "str"
     assert schema["partition"] == "str"
 
 
@@ -316,9 +314,7 @@ def test_revision_falls_back_to_last_modified(
         return _FakeResponse({"last-modified": "Mon, 12 May 2026 06:00:00 GMT"})
 
     monkeypatch.setattr("httpx.head", fake_head)
-    assert source.revision("prescription-surf") == (
-        "Mon, 12 May 2026 06:00:00 GMT"
-    )
+    assert source.revision("prescription-surf") == ("Mon, 12 May 2026 06:00:00 GMT")
 
 
 def test_revision_returns_none_on_network_error(
@@ -350,12 +346,10 @@ def test_revision_probes_gpu_documents_bulk_redirect_location(
     monkeypatch.setattr("httpx.head", fake_head)
 
     assert source.revision("gpu_documents_bulk_index") == (
-        "https://www.geoportail-urbanisme.gouv.fr/document/"
-        "du/2026-05-26/DU_200046977-9f13.zip"
+        "https://www.geoportail-urbanisme.gouv.fr/document/du/2026-05-26/DU_200046977-9f13.zip"
     )
     assert captured == [
-        "https://www.geoportail-urbanisme.gouv.fr/api/document/"
-        "download-by-partition/DU_200046977"
+        "https://www.geoportail-urbanisme.gouv.fr/api/document/download-by-partition/DU_200046977"
     ]
 
 

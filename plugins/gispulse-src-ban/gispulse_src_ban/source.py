@@ -25,8 +25,7 @@ BAN_GEOCODING_BASE_URL = "https://data.geopf.fr/geocodage"
 BAN_SEARCH_ENDPOINT = f"{BAN_GEOCODING_BASE_URL}/search/"
 BAN_REVERSE_ENDPOINT = f"{BAN_GEOCODING_BASE_URL}/reverse/"
 BAN_BULK_CSV_ENDPOINT = (
-    "https://adresse.data.gouv.fr/data/ban/adresses/latest/csv/"
-    "adresses-{departement}.csv.gz"
+    "https://adresse.data.gouv.fr/data/ban/adresses/latest/csv/adresses-{departement}.csv.gz"
 )
 
 _DEFAULT_DEPARTEMENT = "63"
@@ -37,12 +36,21 @@ _DEFAULT_LAT = 45.777222
 _DEFAULT_SEARCH_LIMIT = 5
 _DEFAULT_REVERSE_LIMIT = 1
 _MAX_API_LIMIT = 50
+_REST_TIMEOUT_S = 20.0
+_REST_RETRY_ATTEMPTS = 4
+_REST_RETRY_BACKOFF_S = 2.0
+_REST_RETRY_BACKOFF_FACTOR = 2.0
+_REST_RETRY_STATUSES = [429, 500, 502, 503, 504]
+_REST_RETRY = {
+    "max_attempts": _REST_RETRY_ATTEMPTS,
+    "backoff_seconds": _REST_RETRY_BACKOFF_S,
+    "backoff_factor": _REST_RETRY_BACKOFF_FACTOR,
+    "statuses": _REST_RETRY_STATUSES,
+}
 
 _API_PAGINATION = {"data_key": "features", "max_pages": 1, "max_rows": 5}
 _BULK_PARAMS = {"departement": _DEFAULT_DEPARTEMENT, "table_format": "csv", "delimiter": ";"}
-_DEPARTMENT_RE = re.compile(
-    r"^(?:0[1-9]|[1-8][0-9]|9[0-5]|2A|2B|97[1-8])$"
-)
+_DEPARTMENT_RE = re.compile(r"^(?:0[1-9]|[1-8][0-9]|9[0-5]|2A|2B|97[1-8])$")
 
 _COMMON_METADATA = {
     "provider": "Base Adresse Nationale",
@@ -113,7 +121,7 @@ _BULK_SCHEMA = {
 
 def _copy_params(params: Mapping[str, Any]) -> dict[str, Any]:
     copied = dict(params)
-    for nested_key in ("query", "pagination"):
+    for nested_key in ("query", "pagination", "retry"):
         nested = copied.get(nested_key)
         if isinstance(nested, dict):
             copied[nested_key] = dict(nested)
@@ -171,6 +179,8 @@ def _api_entry(
                     **_API_PAGINATION,
                     "max_rows": limit,
                 },
+                "timeout": _REST_TIMEOUT_S,
+                "retry": dict(_REST_RETRY),
             },
             format="application/json",
         ),

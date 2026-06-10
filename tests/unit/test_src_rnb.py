@@ -32,6 +32,16 @@ from gispulse.core.sources import DataSource  # noqa: E402
 pytestmark = pytest.mark.usefixtures("offline_ssrf")
 
 
+def _assert_rest_retry_params(params: dict) -> None:
+    assert params["timeout"] == 20.0
+    assert params["retry"] == {
+        "max_attempts": 4,
+        "backoff_seconds": 2.0,
+        "backoff_factor": 2.0,
+        "statuses": [429, 500, 502, 503, 504],
+    }
+
+
 @pytest.fixture
 def source() -> RnbSource:
     return RnbSource()
@@ -67,6 +77,12 @@ def test_declares_building_lookup_entries(source: RnbSource) -> None:
         "buildings-parcelle",
         "buildings-address",
     }
+
+
+def test_entries_define_rest_retry_params(source: RnbSource) -> None:
+    for entry in source.entries():
+        assert entry.access.protocol is AccessProtocol.REST_TABLE
+        _assert_rest_retry_params(entry.access.params)
 
 
 def test_buildings_bbox_entry_uses_rnb_rest_table_with_dept63_default(
@@ -115,9 +131,7 @@ def test_address_entry_uses_address_endpoint_and_ban_key_default(
     entry = {entry.id: entry for entry in source.entries()}["buildings-address"]
 
     assert entry.access.protocol is AccessProtocol.REST_TABLE
-    assert entry.access.endpoint == (
-        "https://rnb-api.beta.gouv.fr/api/alpha/buildings/address/"
-    )
+    assert entry.access.endpoint == ("https://rnb-api.beta.gouv.fr/api/alpha/buildings/address/")
     assert entry.access.params["query"] == {
         "cle_interop_ban": "63113_2615_00089",
         "limit": 100,

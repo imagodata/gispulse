@@ -59,14 +59,11 @@ _GEOPLATEFORME_WFS = "https://data.geopf.fr/wfs/ows"
 # WFS GetCapabilities URL — cheap freshness probe target for
 # revision() (issue #198). A HEAD against it reads the ``ETag`` /
 # ``Last-Modified`` header without downloading the document.
-_WFS_CAPABILITIES = (
-    f"{_GEOPLATEFORME_WFS}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetCapabilities"
-)
+_WFS_CAPABILITIES = f"{_GEOPLATEFORME_WFS}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetCapabilities"
 _REVISION_TIMEOUT_S = 8.0
 
 _CNIG_DOWNLOAD_BY_PARTITION = (
-    "https://www.geoportail-urbanisme.gouv.fr/api/document/"
-    "download-by-partition/{partition}"
+    "https://www.geoportail-urbanisme.gouv.fr/api/document/download-by-partition/{partition}"
 )
 _GPU_DOCUMENTS_DEFAULT_PARTITION = "DU_200046977"
 _GPU_DOCUMENTS_DEFAULT_DEPARTEMENT = "69"
@@ -169,9 +166,7 @@ def _probe_revision(url: str) -> str | None:
     import httpx  # local import — keeps module import network-free
 
     try:
-        resp = httpx.head(
-            url, timeout=_REVISION_TIMEOUT_S, follow_redirects=True
-        )
+        resp = httpx.head(url, timeout=_REVISION_TIMEOUT_S, follow_redirects=True)
     except Exception:  # noqa: BLE001 — any transport error ⇒ unknown
         return None
     etag = resp.headers.get("etag")
@@ -188,9 +183,7 @@ def _probe_redirect_revision(url: str) -> str | None:
     import httpx
 
     try:
-        resp = httpx.head(
-            url, timeout=_REVISION_TIMEOUT_S, follow_redirects=False
-        )
+        resp = httpx.head(url, timeout=_REVISION_TIMEOUT_S, follow_redirects=False)
     except Exception:  # noqa: BLE001 — any transport error ⇒ unknown
         return None
     location = resp.headers.get("location")
@@ -279,6 +272,8 @@ class GpuSource(DeclarativeSource):
                     "code_insee_param": "code_insee",
                     "siren_param": "siren",
                     "join_keys": ("idurba", "insee"),
+                    "scope_stamp_dept": True,
+                    "scope_dept_column": "dept",
                 },
             )
         )
@@ -311,6 +306,7 @@ class GpuSource(DeclarativeSource):
             return {
                 "idurba": "str",
                 "insee": "str",
+                "dept": "str",
                 "siren": "str",
                 "partition": "str",
                 "typedoc": "str",
@@ -319,28 +315,28 @@ class GpuSource(DeclarativeSource):
             }
         common = {
             "gid": "int",
-            "idurba": "str",      # parent document id (joins to doc-urba)
+            "idurba": "str",  # parent document id (joins to doc-urba)
             "geometry": "geometry",
         }
         if entry_id == "zone-urba":
             return {
                 **common,
-                "libelle": "str",     # PLU zone label, e.g. "UA", "UB", "A", "N"
-                "libelong": "str",    # long-form label
-                "typezone": "str",    # zone family (U, AU, A, N)
-                "destdomi": "str",    # dominant destination
-                "nomfic": "str",      # regulation file name
-                "urlfic": "str",      # regulation file URL
+                "libelle": "str",  # PLU zone label, e.g. "UA", "UB", "A", "N"
+                "libelong": "str",  # long-form label
+                "typezone": "str",  # zone family (U, AU, A, N)
+                "destdomi": "str",  # dominant destination
+                "nomfic": "str",  # regulation file name
+                "urlfic": "str",  # regulation file URL
             }
         if entry_id == "doc-urba":
             return {
                 **common,
-                "typedoc": "str",     # PLU / PLUi / POS / CC / RNU
-                "datappro": "date",   # approval date
-                "datefin": "date",    # end of validity
-                "datvalid": "date",   # validation date
-                "intercoid": "str",   # EPCI id if PLUi
-                "insee": "str",       # commune INSEE code
+                "typedoc": "str",  # PLU / PLUi / POS / CC / RNU
+                "datappro": "date",  # approval date
+                "datefin": "date",  # end of validity
+                "datvalid": "date",  # validation date
+                "intercoid": "str",  # EPCI id if PLUi
+                "insee": "str",  # commune INSEE code
                 "siren": "str",
             }
         if entry_id == "secteur-cc":
@@ -348,16 +344,16 @@ class GpuSource(DeclarativeSource):
                 **common,
                 "libelle": "str",
                 "libelong": "str",
-                "typesect": "str",    # constructible / non-constructible
+                "typesect": "str",  # constructible / non-constructible
                 "insee": "str",
             }
         if entry_id in {"prescription-surf", "prescription-lin", "prescription-pct"}:
             return {
                 **common,
                 "libelle": "str",
-                "txt": "str",         # free-text description
-                "typepsc": "str",     # prescription category
-                "stypepsc": "str",    # prescription sub-category
+                "txt": "str",  # free-text description
+                "typepsc": "str",  # prescription category
+                "stypepsc": "str",  # prescription sub-category
                 "nomfic": "str",
                 "urlfic": "str",
             }
@@ -366,8 +362,8 @@ class GpuSource(DeclarativeSource):
             **common,
             "libelle": "str",
             "txt": "str",
-            "typeinf": "str",         # information category
-            "stypeinf": "str",        # information sub-category
+            "typeinf": "str",  # information category
+            "stypeinf": "str",  # information sub-category
             "nomfic": "str",
             "urlfic": "str",
         }

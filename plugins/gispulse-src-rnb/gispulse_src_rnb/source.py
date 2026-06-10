@@ -36,6 +36,17 @@ _DEFAULT_BAN_KEY = "63113_2615_00089"
 _DEFAULT_ADDRESS = "89 rue Lecuelle, 63100 Clermont-Ferrand"
 _DEFAULT_LIMIT = 100
 _MAX_LIMIT = 100
+_REST_TIMEOUT_S = 20.0
+_REST_RETRY_ATTEMPTS = 4
+_REST_RETRY_BACKOFF_S = 2.0
+_REST_RETRY_BACKOFF_FACTOR = 2.0
+_REST_RETRY_STATUSES = [429, 500, 502, 503, 504]
+_REST_RETRY = {
+    "max_attempts": _REST_RETRY_ATTEMPTS,
+    "backoff_seconds": _REST_RETRY_BACKOFF_S,
+    "backoff_factor": _REST_RETRY_BACKOFF_FACTOR,
+    "statuses": _REST_RETRY_STATUSES,
+}
 
 _PAGINATION = {
     "data_key": "results",
@@ -92,9 +103,7 @@ _ENTRIES: dict[str, dict[str, Any]] = {
         "metadata": {
             "filter_fields": ("plot_id",),
             "default_plot_id": _DEFAULT_PLOT_ID,
-            "plot_match_note": (
-                "RNB ranks buildings by geometric cover ratio over the plot."
-            ),
+            "plot_match_note": ("RNB ranks buildings by geometric cover ratio over the plot."),
         },
     },
     "buildings-address": {
@@ -141,7 +150,7 @@ _SCHEMA = {
 
 def _copy_params(params: dict[str, Any]) -> dict[str, Any]:
     copied = dict(params)
-    for nested_key in ("query", "pagination"):
+    for nested_key in ("query", "pagination", "retry"):
         nested = copied.get(nested_key)
         if isinstance(nested, dict):
             copied[nested_key] = dict(nested)
@@ -216,13 +225,16 @@ class RnbSource(DeclarativeSource):
 
     def _entry_ref(self, entry_id: str) -> SourceEntryRef:
         spec = _ENTRIES[entry_id]
+        params = _copy_params(spec["params"])
+        params["timeout"] = _REST_TIMEOUT_S
+        params["retry"] = dict(_REST_RETRY)
         return SourceEntryRef(
             id=entry_id,
             name=spec["label"],
             access=AccessSpec(
                 protocol=AccessProtocol.REST_TABLE,
                 endpoint=spec["endpoint"],
-                params=_copy_params(spec["params"]),
+                params=params,
                 format="application/json",
             ),
             revision_token=None,

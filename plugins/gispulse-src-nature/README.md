@@ -15,8 +15,9 @@ IGN / INPN protected natural areas for GISPulse via API Carto Nature
 ## Entries
 
 All entries use `AccessProtocol.REST_API`, format `application/json`, and
-`params = {"geom_param": "geom"}` so the REST GeoJSON fetcher sends the
-runtime extent as a GeoJSON polygon in the `geom` query parameter.
+`params["geom_param"] = "geom"` so the REST GeoJSON fetcher sends the
+runtime extent as a GeoJSON polygon in the `geom` query parameter. They also
+set `timeout` and `retry` params for transient HTTP/transport failures.
 
 | id                | Label                          | Path              |
 |-------------------|--------------------------------|-------------------|

@@ -62,6 +62,16 @@ def _source_class():
     return importlib.import_module("gispulse_src_ban.source").BanSource
 
 
+def _assert_rest_retry_params(params: dict) -> None:
+    assert params["timeout"] == 20.0
+    assert params["retry"] == {
+        "max_attempts": 4,
+        "backoff_seconds": 2.0,
+        "backoff_factor": 2.0,
+        "statuses": [429, 500, 502, 503, 504],
+    }
+
+
 @pytest.fixture
 def source():
     reg = ProtocolRegistry()
@@ -128,6 +138,7 @@ def test_search_entry_uses_geoplateforme_rest_table_with_dept63_default(source) 
         "max_pages": 1,
         "max_rows": 5,
     }
+    _assert_rest_retry_params(entry.access.params)
     assert entry.metadata["default_departement"] == "63"
     assert entry.metadata["default_citycode"] == "63113"
     assert entry.metadata["api_host"] == "data.geopf.fr/geocodage"
@@ -155,6 +166,7 @@ def test_reverse_entry_uses_geoplateforme_rest_table_with_clermont_default(sourc
         "max_pages": 1,
         "max_rows": 1,
     }
+    _assert_rest_retry_params(entry.access.params)
     assert entry.metadata["query_kind"] == "reverse"
     assert entry.metadata["default_lon"] == 3.087025
     assert entry.metadata["default_lat"] == 45.777222
@@ -165,8 +177,7 @@ def test_department_bulk_entry_uses_ban_csv_gzip_with_dept63_default(source) -> 
 
     assert entry.access.protocol is AccessProtocol.TABLE_FILE
     assert entry.access.endpoint == (
-        "https://adresse.data.gouv.fr/data/ban/adresses/latest/csv/"
-        "adresses-{departement}.csv.gz"
+        "https://adresse.data.gouv.fr/data/ban/adresses/latest/csv/adresses-{departement}.csv.gz"
     )
     assert entry.access.params == {
         "departement": "63",

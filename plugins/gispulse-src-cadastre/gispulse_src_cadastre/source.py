@@ -40,9 +40,7 @@ _LAYER_PREFIX = "CADASTRALPARCELS.PARCELLAIRE_EXPRESS"
 # WFS GetCapabilities URL — the cheap freshness probe target for
 # revision() (issue #198). A HEAD against it reads the ETag /
 # Last-Modified header without downloading the document.
-_WFS_CAPABILITIES = (
-    f"{_GEOPLATEFORME_WFS}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetCapabilities"
-)
+_WFS_CAPABILITIES = f"{_GEOPLATEFORME_WFS}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetCapabilities"
 
 # Etalab bulk redistribution of the DGFiP PCI vecteur — quarterly
 # millésime, GeoJSON-gzipped archives per département. The ``latest``
@@ -58,9 +56,7 @@ _ETALAB_CADASTRE_BASE = (
 # resource refresh. Used by revision() for the bulk entries: HEAD on the
 # .json.gz files alone won't surface a millésime change because the
 # ``latest`` symlink target is stable between releases.
-_ETALAB_DATASET_API = (
-    "https://www.data.gouv.fr/api/1/datasets/cadastre/"
-)
+_ETALAB_DATASET_API = "https://www.data.gouv.fr/api/1/datasets/cadastre/"
 _REVISION_TIMEOUT_S = 8.0
 
 # Per-département bulk entries declare the layer name once via this
@@ -93,9 +89,7 @@ def _probe_revision_head(url: str) -> str | None:
     import httpx  # local import — keeps module import network-free
 
     try:
-        resp = httpx.head(
-            url, timeout=_REVISION_TIMEOUT_S, follow_redirects=True
-        )
+        resp = httpx.head(url, timeout=_REVISION_TIMEOUT_S, follow_redirects=True)
     except Exception:  # noqa: BLE001 — any transport error ⇒ unknown
         return None
     etag = resp.headers.get("etag")
@@ -123,9 +117,7 @@ def _probe_revision_datagouv(api_url: str) -> str | None:
     import httpx
 
     try:
-        resp = httpx.get(
-            api_url, timeout=_REVISION_TIMEOUT_S, follow_redirects=True
-        )
+        resp = httpx.get(api_url, timeout=_REVISION_TIMEOUT_S, follow_redirects=True)
         resp.raise_for_status()
         data = resp.json()
     except Exception:  # noqa: BLE001 — any transport error ⇒ unknown
@@ -221,6 +213,11 @@ class CadastreSource(DeclarativeSource):
                 "data_format": "geojson",
                 "update_cadence": "quarterly",
                 "license": "Licence Ouverte 2.0",
+                **(
+                    {"scope_column_aliases": {"code_insee": "id"}}
+                    if entry_id == "communes_bulk"
+                    else {}
+                ),
             },
         )
 
@@ -248,8 +245,11 @@ class CadastreSource(DeclarativeSource):
         # ``arpente`` flag, etc.).
         if entry_id == "parcelles":
             return {
-                "idu": "str", "geometry": "geometry",
-                "commune": "str", "section": "str", "numero": "str",
+                "idu": "str",
+                "geometry": "geometry",
+                "commune": "str",
+                "section": "str",
+                "numero": "str",
                 "contenance": "int",
             }
         if entry_id == "communes":
@@ -260,29 +260,46 @@ class CadastreSource(DeclarativeSource):
         # (cadastre.data.gouv.fr/data/etalab-cadastre/latest/geojson/...).
         if entry_id == "parcelles_bulk":
             return {
-                "id": "str", "geometry": "geometry",
-                "commune": "str", "prefixe": "str", "section": "str",
-                "numero": "str", "contenance": "int", "arpente": "bool",
-                "created": "date", "updated": "date",
+                "id": "str",
+                "geometry": "geometry",
+                "commune": "str",
+                "prefixe": "str",
+                "section": "str",
+                "numero": "str",
+                "contenance": "int",
+                "arpente": "bool",
+                "created": "date",
+                "updated": "date",
             }
         if entry_id == "communes_bulk":
             return {
-                "id": "str", "geometry": "geometry",
-                "nom": "str", "created": "date", "updated": "date",
+                "id": "str",
+                "geometry": "geometry",
+                "code_insee": "str",
+                "nom": "str",
+                "created": "date",
+                "updated": "date",
             }
         if entry_id == "sections_bulk":
             return {
-                "id": "str", "geometry": "geometry",
-                "commune": "str", "prefixe": "str", "code": "str",
-                "created": "date", "updated": "date",
+                "id": "str",
+                "geometry": "geometry",
+                "commune": "str",
+                "prefixe": "str",
+                "code": "str",
+                "created": "date",
+                "updated": "date",
             }
         if entry_id == "batiments_bulk":
             # Etalab GeoJSON bâtiments features have no feature-id; the
             # identity is decomposed across ``type`` / ``nom`` / ``commune``.
             return {
                 "geometry": "geometry",
-                "type": "str", "nom": "str", "commune": "str",
-                "created": "date", "updated": "date",
+                "type": "str",
+                "nom": "str",
+                "commune": "str",
+                "created": "date",
+                "updated": "date",
             }
         # Unreachable — ``_entry()`` above raised for unknown ids.
         return {}

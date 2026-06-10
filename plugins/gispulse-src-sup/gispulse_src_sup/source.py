@@ -22,14 +22,11 @@ from gispulse.plugins.api import (
 )
 
 _GEOPLATEFORME_WFS = "https://data.geopf.fr/wfs/ows"
-_WFS_CAPABILITIES = (
-    f"{_GEOPLATEFORME_WFS}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetCapabilities"
-)
+_WFS_CAPABILITIES = f"{_GEOPLATEFORME_WFS}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetCapabilities"
 _REVISION_TIMEOUT_S = 8.0
 
 _CNIG_DOWNLOAD_BY_PARTITION = (
-    "https://www.geoportail-urbanisme.gouv.fr/api/document/"
-    "download-by-partition/{partition}"
+    "https://www.geoportail-urbanisme.gouv.fr/api/document/download-by-partition/{partition}"
 )
 _PACK_SUP_DEFAULT_PARTITION = "172014607_SUP_69_AC1"
 _PACK_SUP_DEFAULT_CODE_GEO = "69"
@@ -111,9 +108,7 @@ def _probe_revision(url: str) -> str | None:
     import httpx  # local import keeps module import network-free
 
     try:
-        resp = httpx.head(
-            url, timeout=_REVISION_TIMEOUT_S, follow_redirects=True
-        )
+        resp = httpx.head(url, timeout=_REVISION_TIMEOUT_S, follow_redirects=True)
     except Exception:  # noqa: BLE001 - transport errors mean unknown freshness
         return None
     etag = resp.headers.get("etag")
@@ -130,9 +125,7 @@ def _probe_redirect_revision(url: str) -> str | None:
     import httpx
 
     try:
-        resp = httpx.head(
-            url, timeout=_REVISION_TIMEOUT_S, follow_redirects=False
-        )
+        resp = httpx.head(url, timeout=_REVISION_TIMEOUT_S, follow_redirects=False)
     except Exception:  # noqa: BLE001 - transport errors mean unknown freshness
         return None
     location = resp.headers.get("location")
@@ -219,6 +212,8 @@ class SupSource(DeclarativeSource):
                     "department_param": "codeGeo",
                     "category_param": "categorie",
                     "join_keys": ("idsup", "suptype"),
+                    "scope_stamp_dept": True,
+                    "scope_dept_column": "dept",
                 },
             )
         )
@@ -233,6 +228,7 @@ class SupSource(DeclarativeSource):
                 "suptype": "str",
                 "idsup": "str",
                 "partition": "str",
+                "dept": "str",
                 "nomsuplitt": "str",
                 "geometry": "geometry",
             }
