@@ -166,10 +166,16 @@ class JobWorker:
         source = "schedule" if triggered_by == "scheduler" else "job"
 
         # Create PipelineRun record
+        # trigger_depth is injected by TriggerJobBridge when a job is created
+        # from an on_run_completed trigger. Propagating it to PipelineRun.depth
+        # is what makes the anti-loop depth guard effective: the next terminal
+        # event carries the incremented depth so max_depth comparisons work.
+        trigger_depth = int(job.parameters.get("trigger_depth", 0))
         run = PipelineRun(
             source=source,
             spec_ref=job.name,
             scope=str(job.parameters.get("scope", "")),
+            depth=trigger_depth,
         )
 
         # RecordingSink keeps PipelineRunStep entries in sync with the run entity
@@ -203,6 +209,10 @@ class JobWorker:
                 "status": "failed",
                 "ended_at": run.ended_at.isoformat(),
                 "error": "cancelled",
+                "depth": run.depth,
+                "source": run.source,
+                "spec_ref": run.spec_ref,
+                "scope": run.scope,
             })
             return
 
@@ -252,6 +262,10 @@ class JobWorker:
                     "status": "failed",
                     "ended_at": run.ended_at.isoformat(),
                     "error": "cancelled",
+                    "depth": run.depth,
+                    "source": run.source,
+                    "spec_ref": run.spec_ref,
+                    "scope": run.scope,
                 })
                 return
 
@@ -300,6 +314,10 @@ class JobWorker:
                 "job_id": job_id,
                 "status": "completed",
                 "ended_at": run.ended_at.isoformat(),
+                "depth": run.depth,
+                "source": run.source,
+                "spec_ref": run.spec_ref,
+                "scope": run.scope,
             })
             log.info("worker_job_completed", job_id=job_id)
 
@@ -339,6 +357,10 @@ class JobWorker:
                 "status": "failed",
                 "ended_at": run.ended_at.isoformat(),
                 "error": error_msg,
+                "depth": run.depth,
+                "source": run.source,
+                "spec_ref": run.spec_ref,
+                "scope": run.scope,
             })
             log.error("worker_job_failed", job_id=job_id, error=error_msg)
         finally:

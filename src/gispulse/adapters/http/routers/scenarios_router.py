@@ -28,6 +28,7 @@ from gispulse.adapters.http.dependencies import (
 )
 from gispulse.adapters.http.schemas import ScenarioCreate, ScenarioResponse
 from gispulse.core.models import Scenario
+from gispulse.orchestration.event_sink import NoOpSink
 from gispulse.persistence.engine import SpatialEngine
 from gispulse.persistence.repository import Repository
 
@@ -192,12 +193,48 @@ def run_scenario(
     If the scenario has a graph definition (nodes + edges), uses the
     GraphExecutor for DAG execution. Otherwise falls back to the
     sequential ScenarioRunner.
+
+    Emits ``run.started`` / ``run.completed`` / ``run.failed`` lifecycle events
+    via the app's event sink (EventHubSink + RunCompletionTriggerSink when
+    running in full mode) and persists a PipelineRun record.
     """
     import time
 
     scenario = repo.get(scenario_id)
     if scenario is None:
+        # Validation rejection — no PipelineRun is created.
+        # A PipelineRun exists ONLY once execution actually starts (below).
         raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found.")
+
+    # --- PipelineRun plumbing (issue #440-c) ---
+    # INVARIANT: run creation is strictly after all validation guards.
+    # 404/422 rejections produce no PipelineRun; a run exists only once
+    # execution starts. This keeps run history clean and avoids phantom
+    # entries for invalid requests.
+    from datetime import datetime, timezone
+    from gispulse.core.run_models import PipelineRun
+    from gispulse.orchestration.event_sink import RecordingSink
+
+    run_repo = getattr(request.app.state, "run_repo", None)
+    outer_sink = getattr(request.app.state, "event_sink", None)
+    if outer_sink is None:
+        outer_sink = NoOpSink()
+
+    run = PipelineRun(
+        source="scenario",
+        spec_ref=str(scenario_id),
+        scope="",
+    )
+    if run_repo is not None:
+        run_repo.save(run)
+
+    run_sink = RecordingSink(run=run, run_repo=run_repo, inner=outer_sink)
+    run_sink.emit("run.started", {
+        "run_id": str(run.run_id),
+        "source": "scenario",
+        "spec_ref": str(scenario_id),
+        "started_at": run.started_at.isoformat(),
+    })
 
     start = time.monotonic()
     node_results: list[NodeExecResult] = []
@@ -205,14 +242,46 @@ def run_scenario(
     graph = scenario.graph
     has_graph = bool(graph and graph.get("nodes"))
 
-    if has_graph:
-        node_results = _run_graph(scenario, engine, rule_repo, dataset_repo)
-    else:
-        node_results = _run_sequential(scenario, engine, rule_repo, dataset_repo)
+    try:
+        if has_graph:
+            node_results = _run_graph(scenario, engine, rule_repo, dataset_repo)
+        else:
+            node_results = _run_sequential(scenario, engine, rule_repo, dataset_repo)
+    except Exception as exc:
+        from gispulse.core.models import JobStatus
+        run.status = JobStatus.FAILED
+        run.error = str(exc)
+        run.ended_at = datetime.now(timezone.utc)
+        if run_repo is not None:
+            run_repo.save(run)
+        run_sink.emit("run.failed", {
+            "run_id": str(run.run_id),
+            "source": "scenario",
+            "spec_ref": str(scenario_id),
+            "status": "failed",
+            "ended_at": run.ended_at.isoformat(),
+            "error": str(exc),
+        })
+        raise
 
     duration_ms = (time.monotonic() - start) * 1000
     failed = any(nr.status == "failed" for nr in node_results)
     status = "failed" if failed else "success"
+
+    from gispulse.core.models import JobStatus
+    run.status = JobStatus.FAILED if failed else JobStatus.COMPLETED
+    run.ended_at = datetime.now(timezone.utc)
+    if run_repo is not None:
+        run_repo.save(run)
+
+    terminal_event = "run.failed" if failed else "run.completed"
+    run_sink.emit(terminal_event, {
+        "run_id": str(run.run_id),
+        "source": "scenario",
+        "spec_ref": str(scenario_id),
+        "status": status,
+        "ended_at": run.ended_at.isoformat(),
+    })
 
     return ScenarioRunResult(
         scenario_id=scenario.id,
@@ -230,6 +299,7 @@ def _run_graph(
 ) -> list[NodeExecResult]:
     """Execute a scenario via the GraphExecutor."""
 
+    from gispulse.capabilities import get as _get_capability
     from gispulse.core.models import NodeDef, EdgeDef, NodeType
     from gispulse.orchestration.graph_executor import GraphExecutor
 
@@ -256,11 +326,7 @@ def _run_graph(
         for e in raw_edges
     ]
 
-    # NOTE: GraphExecutor(rule_repo=...) is a pre-existing API mismatch on
-    # upstream/integration/v2.4 (constructor expects capability_getter, not rule_repo).
-    # This is NOT introduced by this PR (issue #440 volets a+b) — filed as follow-up.
-    # Run events for scenarios are also out of scope until the mismatch is repaired.
-    executor = GraphExecutor(rule_repo=rule_repo)  # type: ignore[call-arg]
+    executor = GraphExecutor(capability_getter=_get_capability)
     results: list[NodeExecResult] = []
 
     # Execute node by node with individual timing
@@ -380,6 +446,7 @@ class RunNodeResult(BaseModel):
 
 @router.post("/{scenario_id}/run-node", response_model=RunNodeResult)
 def run_single_node(
+    request: Request,
     scenario_id: UUID,
     payload: RunNodeRequest,
     repo: Repository = Depends(get_scenario_repo),
@@ -397,10 +464,12 @@ def run_single_node(
 
     scenario = repo.get(scenario_id)
     if scenario is None:
+        # Validation rejection — no PipelineRun is created.
         raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found.")
 
     graph = scenario.graph
     if not graph or not graph.get("nodes"):
+        # Validation rejection — no PipelineRun is created.
         raise HTTPException(status_code=422, detail="Scenario has no graph definition.")
 
     raw_nodes = graph.get("nodes", [])
@@ -411,6 +480,7 @@ def run_single_node(
     if target_raw is None:
         raise HTTPException(status_code=404, detail=f"Node '{payload.node_id}' not found in scenario graph.")
 
+    from gispulse.capabilities import get as _get_capability
     from gispulse.core.models import NodeDef, EdgeDef, NodeType
     from gispulse.orchestration.graph_executor import GraphExecutor
     import geopandas as gpd
@@ -458,8 +528,37 @@ def run_single_node(
         for e in sub_edges_raw
     ]
 
-    # NOTE: same pre-existing mismatch as _run_graph above — see comment there.
-    executor = GraphExecutor(rule_repo=rule_repo)  # type: ignore[call-arg]
+    # --- PipelineRun plumbing (issue #440-c) ---
+    # INVARIANT: run creation is strictly after all validation guards above
+    # (404 scenario not found, 422 no graph, 404 node not found).
+    # Validation rejections produce no PipelineRun; a run exists only once
+    # execution starts.
+    from datetime import datetime, timezone
+    from gispulse.core.run_models import PipelineRun
+    from gispulse.orchestration.event_sink import RecordingSink
+
+    run_repo = getattr(request.app.state, "run_repo", None)
+    outer_sink = getattr(request.app.state, "event_sink", None)
+    if outer_sink is None:
+        outer_sink = NoOpSink()
+
+    node_run = PipelineRun(
+        source="scenario",
+        spec_ref=f"{scenario_id}#{payload.node_id}",
+        scope="",
+    )
+    if run_repo is not None:
+        run_repo.save(node_run)
+
+    node_sink = RecordingSink(run=node_run, run_repo=run_repo, inner=outer_sink)
+    node_sink.emit("run.started", {
+        "run_id": str(node_run.run_id),
+        "source": "scenario",
+        "spec_ref": f"{scenario_id}#{payload.node_id}",
+        "started_at": node_run.started_at.isoformat(),
+    })
+
+    executor = GraphExecutor(capability_getter=_get_capability)
     inputs: dict[str, gpd.GeoDataFrame] = {}
     for n in nodes:
         if n.node_type == NodeType.DATASET and n.bind:
@@ -475,6 +574,20 @@ def run_single_node(
         results = executor.execute(nodes, edges, inputs=inputs)
         output = results.get(payload.node_id)
         duration_ms = round((time.monotonic() - t0) * 1000, 1)
+
+        from gispulse.core.models import JobStatus
+        node_run.status = JobStatus.COMPLETED
+        node_run.ended_at = datetime.now(timezone.utc)
+        if run_repo is not None:
+            run_repo.save(node_run)
+        node_sink.emit("run.completed", {
+            "run_id": str(node_run.run_id),
+            "source": "scenario",
+            "spec_ref": f"{scenario_id}#{payload.node_id}",
+            "status": "completed",
+            "ended_at": node_run.ended_at.isoformat(),
+        })
+
         return RunNodeResult(
             node_id=payload.node_id,
             scenario_id=scenario_id,
@@ -484,6 +597,22 @@ def run_single_node(
         )
     except Exception as exc:
         duration_ms = round((time.monotonic() - t0) * 1000, 1)
+
+        from gispulse.core.models import JobStatus
+        node_run.status = JobStatus.FAILED
+        node_run.error = str(exc)
+        node_run.ended_at = datetime.now(timezone.utc)
+        if run_repo is not None:
+            run_repo.save(node_run)
+        node_sink.emit("run.failed", {
+            "run_id": str(node_run.run_id),
+            "source": "scenario",
+            "spec_ref": f"{scenario_id}#{payload.node_id}",
+            "status": "failed",
+            "ended_at": node_run.ended_at.isoformat(),
+            "error": str(exc),
+        })
+
         return RunNodeResult(
             node_id=payload.node_id,
             scenario_id=scenario_id,
