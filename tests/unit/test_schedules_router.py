@@ -29,6 +29,7 @@ class _FakeScheduledPipeline:
     name: str = ""
     cron_expression: str = ""
     pipeline_config: dict[str, Any] = field(default_factory=dict)
+    dataset_id: UUID | None = None
     enabled: bool = True
     last_run: datetime | None = None
     next_run: datetime | None = None
@@ -46,6 +47,7 @@ class _FakeScheduler:
             name=sp.name,
             cron_expression=sp.cron_expression,
             pipeline_config=sp.pipeline_config,
+            dataset_id=getattr(sp, "dataset_id", None),
             enabled=sp.enabled,
             created_by=getattr(sp, "created_by", None),
         )
