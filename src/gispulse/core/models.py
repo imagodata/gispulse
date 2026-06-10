@@ -11,6 +11,8 @@ Submodules:
     core.graph       — NodeDef, EdgeDef, ActionDef, EvalResult
     core.relations   — TableRelation, ComputedFieldDef
     core.session     — EphemeralSession
+    core.geo_models  — GeocodedAddress, Parcel, Building, PartialError,
+                       AnalysisTrace, SpatialImpact
 """
 
 from __future__ import annotations
@@ -88,6 +90,16 @@ from gispulse.core.relations import (  # noqa: F401
 
 # Session
 from gispulse.core.session import EphemeralSession  # noqa: F401
+
+# Geo-spatial domain models
+from gispulse.core.geo_models import (  # noqa: F401
+    AnalysisTrace,
+    Building,
+    GeocodedAddress,
+    Parcel,
+    PartialError,
+    SpatialImpact,
+)
 
 
 # ---------------------------------------------------------------------------
