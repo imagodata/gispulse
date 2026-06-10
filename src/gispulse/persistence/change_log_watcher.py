@@ -102,6 +102,44 @@ class _ActionDispatcherProtocol(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# Composite primary-key decoding (#403)
+# ---------------------------------------------------------------------------
+
+
+def _decode_composite_pk(fid: str) -> list[Any] | None:
+    """Decode a composite ``row_pk`` produced as a JSON array (#403).
+
+    The change-tracking triggers journal a multi-column primary key as
+    ``json_array(...)`` → e.g. ``[33, "075056"]``. A single-column PK is
+    journalled as the bare value, so anything that is not a JSON list of
+    length ≥ 2 is treated as a plain single key (returns ``None``).
+    """
+    s = fid.strip()
+    if not (s.startswith("[") and s.endswith("]")):
+        return None
+    try:
+        val = json.loads(s)
+    except (ValueError, TypeError):
+        return None
+    if isinstance(val, list) and len(val) > 1:
+        return val
+    return None
+
+
+def _table_pk_cols(conn: Any, safe_table: str) -> list[str]:
+    """Return *safe_table*'s primary-key columns, ordered by key position.
+
+    ``safe_table`` must already have passed identifier validation.
+    """
+    try:
+        rows = conn.execute(f'PRAGMA table_info("{safe_table}")').fetchall()
+    except Exception:
+        return []
+    pk = sorted(((r[5], r[1]) for r in rows if r[5]), key=lambda t: t[0])
+    return [str(name) for _, name in pk]
+
+
+# ---------------------------------------------------------------------------
 # Watcher
 # ---------------------------------------------------------------------------
 
@@ -837,9 +875,6 @@ class ChangeLogWatcher:
             )
             return None
 
-        # Default GPKG primary key is "fid". We fall back to a generic
-        # ``id``/``rowid`` lookup so non-GPKG layers still resolve.
-        pk_candidates = ("fid", "id", "rowid")
         get_conn = getattr(self._engine, "_get_conn", None)
         if get_conn is None:
             return None
@@ -849,7 +884,26 @@ class ChangeLogWatcher:
             return None
 
         try:
-            for pk in pk_candidates:
+            # #403: a composite primary key is journalled as a JSON array.
+            # Rebuild the multi-column lookup from the table's real PK
+            # column names instead of matching a single column.
+            composite = _decode_composite_pk(fid)
+            if composite is not None:
+                pk_names = _table_pk_cols(conn, safe_table)
+                if pk_names and len(pk_names) == len(composite):
+                    where = " AND ".join(f'"{c}" = ?' for c in pk_names)
+                    cur = conn.execute(
+                        f'SELECT * FROM "{safe_table}" WHERE {where} LIMIT 1',
+                        tuple(composite),
+                    )
+                    row = cur.fetchone()
+                    if row is not None:
+                        return {k: row[k] for k in row.keys()}
+                return None
+
+            # Default GPKG primary key is "fid". We fall back to a generic
+            # ``id``/``rowid`` lookup so non-GPKG layers still resolve.
+            for pk in ("fid", "id", "rowid"):
                 try:
                     cur = conn.execute(
                         f'SELECT * FROM "{safe_table}" WHERE "{pk}" = ? LIMIT 1',

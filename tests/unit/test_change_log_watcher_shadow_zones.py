@@ -620,3 +620,62 @@ class TestSingleEngineConstraint:
         #       copy — current behaviour suggests this is NOT the case),
         #   (c) Live-sync only works for the project GPKG, not uploads
         #       (current de-facto behaviour — needs documentation).
+
+
+# ---------------------------------------------------------------------------
+# #403 — composite primary-key reload
+# ---------------------------------------------------------------------------
+
+
+class TestCompositePkReload:
+    """The CDC change log journals a composite PK as a JSON array; the
+    watcher must rebuild the full multi-column lookup to reload the row."""
+
+    def _make_conn(self, tmp_path: Path) -> sqlite3.Connection:
+        conn = sqlite3.connect(tmp_path / "ods.gpkg")
+        conn.row_factory = sqlite3.Row
+        bootstrap_gpkg_project(conn)
+        conn.execute(
+            'CREATE TABLE "ods" '
+            "(dept INTEGER, commune TEXT, val INTEGER, "
+            "PRIMARY KEY (dept, commune))"
+        )
+        conn.execute(
+            'INSERT INTO "ods" (dept, commune, val) VALUES (33, \'075056\', 7)'
+        )
+        conn.commit()
+        return conn
+
+    def test_decode_composite_pk(self) -> None:
+        from gispulse.persistence.change_log_watcher import _decode_composite_pk
+
+        assert _decode_composite_pk('[33, "075056"]') == [33, "075056"]
+        assert _decode_composite_pk("42") is None  # single PK → bare value
+        assert _decode_composite_pk("[5]") is None  # 1-element ≠ composite
+        assert _decode_composite_pk("not-json [") is None
+
+    def test_load_row_values_composite(self, tmp_path: Path) -> None:
+        conn = self._make_conn(tmp_path)
+
+        class _Eng:
+            backend_name = "gpkg"
+
+            def __init__(self, c: sqlite3.Connection) -> None:
+                self._c = c
+
+            def _get_conn(self) -> sqlite3.Connection:
+                return self._c
+
+            def get_pending_changes(self, limit: int = 100) -> list[dict]:
+                return []
+
+            def mark_changes_processed(self, up_to_id: int) -> int:
+                return 0
+
+        watcher = ChangeLogWatcher(_Eng(conn), _RecordingHub(), dataset_id="d1")
+        row = watcher._load_row_values("ods", '[33, "075056"]')
+        assert row is not None
+        assert row["val"] == 7
+        assert row["dept"] == 33
+        assert row["commune"] == "075056"
+        conn.close()
