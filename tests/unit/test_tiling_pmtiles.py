@@ -237,3 +237,18 @@ def test_pyramid_writes_two_layers_disjoint_zooms_one_archive(tmp_path: Path) ->
     assert {4, 8} <= zooms
     assert report.created is True
     assert report.rows_written == header["addressed_tiles_count"]
+
+
+def test_pyramid_archive_is_byte_deterministic(tmp_path: Path) -> None:
+    tiling = import_module("gispulse.tiling")
+    source = _toy_geoparquet(tmp_path)
+    spec = [
+        tiling.TileLayer(source=source, layer="coarse", min_zoom=4, max_zoom=5),
+        tiling.TileLayer(source=source, layer="fine", min_zoom=8, max_zoom=8),
+    ]
+    a = tmp_path / "a.pmtiles"
+    b = tmp_path / "b.pmtiles"
+    tiling.write_pmtiles_pyramid(spec, a)
+    time.sleep(1.1)
+    tiling.write_pmtiles_pyramid(spec, b)
+    assert a.read_bytes() == b.read_bytes()
