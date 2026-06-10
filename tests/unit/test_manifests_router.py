@@ -73,7 +73,7 @@ def test_runner_manifest_dispatch_completes(runner):
     def _fake_run_manifest(manifest, *, source_loader=None, materializer=None, event_sink=None, run_id=None):
         return ManifestRunResult(materialized={}, execution_order=[])
 
-    with patch("gispulse.orchestration.runner.run_manifest", side_effect=_fake_run_manifest):
+    with patch("gispulse.runtime.manifest_runner.run_manifest", side_effect=_fake_run_manifest):
         updated_job, result_gdf = runner.run(job, gdf)
 
     assert updated_job.status == JobStatus.COMPLETED
@@ -102,7 +102,7 @@ def test_runner_manifest_takes_priority_over_pipeline_config(runner):
         executed.append("manifest")
         return ManifestRunResult(materialized={}, execution_order=[])
 
-    with patch("gispulse.orchestration.runner.run_manifest", side_effect=_fake_run_manifest):
+    with patch("gispulse.runtime.manifest_runner.run_manifest", side_effect=_fake_run_manifest):
         updated_job, _ = runner.run(job, gdf)
 
     assert executed == ["manifest"]

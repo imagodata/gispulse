@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 import duckdb
 import geopandas as gpd
+import pandas as pd
 from shapely import wkb
 
 from gispulse.core.config import settings
@@ -376,8 +377,26 @@ class DuckDBSession(SpatialEngine):
     def sql_to_gdf(self, sql: str) -> gpd.GeoDataFrame:
         return self.sql(sql)
 
-    def register(self, name: str, gdf: gpd.GeoDataFrame) -> None:
-        self.register_gdf(name, gdf)
+    def register(self, name: str, gdf: "gpd.GeoDataFrame | pd.DataFrame") -> None:
+        """Register a GeoDataFrame or plain DataFrame as a named DuckDB table.
+
+        Dispatches to :meth:`register_gdf` for geometry-carrying inputs and
+        to :meth:`register_df` for plain DataFrames so that tabular (non-geo)
+        manifests with ``materialize: table`` work without ``AttributeError``.
+        """
+        if isinstance(gdf, gpd.GeoDataFrame):
+            self.register_gdf(name, gdf)
+        else:
+            self.register_df(name, gdf)
+
+    def register_df(self, name: str, df: pd.DataFrame) -> None:
+        """Register a plain pandas DataFrame as a named table in DuckDB.
+
+        Unlike :meth:`register_gdf`, no WKB serialisation is performed —
+        DuckDB can read a pandas DataFrame directly via its Arrow bridge.
+        """
+        self.conn.register(name, df)
+        log.debug("df_registered", table=name, rows=len(df))
 
     @property
     def backend_name(self) -> str:

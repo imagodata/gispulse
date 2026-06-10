@@ -36,6 +36,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import geopandas as gpd
+import pandas as pd
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from gispulse.core.assertions import AssertionFailure
@@ -83,12 +84,18 @@ class RefreshMode(str, Enum):
 
 @dataclass
 class MaterializedModel:
-    """A model after materialization."""
+    """A model after materialization.
+
+    ``result`` is a :class:`geopandas.GeoDataFrame` for geo sources and a
+    plain :class:`pandas.DataFrame` for tabular (non-geo) sources.
+    Downstream steps that require geometry must guard against the plain
+    DataFrame case or ensure their source carries geometry.
+    """
 
     name: str
     mode: MaterializationMode
     refresh: RefreshMode
-    result: gpd.GeoDataFrame
+    result: "gpd.GeoDataFrame | pd.DataFrame"
     #: Engine table name when ``mode == TABLE`` — ``None`` otherwise.
     table_ref: str | None = None
 
@@ -121,7 +128,7 @@ class Materializer:
     def materialize(
         self,
         name: str,
-        gdf: gpd.GeoDataFrame,
+        gdf: "gpd.GeoDataFrame | pd.DataFrame",
         mode: MaterializationMode,
         refresh: RefreshMode = RefreshMode.MANUAL,
     ) -> MaterializedModel:
@@ -163,7 +170,8 @@ class Materializer:
 # ---------------------------------------------------------------------------
 
 #: Signature of a source-loader. Defaults to ``engine.load_layer(uri, layer)``.
-SourceLoader = Callable[[SourceSpec], gpd.GeoDataFrame]
+#: May return a plain :class:`pandas.DataFrame` for tabular (non-geo) sources.
+SourceLoader = Callable[["SourceSpec"], "gpd.GeoDataFrame | pd.DataFrame"]
 
 
 @dataclass
@@ -289,9 +297,9 @@ def run_manifest(
         order=order,
     )
 
-    source_cache: dict[str, gpd.GeoDataFrame] = {}
+    source_cache: "dict[str, gpd.GeoDataFrame | pd.DataFrame]" = {}
 
-    def _resolve(ref: str) -> gpd.GeoDataFrame:
+    def _resolve(ref: str) -> "gpd.GeoDataFrame | pd.DataFrame":
         if ref in manifest.sources:
             if ref not in source_cache:
                 source_cache[ref] = source_loader(manifest.sources[ref])
@@ -313,16 +321,42 @@ def run_manifest(
         primary = _resolve(model.select)
         sub_spec = _build_sub_pipeline(model, manifest.sources, model_names)
 
-        # Inputs: primary GDF first (PipelineExecutor's linear path keys
+        # Inputs: primary first (PipelineExecutor's linear path keys
         # off the first value); any `with: <ref>` resolves into a named
         # entry that the existing ``ref_layer`` plumbing picks up.
-        inputs: dict[str, gpd.GeoDataFrame] = {model.select: primary}
+        # When the primary is a plain pd.DataFrame (tabular/non-geo source)
+        # and the model has no transform steps, we short-circuit the executor
+        # to avoid handing a non-GeoDataFrame to geometry-aware capabilities.
+        inputs: "dict[str, gpd.GeoDataFrame | pd.DataFrame]" = {model.select: primary}
         for step in sub_spec.steps:
             alias = step.params.get("ref_layer")
             if isinstance(alias, str) and alias not in inputs:
                 inputs[alias] = _resolve(alias)
 
-        results = executor.execute(sub_spec, inputs, None, event_sink=_sink, run_id=run_id)
+        # Tabular guard: a plain pd.DataFrame source cannot be passed to
+        # geometry-aware capability steps. We distinguish two sub-cases:
+        #
+        # 1. Source is tabular AND the model has declared transform steps
+        #    → FAIL EXPLICITLY with a message naming the model, so the author
+        #    can fix their manifest rather than receiving silently wrong data.
+        # 2. Source is tabular AND no transform steps (passthrough)
+        #    → short-circuit: skip PipelineExecutor and use primary as terminal.
+        if not isinstance(primary, gpd.GeoDataFrame) and isinstance(primary, pd.DataFrame):
+            real_transforms = [t for t in (model.transform or []) if isinstance(t, dict)]
+            if real_transforms:
+                n = len(real_transforms)
+                raise ValueError(
+                    f"run_manifest: model '{model_name}' declares {n} transform "
+                    f"step(s) but its source '{model.select}' is tabular "
+                    f"(no geometry). Capability steps require a GeoDataFrame. "
+                    f"Either use a geo source or remove the transform steps."
+                )
+            # Passthrough — no transforms, materialise primary directly.
+            results: "dict[str, gpd.GeoDataFrame | pd.DataFrame]" = {}
+        else:
+            # For geo sources, all inputs must be GeoDataFrames — cast check
+            # delegated to capabilities at call time (existing behaviour).
+            results = executor.execute(sub_spec, inputs, None, event_sink=_sink, run_id=run_id)  # type: ignore[arg-type]
 
         # The model's output is the last step's result — fall back to
         # any single produced output, then to the primary, so a
