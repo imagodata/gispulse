@@ -1675,6 +1675,15 @@ def explain(
         typer.echo(format_explanation_text(explanation))
 
 
+# ---------------------------------------------------------------------------
+# postgis — PostGIS lifecycle utilities (column shed, etc.)
+# ---------------------------------------------------------------------------
+
+from gispulse.cli_postgis import postgis_app  # noqa: E402
+
+app.add_typer(postgis_app, name="postgis")
+
+
 def main() -> None:
     from gispulse._pyogrio_warnings import silence_gispulse_extension_warnings
 
