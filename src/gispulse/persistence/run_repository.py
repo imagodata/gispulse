@@ -42,6 +42,11 @@ _MIGRATE_ADD_DEPTH_SQL = (
     "ALTER TABLE pipeline_runs ADD COLUMN depth INTEGER NOT NULL DEFAULT 0"
 )
 
+# The `steps` column is JSON and already stores an array of step objects.
+# Individual step artifacts are stored inline in each step object (not a
+# separate column) — no schema migration is required; the serialiser below
+# writes the new `artifacts` key into the existing JSON blob.
+
 
 class RunRepository:
     """SQLite-backed CRUD for PipelineRun objects.
@@ -97,6 +102,7 @@ class RunRepository:
                     "ended_at": s.ended_at.isoformat() if s.ended_at else None,
                     "attempt": s.attempt,
                     "error": s.error,
+                    "artifacts": s.artifacts if s.artifacts else {},
                 }
                 for s in steps
             ]
@@ -115,6 +121,7 @@ class RunRepository:
                     ended_at=datetime.fromisoformat(d["ended_at"]) if d.get("ended_at") else None,
                     attempt=d.get("attempt", 1),
                     error=d.get("error", ""),
+                    artifacts=d.get("artifacts") or {},
                 )
             )
         return steps

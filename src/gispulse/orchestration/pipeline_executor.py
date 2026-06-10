@@ -31,6 +31,88 @@ from gispulse.orchestration.event_sink import NoOpSink, RunEventSink
 log = get_logger(__name__)
 
 
+def _persist_step_artifacts(
+    run_id: str,
+    step_id: str,
+    artifacts: dict,
+    run_repo: Any,
+) -> None:
+    """Persist step artifacts into the PipelineRunStep in the run repository.
+
+    Called after a non-capability step completes so that log_tail, skip_marker,
+    and other artifacts are available via GET /runs/{id}.
+
+    Args:
+        run_id:   String representation of the run UUID.
+        step_id:  Step id within the run.
+        artifacts: Artifacts dict from StepResult.
+        run_repo:  RunRepository (or any repo with .get(UUID) / .save(run)).
+    """
+    from uuid import UUID
+
+    try:
+        uid = UUID(run_id)
+        run = run_repo.get(uid)
+        if run is None:
+            return
+        step = next((s for s in run.steps if s.step_id == step_id), None)
+        if step is not None:
+            step.artifacts = artifacts
+            run_repo.save(run)
+    except Exception as exc:  # noqa: BLE001 — never abort execution for persistence failure
+        log.warning(
+            "persist_step_artifacts_failed",
+            run_id=run_id,
+            step_id=step_id,
+            error=str(exc),
+        )
+
+
+def _execute_step_kind(
+    step: "StepSpec",
+    *,
+    run_id: str,
+    scope: str,
+    event_sink: "RunEventSink",
+    cancel_check: Callable[[], bool],
+    heartbeat: Callable[[], None],
+    run_repo: Any | None = None,
+) -> "Any":
+    """Dispatch a non-capability step to the step-kind registry.
+
+    Returns a :class:`~gispulse.orchestration.step_kinds.StepResult`.
+    Raises :exc:`KeyError` if the kind is not registered (surfaces as a
+    failed step with a clear message).
+    """
+    from gispulse.orchestration.step_kinds import (
+        StepContext,
+        _ensure_builtin_kinds,
+        get_step_kind_handler,
+    )
+
+    _ensure_builtin_kinds()
+    handler = get_step_kind_handler(step.kind)
+    if handler is None:
+        from gispulse.orchestration.step_kinds import StepResult
+        return StepResult(
+            status="failed",
+            error=(
+                f"step '{step.id}': unknown step kind {step.kind!r}; "
+                "register it with register_step_kind() before executing this pipeline"
+            ),
+        )
+
+    ctx = StepContext(
+        run_id=run_id,
+        step_id=step.id,
+        scope=scope,
+        event_sink=event_sink,
+        cancel_check=cancel_check,
+        heartbeat=heartbeat,
+    )
+    return handler(step.params, ctx)
+
+
 def _validate_step_params(capability_instance: Any, step_id: str, params: dict) -> None:
     """Validate step params against the capability instance schema; raise if invalid.
 
@@ -99,18 +181,37 @@ class PipelineExecutor:
             ``capabilities.registry.get``.
         execution_context: Optional engine context for strategy-based
             execution (DuckDB/PostGIS acceleration).
+        cancel_check:   Callable returning ``True`` when the current job
+                        has been cancelled.  Passed to non-capability step
+                        handlers via :class:`~step_kinds.StepContext`.
+        heartbeat:      Callable that the executor calls periodically
+                        during non-capability step execution so the
+                        worker's stuck-job recovery does not kill a
+                        healthy long-running step.
+        scope:          Optional scope string propagated to StepContext.
+        run_repo:       Optional run repository for persisting step
+                        artifacts after non-capability step completion.
     """
 
     def __init__(
         self,
         capability_getter: Callable[[str], Any] | None = None,
         execution_context: Any | None = None,
+        *,
+        cancel_check: Callable[[], bool] | None = None,
+        heartbeat: Callable[[], None] | None = None,
+        scope: str = "",
+        run_repo: Any | None = None,
     ) -> None:
         if capability_getter is None:
             from gispulse.capabilities import get as _get
             capability_getter = _get
         self._get_cap = capability_getter
         self._execution_context = execution_context
+        self._cancel_check: Callable[[], bool] = cancel_check or (lambda: False)
+        self._heartbeat: Callable[[], None] = heartbeat or (lambda: None)
+        self._scope = scope
+        self._run_repo = run_repo
 
     def execute(
         self,
@@ -165,6 +266,75 @@ class PipelineExecutor:
         results: dict[str, gpd.GeoDataFrame] = {}
 
         for step in spec.enabled_steps:
+            # --- Non-capability kind: dispatch to step-kind registry ------
+            if step.kind != "capability":
+                step_started_at = datetime.now(timezone.utc)
+                sink.emit("run.step.started", {
+                    "run_id": run_id or "",
+                    "step_id": step.id,
+                    "started_at": step_started_at.isoformat(),
+                })
+                try:
+                    step_result = _execute_step_kind(
+                        step,
+                        run_id=run_id or "",
+                        scope=self._scope,
+                        event_sink=sink,
+                        cancel_check=self._cancel_check,
+                        heartbeat=self._heartbeat,
+                        run_repo=self._run_repo,
+                    )
+                except Exception as exc:
+                    step_ended_at = datetime.now(timezone.utc)
+                    sink.emit("run.step.failed", {
+                        "run_id": run_id or "",
+                        "step_id": step.id,
+                        "status": "failed",
+                        "ended_at": step_ended_at.isoformat(),
+                        "error": str(exc),
+                    })
+                    raise
+
+                step_ended_at = datetime.now(timezone.utc)
+                # Persist artifacts to PipelineRunStep if run_repo is available
+                # (done via the sink's RecordingSink path — we emit the event
+                # with artifacts so RecordingSink can forward them)
+                if step_result.status == "failed":
+                    sink.emit("run.step.failed", {
+                        "run_id": run_id or "",
+                        "step_id": step.id,
+                        "status": "failed",
+                        "ended_at": step_ended_at.isoformat(),
+                        "error": step_result.error,
+                        "artifacts": step_result.artifacts,
+                        "metrics": step_result.metrics,
+                    })
+                    raise RuntimeError(
+                        f"Step '{step.id}' (kind={step.kind!r}) failed: "
+                        f"{step_result.error}"
+                    )
+                sink.emit("run.step.completed", {
+                    "run_id": run_id or "",
+                    "step_id": step.id,
+                    "status": "completed",
+                    "ended_at": step_ended_at.isoformat(),
+                    "artifacts": step_result.artifacts,
+                    "metrics": step_result.metrics,
+                })
+                # Store artifacts on the PipelineRunStep via run_repo if available
+                if self._run_repo is not None:
+                    _persist_step_artifacts(
+                        run_id or "", step.id, step_result.artifacts, self._run_repo
+                    )
+                log.info(
+                    "pipeline_kind_step_done",
+                    step_id=step.id,
+                    kind=step.kind,
+                    status=step_result.status,
+                )
+                continue
+
+            # --- Capability path (existing unchanged behaviour) -----------
             if step.type != "capability" or not step.capability:
                 log.warning("pipeline_skip_non_capability", step_id=step.id, step_type=step.type)
                 continue
@@ -257,15 +427,86 @@ class PipelineExecutor:
         event_sink: RunEventSink | None = None,
         run_id: str | None = None,
     ) -> dict[str, gpd.GeoDataFrame]:
-        """Convert PipelineSpec to NodeDef/EdgeDef and run via GraphExecutor."""
+        """Run non-capability DAG steps, then delegate capability nodes."""
+        from datetime import datetime, timezone
+
         from gispulse.orchestration.graph_executor import GraphExecutor
+
+        sink = event_sink if event_sink is not None else NoOpSink()
+        from gispulse.core.pipeline import validate_step_kind_inputs
+
+        validation_errors = validate_step_kind_inputs(spec)
+        if validation_errors:
+            raise ValueError(
+                "step kind validation failed: " + "; ".join(validation_errors)
+            )
+
+        non_cap_steps = [s for s in spec.enabled_steps if s.kind != "capability"]
+        cap_steps = [s for s in spec.enabled_steps if s.kind == "capability"]
+
+        for step in non_cap_steps:
+            step_started_at = datetime.now(timezone.utc)
+            sink.emit("run.step.started", {
+                "run_id": run_id or "",
+                "step_id": step.id,
+                "started_at": step_started_at.isoformat(),
+            })
+            try:
+                step_result = _execute_step_kind(
+                    step,
+                    run_id=run_id or "",
+                    scope=self._scope,
+                    event_sink=sink,
+                    cancel_check=self._cancel_check,
+                    heartbeat=self._heartbeat,
+                    run_repo=self._run_repo,
+                )
+            except Exception as exc:
+                step_ended_at = datetime.now(timezone.utc)
+                sink.emit("run.step.failed", {
+                    "run_id": run_id or "",
+                    "step_id": step.id,
+                    "status": "failed",
+                    "ended_at": step_ended_at.isoformat(),
+                    "error": str(exc),
+                })
+                raise
+
+            step_ended_at = datetime.now(timezone.utc)
+            if step_result.status == "failed":
+                sink.emit("run.step.failed", {
+                    "run_id": run_id or "",
+                    "step_id": step.id,
+                    "status": "failed",
+                    "ended_at": step_ended_at.isoformat(),
+                    "error": step_result.error,
+                    "artifacts": step_result.artifacts,
+                    "metrics": step_result.metrics,
+                })
+                raise RuntimeError(
+                    f"Step '{step.id}' (kind={step.kind!r}) failed: {step_result.error}"
+                )
+
+            sink.emit("run.step.completed", {
+                "run_id": run_id or "",
+                "step_id": step.id,
+                "status": "completed",
+                "ended_at": step_ended_at.isoformat(),
+                "artifacts": step_result.artifacts,
+                "metrics": step_result.metrics,
+            })
+            if self._run_repo is not None:
+                _persist_step_artifacts(run_id or "", step.id, step_result.artifacts, self._run_repo)
+
+        if not cap_steps:
+            return {}
 
         nodes, edges, dataset_inputs = self._spec_to_graph(spec, inputs)
 
         executor = GraphExecutor(
             capability_getter=self._get_cap,
             execution_context=self._execution_context,
-            event_sink=event_sink,
+            event_sink=sink,
             run_id=run_id,
         )
         return executor.execute(nodes, edges, dataset_inputs, params or {})
@@ -288,7 +529,7 @@ class PipelineExecutor:
 
         # Track which step is the first without an explicit input
         first_input_key = f"_input_{next(iter(inputs))}" if inputs else None
-        step_ids = {s.id for s in spec.enabled_steps if s.type == "capability"}
+        step_ids = {s.id for s in spec.enabled_steps if s.kind == "capability"}
 
         def _resolve_source(src: str) -> str:
             # Allow step.input to reference a ref-layer / dataset alias
@@ -301,7 +542,7 @@ class PipelineExecutor:
             return src
 
         for step in spec.enabled_steps:
-            if step.type != "capability":
+            if step.kind != "capability" or step.type != "capability":
                 continue
 
             node = NodeDef(

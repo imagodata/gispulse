@@ -24,6 +24,9 @@ class PipelineRunStep:
         ended_at:   UTC timestamp when the step finished (None if still running).
         attempt:    Retry counter, 1-based.
         error:      Error message if status=FAILED, empty string otherwise.
+        artifacts:  Opaque dict persisted after non-capability step completion.
+                    Carries ``log_tail``, ``skip_marker``, and other kind-specific
+                    artefacts.  Empty for capability steps.
     """
 
     step_id: str
@@ -32,6 +35,7 @@ class PipelineRunStep:
     ended_at: datetime | None = None
     attempt: int = 1
     error: str = ""
+    artifacts: dict = field(default_factory=dict)
 
 
 @dataclass
