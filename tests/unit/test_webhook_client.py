@@ -184,6 +184,80 @@ class TestSSRFPolicy:
 
 
 # ---------------------------------------------------------------------------
+# DNS rebinding (TOCTOU): connection is pinned to the validated IP
+# ---------------------------------------------------------------------------
+
+
+class TestDnsRebindingPinning:
+    """Without a DI client, the request must connect to the *validated* IP
+    while keeping the original Host header (and SNI for https), so a hostname
+    cannot re-resolve to a blocked address between validation and connect."""
+
+    def test_https_pins_ip_keeps_host_and_sni(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        # Validation resolves to this public IP exactly once.
+        monkeypatch.setattr(_module, "_resolve_all", lambda host: ["93.184.216.34"])
+
+        captured: list[httpx.Request] = []
+        _real_client = httpx.Client
+
+        class _CaptureClient:
+            def __init__(self, *a, **k):
+                self._inner = _real_client(
+                    transport=httpx.MockTransport(self._handler)
+                )
+
+            def _handler(self, request: httpx.Request) -> httpx.Response:
+                captured.append(request)
+                return httpx.Response(200)
+
+            def build_request(self, *a, **k):
+                return self._inner.build_request(*a, **k)
+
+            def send(self, request):
+                return self._inner.send(request)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                self._inner.close()
+
+        monkeypatch.setattr(_module.httpx, "Client", _CaptureClient)
+
+        c = HttpWebhookClient(allow_private_ips=False)
+        c.post("https://api.example.com/hook", {"x": 1})
+
+        assert len(captured) == 1
+        req = captured[0]
+        # Connection target is the validated IP, not the hostname.
+        assert req.url.host == "93.184.216.34"
+        # Host header preserves virtual-host routing on the original name.
+        assert req.headers["Host"] == "api.example.com"
+        # TLS verifies against the original hostname, not the IP.
+        assert req.extensions.get("sni_hostname") == "api.example.com"
+
+    def test_rebinding_to_metadata_ip_is_blocked_before_connect(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        # Hostname resolves to the cloud metadata endpoint at validation time.
+        monkeypatch.setattr(
+            _module, "_resolve_all", lambda host: ["169.254.169.254"]
+        )
+        # Any attempt to actually open a client would be a bug.
+        monkeypatch.setattr(
+            _module.httpx,
+            "Client",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("connected!")),
+        )
+
+        c = HttpWebhookClient(allow_private_ips=False)
+        with pytest.raises(WebhookSecurityError, match="blocked"):
+            c.post("https://attacker.example/hook", {"x": 1})
+
+
+# ---------------------------------------------------------------------------
 # HMAC signing
 # ---------------------------------------------------------------------------
 

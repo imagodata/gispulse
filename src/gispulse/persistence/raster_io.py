@@ -170,9 +170,18 @@ def write_raster(
     transform: Any,
     nodata: Optional[float] = None,
     dtype: Optional[str] = None,
+    cog: Optional[bool] = None,
+    compress: str = "DEFLATE",
+    blocksize: int = 512,
     **kwargs: Any,
 ) -> None:
     """Write a numpy array as a raster file.
+
+    For GeoTIFF outputs (``.tif`` / ``.tiff``) the data is written as a
+    Cloud-Optimized GeoTIFF (COG) by default, using rasterio's native
+    ``COG`` driver. COGs are tiled, carry internal overviews and a
+    cloud-friendly layout, which makes them efficient to stream from object
+    storage while remaining valid GeoTIFFs for any GDAL reader.
 
     Args:
         data:      Array of shape [bands, height, width] or [height, width].
@@ -181,7 +190,12 @@ def write_raster(
         transform: Affine transform.
         nodata:    Nodata value.
         dtype:     Output dtype. Defaults to data.dtype.
-        **kwargs:  Extra rasterio profile options.
+        cog:       Write a Cloud-Optimized GeoTIFF. ``None`` (default) means
+                   auto: COG for ``.tif``/``.tiff``, plain driver otherwise.
+                   Pass ``False`` to force a plain ``GTiff`` for ``.tif``.
+        compress:  Compression for COG output (e.g. "DEFLATE", "LZW", "ZSTD").
+        blocksize: Internal tile/block size for COG output.
+        **kwargs:  Extra rasterio profile options (override the defaults).
     """
     import numpy as np
     import rasterio
@@ -201,19 +215,47 @@ def write_raster(
     if isinstance(transform, (list, tuple)):
         transform = Affine(*transform[:6])
 
-    profile = {
-        "driver": RASTER_DRIVERS.get(ext, "GTiff"),
-        "dtype": dtype or str(data.dtype),
-        "width": width,
-        "height": height,
-        "count": count,
-        "crs": crs,
-        "transform": transform,
-    }
+    # Decide whether to emit a Cloud-Optimized GeoTIFF. Auto-enable for
+    # GeoTIFF extensions; never for other formats (which lack a COG driver).
+    is_geotiff = ext in (".tif", ".tiff")
+    use_cog = is_geotiff if cog is None else (cog and is_geotiff)
+
+    if use_cog:
+        profile = {
+            "driver": "COG",
+            "dtype": dtype or str(data.dtype),
+            "width": width,
+            "height": height,
+            "count": count,
+            "crs": crs,
+            "transform": transform,
+            # COG driver creation options: tiled + internal overviews.
+            "compress": compress,
+            "blocksize": blocksize,
+            "overview_resampling": "nearest",
+        }
+    else:
+        profile = {
+            "driver": RASTER_DRIVERS.get(ext, "GTiff"),
+            "dtype": dtype or str(data.dtype),
+            "width": width,
+            "height": height,
+            "count": count,
+            "crs": crs,
+            "transform": transform,
+        }
     if nodata is not None:
         profile["nodata"] = nodata
 
     profile.update(kwargs)
+
+    # Validate the CRS up-front so an invalid value raises a clean Python
+    # exception. The COG driver may otherwise abort hard (rather than raising)
+    # on a malformed CRS during its internal translate step.
+    if profile.get("crs") is not None:
+        from rasterio.crs import CRS
+
+        profile["crs"] = CRS.from_user_input(profile["crs"])
 
     # Atomic write: write to temp file first, then rename
     import tempfile

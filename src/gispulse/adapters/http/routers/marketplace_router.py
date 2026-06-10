@@ -22,12 +22,34 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from gispulse.adapters.http.auth import require_role
 
 router = APIRouter(prefix="/marketplace", tags=["marketplace"])
+
+
+def require_rbac_enabled(request: Request) -> None:
+    """Fail-closed guard for privileged marketplace operations.
+
+    ``require_role("admin")`` is a no-op when RBAC is disabled (no
+    ``AuthRepository`` attached to the app), which would otherwise let any
+    caller install/uninstall packages (pip, arbitrary code execution).  This
+    dependency rejects the request unless RBAC is actually configured, so the
+    admin role check that follows can be meaningfully enforced.
+
+    Raises:
+        HTTPException(403): When RBAC is not configured.
+    """
+    if getattr(request.app.state, "auth_repo", None) is None:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Plugin install/uninstall requires RBAC to be configured "
+                "(set GISPULSE_RBAC=1 and provision an admin user)."
+            ),
+        )
 
 _PLUGIN_PREFIX = "gispulse-cap-"
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$")
@@ -264,7 +286,7 @@ def search_plugins(q: str = Query(..., min_length=1, description="Search term"))
     "/plugins/{plugin_id}/install",
     summary="Install a plugin by ID (admin only)",
     response_model=PluginActionResponse,
-    dependencies=[Depends(require_role("admin"))],
+    dependencies=[Depends(require_rbac_enabled), Depends(require_role("admin"))],
 )
 def install_plugin_by_id(plugin_id: str) -> PluginActionResponse:
     """Install a plugin using its registry ID (e.g. ``gispulse-cap-ftth``).
@@ -305,7 +327,7 @@ def install_plugin_by_id(plugin_id: str) -> PluginActionResponse:
     "/install",
     summary="Install a plugin (admin only)",
     response_model=PluginActionResponse,
-    dependencies=[Depends(require_role("admin"))],
+    dependencies=[Depends(require_rbac_enabled), Depends(require_role("admin"))],
 )
 def install_plugin(body: PluginAction) -> PluginActionResponse:
     """Install a GISPulse capability plugin via pip.
@@ -339,7 +361,7 @@ def install_plugin(body: PluginAction) -> PluginActionResponse:
     "/plugins/{plugin_id}/uninstall",
     summary="Uninstall a plugin by ID (admin only)",
     response_model=PluginActionResponse,
-    dependencies=[Depends(require_role("admin"))],
+    dependencies=[Depends(require_rbac_enabled), Depends(require_role("admin"))],
 )
 def uninstall_plugin_by_id(plugin_id: str) -> PluginActionResponse:
     """Uninstall a plugin using its registry ID."""
@@ -379,7 +401,7 @@ def uninstall_plugin_by_id(plugin_id: str) -> PluginActionResponse:
     "/uninstall",
     summary="Uninstall a plugin (admin only)",
     response_model=PluginActionResponse,
-    dependencies=[Depends(require_role("admin"))],
+    dependencies=[Depends(require_rbac_enabled), Depends(require_role("admin"))],
 )
 def uninstall_plugin(body: PluginAction) -> PluginActionResponse:
     """Uninstall a GISPulse capability plugin via pip.
