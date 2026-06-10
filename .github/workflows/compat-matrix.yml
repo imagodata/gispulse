@@ -45,8 +45,8 @@ jobs:
         python-version: ${{ fromJSON(inputs.python-versions) }}
         gispulse-version: ${{ fromJSON(inputs.gispulse-versions) }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install gispulse ${{ matrix.gispulse-version }}
@@ -67,7 +67,7 @@ jobs:
           pytest --collect-only ${{ inputs.pytest-target }} 2>&1 | tail -20
       - name: Open issue on failure
         if: failure()
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             github.rest.issues.create({
