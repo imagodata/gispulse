@@ -341,11 +341,11 @@ def _read_csv_geo(
     Auto-detects common lat/lon column names if not provided.
     Also supports a WKT geometry column.
     """
-    import pandas as pd
+    from gispulse.core.io.csv_encoding import read_csv_with_encoding_fallback
 
     sep = "\t" if path.endswith(".tsv") else ","
     nrows = rows if rows else None
-    df = pd.read_csv(path, sep=sep, nrows=nrows, **kwargs)
+    df = read_csv_with_encoding_fallback(path, sep=sep, nrows=nrows, **kwargs)
 
     # Try WKT geometry column first
     if geom_col and geom_col in df.columns:
