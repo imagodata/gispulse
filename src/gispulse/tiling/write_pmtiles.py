@@ -404,7 +404,7 @@ def _prepare_source_result(
         )
 
     try:
-        import geopandas as gpd
+        import geopandas as gpd  # type: ignore[import-untyped]
     except Exception as exc:  # pragma: no cover - geopandas is a base dependency
         raise TypeError("GeoDataFrame SourceResult data requires geopandas") from exc
 
@@ -678,7 +678,7 @@ def _encode_layer_tiles(
         xmin, ymin, xmax, ymax = _tile_bounds_3857(z, x, y)
         tile_rows.append((z, x, y, xmin, ymin, xmax, ymax))
     if not tile_rows:
-        return 0
+        return []
     session.conn.executemany(f"INSERT INTO {tiles_table} VALUES (?, ?, ?, ?, ?, ?, ?)", tile_rows)
 
     box_expr = "ST_MakeBox2D(ST_Point(tiles.xmin, tiles.ymin), ST_Point(tiles.xmax, tiles.ymax))"

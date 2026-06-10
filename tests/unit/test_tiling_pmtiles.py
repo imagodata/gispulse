@@ -252,3 +252,31 @@ def test_pyramid_archive_is_byte_deterministic(tmp_path: Path) -> None:
     time.sleep(1.1)
     tiling.write_pmtiles_pyramid(spec, b)
     assert a.read_bytes() == b.read_bytes()
+
+
+def test_pyramid_empty_source_names_the_layer(tmp_path: Path) -> None:
+    tiling = import_module("gispulse.tiling")
+    empty = tmp_path / "empty.parquet"
+    gpd.GeoDataFrame({"id": []}, geometry=[], crs="EPSG:4326").to_parquet(empty)
+    with pytest.raises(ValueError, match="layer 'ghost': source contains no geometries"):
+        tiling.write_pmtiles_pyramid(
+            [tiling.TileLayer(source=empty, layer="ghost", min_zoom=0, max_zoom=4)],
+            tmp_path / "x.pmtiles",
+        )
+
+
+def test_pyramid_report_detail_lists_layers(tmp_path: Path) -> None:
+    import json as _json
+
+    tiling = import_module("gispulse.tiling")
+    source = _toy_geoparquet(tmp_path)
+    report = tiling.write_pmtiles_pyramid(
+        [
+            tiling.TileLayer(source=source, layer="coarse", min_zoom=4, max_zoom=5),
+            tiling.TileLayer(source=source, layer="fine", min_zoom=8, max_zoom=8),
+        ],
+        tmp_path / "x.pmtiles",
+    )
+    detail = _json.loads(report.detail)
+    assert detail["layers"] == ["coarse", "fine"]
+    assert detail["min_zoom"] == 4 and detail["max_zoom"] == 8
