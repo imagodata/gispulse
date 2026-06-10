@@ -45,6 +45,19 @@ class _PreparedSource:
     source_crs: str | None
 
 
+@dataclass(frozen=True)
+class TileLayer:
+    """Une couche source + sa plage de zoom dediee dans une pyramide PMTiles."""
+
+    source: str | Path | SourceResult
+    layer: str
+    min_zoom: int
+    max_zoom: int
+    geometry_column: str | None = None
+    source_crs: str | None = None
+    simplify_tolerance: float | None = None
+
+
 def write_pmtiles(
     source: str | Path | SourceResult,
     out_path: str | Path,
@@ -101,6 +114,18 @@ def write_pmtiles(
         if owns_session:
             duck.close()
     return report
+
+
+def write_pmtiles_pyramid(
+    layers: Sequence[TileLayer],
+    out_path: str | Path,
+    *,
+    extent: int = 4096,
+    buffer: int = 256,
+    session: DuckDBSession | None = None,
+) -> WriteReport:
+    _validate_pyramid_layers(layers, extent=extent, buffer=buffer)
+    raise NotImplementedError
 
 
 class PmtilesWriter:
@@ -231,6 +256,31 @@ def _validate_options(
         raise ValueError("buffer must be non-negative")
     if simplify_tolerance is not None and simplify_tolerance < 0:
         raise ValueError("simplify_tolerance must be non-negative")
+
+
+def _validate_pyramid_layers(
+    layers: Sequence[TileLayer], *, extent: int, buffer: int
+) -> None:
+    if not layers:
+        raise ValueError("write_pmtiles_pyramid requires at least one TileLayer")
+    names = [item.layer for item in layers]
+    if len(set(names)) != len(names):
+        raise ValueError("layer names must be unique across the pyramid")
+    for item in layers:
+        _validate_options(
+            layer=item.layer,
+            min_zoom=item.min_zoom,
+            max_zoom=item.max_zoom,
+            simplify_tolerance=item.simplify_tolerance,
+            extent=extent,
+            buffer=buffer,
+        )
+    spans = sorted((item.min_zoom, item.max_zoom) for item in layers)
+    for (lo, hi), (nlo, nhi) in zip(spans, spans[1:]):
+        if nlo <= hi:
+            raise ValueError(
+                f"zoom ranges must be disjoint: [{lo},{hi}] overlaps [{nlo},{nhi}]"
+            )
 
 
 def _prepare_source(

@@ -6,12 +6,14 @@ from importlib.util import find_spec
 from pathlib import Path
 
 import geopandas as gpd
+import pytest
 from pmtiles.reader import MmapSource, Reader, all_tiles
 from pmtiles.tile import Compression, TileType
 from shapely.geometry import Point
 
 from gispulse.core.plugin_model import AccessProtocol, Payload, SourceResult, WriteSpec
 from gispulse.core.sources import ProtocolRegistry
+from gispulse.tiling import TileLayer
 
 
 def _toy_geoparquet(tmp_path: Path) -> Path:
@@ -173,3 +175,25 @@ def test_write_pmtiles_coerces_unsupported_property_types(tmp_path: Path) -> Non
     out = tmp_path / "dated.pmtiles"
     report = write_pmtiles(path, out, layer="dated", min_zoom=0, max_zoom=10)
     assert report.rows_written > 0
+
+
+def test_tilelayer_rejects_overlapping_zoom_ranges(tmp_path: Path) -> None:
+    write_pmtiles_pyramid = import_module("gispulse.tiling").write_pmtiles_pyramid
+    source = _toy_geoparquet(tmp_path)
+    layers = [
+        TileLayer(source=source, layer="r_low", min_zoom=0, max_zoom=6),
+        TileLayer(source=source, layer="r_high", min_zoom=6, max_zoom=10),
+    ]
+    with pytest.raises(ValueError, match="zoom ranges must be disjoint"):
+        write_pmtiles_pyramid(layers, tmp_path / "x.pmtiles")
+
+
+def test_tilelayer_rejects_duplicate_layer_names(tmp_path: Path) -> None:
+    write_pmtiles_pyramid = import_module("gispulse.tiling").write_pmtiles_pyramid
+    source = _toy_geoparquet(tmp_path)
+    layers = [
+        TileLayer(source=source, layer="dup", min_zoom=0, max_zoom=4),
+        TileLayer(source=source, layer="dup", min_zoom=5, max_zoom=8),
+    ]
+    with pytest.raises(ValueError, match="layer names must be unique"):
+        write_pmtiles_pyramid(layers, tmp_path / "x.pmtiles")
