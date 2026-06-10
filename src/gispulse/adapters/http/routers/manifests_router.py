@@ -177,7 +177,13 @@ def _validate_manifest_dict(raw: dict[str, Any]) -> tuple[bool, list[str], int]:
             f"unknown capability '{step.capability}' in step '{step.id}'. "
             f"Available: {sorted(known_caps)}."
             for step in compiled.steps
-            if step.type == "capability" and step.capability
+            # Skip non-capability steps: their kind is dispatched to the step-kind
+            # registry at execution time in the worker process. The HTTP boundary
+            # cannot know which application kinds are registered there. Validating
+            # step.kind existence here would produce false-positive 422s for any
+            # custom kind (e.g. "external") that is perfectly valid in the worker.
+            if step.kind == "capability"
+            and step.type == "capability" and step.capability
             and step.capability not in known_caps
         ]
         if cap_errors:
