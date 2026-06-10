@@ -607,7 +607,8 @@ def create_app(
                 except Exception:
                     pass
             # Close queue and metering connections
-            await app.state.job_queue.close()
+            if app.state.job_queue is not None:
+                await app.state.job_queue.close()
             await app.state.metering.close()
             spatial_engine.close()
         else:

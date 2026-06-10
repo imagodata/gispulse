@@ -188,6 +188,13 @@ def _run_external(params: dict, context: StepContext) -> StepResult:
     for k, v in env_override.items():
         merged_env[k] = str(v)
 
+    # Inject resume marker if present — subprocess can restart from checkpoint.
+    # The marker is the opaque token emitted by a prior run via
+    # GISPULSE_SKIP_MARKER=<token>; on resume it is passed back as
+    # GISPULSE_RESUME_MARKER so the script can skip already-processed work.
+    if context.resume_marker:
+        merged_env["GISPULSE_RESUME_MARKER"] = context.resume_marker
+
     # Shared state between threads
     tail: deque[str] = deque(maxlen=log_tail_lines)
     skip_marker: list[str] = []  # at most 1 element

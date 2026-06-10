@@ -63,6 +63,7 @@ __all__ = [
     "Materializer",
     "ManifestRunResult",
     "run_manifest",
+    "validate_steps_filter_models",
 ]
 
 
@@ -236,6 +237,81 @@ def _build_sub_pipeline(
     return PipelineSpec(version=2, name=model.name, steps=sub_steps)
 
 
+def validate_steps_filter_models(
+    manifest: ManifestV3,
+    steps_filter: list[str],
+) -> None:
+    """Validate that steps_filter does not orphan a capability-upstream model.
+
+    Checks both ``select`` and ``with:`` (ref_layer) inter-model references.
+    For each model whose compiled step IDs overlap with ``steps_filter``, all
+    referenced upstream models (via ``select`` or ``with:`` transforms) must
+    either also be included in the filter OR have no capability steps.
+
+    If an included model references an excluded model that has capability steps,
+    a ``ValueError`` is raised with ``code=EXCLUDED_CAPABILITY_UPSTREAM``.
+
+    This function is called from two boundaries:
+    - ``run_manifest`` (runtime): raises ``ValueError``.
+    - ``manifests_router`` (HTTP): catches ``ValueError`` and returns 422.
+
+    Args:
+        manifest:     Parsed v3 manifest.
+        steps_filter: List of flat step IDs to include.
+
+    Raises:
+        ValueError: When an included model references an excluded model with
+            capability steps. Message contains ``code=EXCLUDED_CAPABILITY_UPSTREAM``.
+    """
+    if not steps_filter:
+        return  # no filter → no orphan possible
+
+    model_names = set(manifest.models)
+    filter_set = set(steps_filter)
+
+    # Compute per-model step IDs to determine inclusion
+    _model_step_ids: dict[str, set[str]] = {}
+    for _mn in model_names:
+        _sub = _build_sub_pipeline(manifest.models[_mn], manifest.sources, model_names)
+        _model_step_ids[_mn] = {s.id for s in _sub.steps}
+
+    included_models = {
+        _mn for _mn, _ids in _model_step_ids.items()
+        if _ids.intersection(filter_set)
+    }
+
+    for _mn in included_models:
+        _mdl = manifest.models[_mn]
+        # Build sub-spec to find all ref_layer references (with: compiled refs).
+        _sub_for_refs = _build_sub_pipeline(_mdl, manifest.sources, model_names)
+        _ref_layer_refs = {
+            s.params["ref_layer"]
+            for s in _sub_for_refs.steps
+            if isinstance(s.params.get("ref_layer"), str)
+            and s.params["ref_layer"] in model_names  # model refs only
+        }
+        # Combine: select ref + all with: refs
+        _all_upstream_refs: set[str] = set()
+        if _mdl.select in model_names:
+            _all_upstream_refs.add(_mdl.select)
+        _all_upstream_refs.update(_ref_layer_refs)
+
+        for _ref in _all_upstream_refs:
+            if _ref not in included_models:
+                _ref_sub = _build_sub_pipeline(
+                    manifest.models[_ref], manifest.sources, model_names
+                )
+                _ref_has_cap = any(s.kind == "capability" for s in _ref_sub.steps)
+                if _ref_has_cap:
+                    raise ValueError(
+                        f"steps_filter: included model '{_mn}' references excluded model "
+                        f"'{_ref}' (via select or with:) which has capability steps whose "
+                        f"in-memory GeoDataFrame output is required. Either include "
+                        f"'{_ref}' in the filter or exclude '{_mn}'. "
+                        f"code=EXCLUDED_CAPABILITY_UPSTREAM"
+                    )
+
+
 def run_manifest(
     manifest: ManifestV3,
     *,
@@ -244,6 +320,8 @@ def run_manifest(
     materializer: Materializer | None = None,
     event_sink: RunEventSink | None = None,
     run_id: str | None = None,
+    steps_filter: list[str] | None = None,
+    resume_markers: dict[str, str] | None = None,
 ) -> ManifestRunResult:
     """Execute a v3 manifest end-to-end.
 
@@ -297,6 +375,33 @@ def run_manifest(
         order=order,
     )
 
+    # --- Build an effective filter set (flat step IDs → per-model inclusion map) ---
+    # steps_filter contains flat PipelineSpec step IDs. These correspond
+    # directly to the sub-spec step IDs produced by _build_sub_pipeline
+    # (terminal step id = model name, intermediates = <model>__t<n>).
+    # Strategy:
+    #   1. Compute the flat step IDs for each model.
+    #   2. A model is INCLUDED if at least one of its step IDs is in the filter.
+    #   3. Models not included are SKIPPED: primary is materialised as passthrough
+    #      WITHOUT executing any steps (critical: no subprocess, no capability exec).
+    #   4. Validation delegated to validate_steps_filter_models: covers both
+    #      select refs AND with: (ref_layer) refs to excluded capability models.
+    _effective_filter: set[str] | None = None
+    _included_models: set[str] = set(model_names)  # default = all included
+    if steps_filter:
+        _effective_filter = set(steps_filter)
+        # Validate before computing inclusion — raises ValueError on orphan capability.
+        validate_steps_filter_models(manifest, steps_filter)
+        # Compute per-model step IDs to determine inclusion
+        _model_step_ids: dict[str, set[str]] = {}
+        for _mn in model_names:
+            _sub = _build_sub_pipeline(manifest.models[_mn], manifest.sources, model_names)
+            _model_step_ids[_mn] = {s.id for s in _sub.steps}
+        _included_models = {
+            _mn for _mn, _ids in _model_step_ids.items()
+            if _ids.intersection(_effective_filter)
+        }
+
     source_cache: "dict[str, gpd.GeoDataFrame | pd.DataFrame]" = {}
 
     def _resolve(ref: str) -> "gpd.GeoDataFrame | pd.DataFrame":
@@ -313,13 +418,60 @@ def run_manifest(
         )
 
     _sink = event_sink if event_sink is not None else NoOpSink()
-    executor = PipelineExecutor(execution_context=None)
     assertion_warnings: list = []
+    _resume_markers: dict[str, str] = resume_markers or {}
+    executed_order: list[str] = []  # models actually materialized (filter-aware)
 
     for model_name in order:
         model = manifest.models[model_name]
-        primary = _resolve(model.select)
+
+        if model_name not in _included_models:
+            # --- Skipped model: materialise primary as passthrough, NO steps executed ---
+            # This is intentionally a passthrough and NOT a NoOpSink-execute.
+            # No subprocess is spawned, no capability pipeline runs.
+            # The passthrough puts the raw source GDF into the materializer so
+            # that downstream models referencing this one via _resolve() can find it.
+            # Safety: the validation above guarantees no included model depends on
+            # this model's capability output.
+            log.debug(
+                "manifest_model_skipped_by_filter",
+                model=model_name,
+                steps_filter=list(_effective_filter) if _effective_filter else [],
+            )
+            primary = _resolve(model.select)
+            materializer.materialize(
+                model_name,
+                primary,
+                MaterializationMode(model.materialize),
+                RefreshMode(model.refresh),
+            )
+            # Do NOT add to executed_order — the model was not run.
+            continue
+
+        # --- Included model: build sub-spec, optionally filtered ---
         sub_spec = _build_sub_pipeline(model, manifest.sources, model_names)
+
+        if _effective_filter is not None:
+            # Keep only the listed steps within this model's sub-spec.
+            from gispulse.core.pipeline import PipelineSpec as _PS
+            filtered_steps = [s for s in sub_spec.steps if s.id in _effective_filter]
+            sub_spec = _PS(
+                version=sub_spec.version,
+                name=sub_spec.name,
+                steps=filtered_steps,
+                triggers=sub_spec.triggers,
+                ref_layers=sub_spec.ref_layers,
+            )
+
+        primary = _resolve(model.select)
+
+        # --- resume_markers: pass per-step markers to this model's executor ---
+        model_step_ids_for_resume = {s.id for s in sub_spec.steps}
+        model_resume_markers = {
+            sid: marker
+            for sid, marker in _resume_markers.items()
+            if sid in model_step_ids_for_resume
+        }
 
         # Inputs: primary first (PipelineExecutor's linear path keys
         # off the first value); any `with: <ref>` resolves into a named
@@ -356,7 +508,13 @@ def run_manifest(
         else:
             # For geo sources, all inputs must be GeoDataFrames — cast check
             # delegated to capabilities at call time (existing behaviour).
-            results = executor.execute(sub_spec, inputs, None, event_sink=_sink, run_id=run_id)  # type: ignore[arg-type]
+            # A per-model executor is created so resume_markers are scoped to
+            # the current model's step IDs (no cross-model marker leakage).
+            model_executor = PipelineExecutor(
+                execution_context=None,
+                resume_markers=model_resume_markers if model_resume_markers else None,
+            )
+            results = model_executor.execute(sub_spec, inputs, None, event_sink=_sink, run_id=run_id)  # type: ignore[arg-type]
 
         # The model's output is the last step's result — fall back to
         # any single produced output, then to the primary, so a
@@ -400,8 +558,10 @@ def run_manifest(
                 )
             assertion_warnings.extend(failures)
 
+        executed_order.append(model_name)
+
     return ManifestRunResult(
         materialized=dict(materializer.models),
-        execution_order=order,
+        execution_order=executed_order,
         assertion_warnings=assertion_warnings,
     )

@@ -72,6 +72,241 @@ def _compute_effective_timeout(job_timeout: int, spec: Any) -> int:
     return max(job_timeout, step_sum + 60)
 
 
+def _apply_steps_filter(
+    spec: "Any",
+    steps_filter: list[str],
+    *,
+    job_id: str = "",
+) -> "Any":
+    """Validate and apply a steps_filter to a PipelineSpec (partial run).
+
+    Spec contract:
+    - All step IDs in steps_filter must exist in spec.steps → ValueError (422).
+    - A capability step in the filter whose ``input`` references a step OUTSIDE
+      the filter → ValueError (no upstream GeoDataFrame).
+    - A non-capability step whose ``input`` references a step outside the
+      filter → ACCEPTED (no GeoDataFrame dependency between external steps).
+
+    Returns a new PipelineSpec with only the selected steps enabled.
+
+    Args:
+        spec:         Parsed PipelineSpec to filter.
+        steps_filter: List of step IDs to include.
+        job_id:       Used in error messages.
+
+    Raises:
+        ValueError: Invalid filter (unknown ids, orphan capability).
+    """
+    from gispulse.core.pipeline import PipelineSpec
+
+    all_ids = {s.id for s in spec.steps}
+
+    # 1. Unknown ID check
+    unknown = [sid for sid in steps_filter if sid not in all_ids]
+    if unknown:
+        valid_ids = sorted(all_ids)
+        raise ValueError(
+            f"Job {job_id}: steps_filter contains unknown step IDs: "
+            f"{unknown!r}. Valid IDs: {valid_ids!r}."
+        )
+
+    filter_set = set(steps_filter)
+
+    # 2. Capability orphan check — capability step whose input is outside filter
+    for step in spec.steps:
+        if step.id not in filter_set:
+            continue
+        if step.kind != "capability":
+            continue
+        if step.input is None:
+            continue
+        refs = step.input if isinstance(step.input, list) else [step.input]
+        orphan_refs = [r for r in refs if r in all_ids and r not in filter_set]
+        if orphan_refs:
+            raise ValueError(
+                f"Job {job_id}: steps_filter — capability step '{step.id}' "
+                f"requires upstream step(s) {orphan_refs!r} which are excluded "
+                "from the filter. A capability step cannot run without its "
+                "GeoDataFrame input. Either include the upstream step(s) or "
+                "remove this step from the filter."
+            )
+
+    # 3. Build filtered spec: keep only steps in filter_set
+    filtered_steps = [s for s in spec.steps if s.id in filter_set]
+    return PipelineSpec(
+        version=spec.version,
+        name=spec.name,
+        description=spec.description,
+        steps=filtered_steps,
+        triggers=spec.triggers,
+        ref_layers=spec.ref_layers,
+    )
+
+
+def _replay_resume(
+    spec: "Any",
+    resume_from_run_id: str,
+    run_id: str,
+    event_sink: "Any | None",
+    run_repo: "Any",
+    job_id: str = "",
+) -> "tuple[Any, dict[str, str]]":
+    """Replay completed steps from a source run and filter the spec.
+
+    Skip/replay semantics are split by step kind:
+
+    **Non-capability steps** (``step.kind != "capability"``, e.g. ``external``,
+    ``dbt_build``, …) whose side effects persist outside the current process
+    (dbt tables, tiles, files on disk) ARE SKIPPED when they were COMPLETED
+    in the source run:
+    1. Emit ``run.step.started`` + ``run.step.completed`` on the event_sink
+       (so the cockpit sees a complete graph).
+    2. Add ``skipped_resume=True`` to the step artifacts in the current run
+       (via event_sink which drives RecordingSink).
+    3. If the source step has a ``skip_marker`` in its artifacts, record it
+       in ``resume_markers`` so the executor can pass it to the subprocess
+       via ``GISPULSE_RESUME_MARKER``.
+    4. Remove the COMPLETED non-capability step from the spec.
+
+    **Capability steps** (``step.kind == "capability"``) transform the GDF
+    in-memory. Their output does NOT survive the process boundary. A capability
+    step COMPLETED in the source run MUST be re-executed to rebuild the in-memory
+    GeoDataFrame chain so that subsequent steps receive the correct input.
+    Replaying them as "skipped" would silently produce wrong data (downstream
+    steps would run on the raw input GDF, bypassing the upstream transforms).
+    Capability steps are therefore kept in the returned spec regardless of their
+    COMPLETED status in the source run.
+
+    Contract: non-capability steps are assumed idempotent at the side-effect
+    level (app contract). Capability steps are always cheap to re-run (in-memory).
+
+    Args:
+        spec:                 Parsed PipelineSpec to filter.
+        resume_from_run_id:   UUID of the source run to resume from.
+        run_id:               UUID of the new (current) run.
+        event_sink:           Where to emit replay events. ``None`` = no events.
+        run_repo:             Repository for loading the source run.
+        job_id:               Used in log messages.
+
+    Returns:
+        (filtered_spec, resume_markers) where resume_markers maps
+        step_id → skip_marker for the first non-skipped step following each
+        skipped non-capability step block.
+    """
+    from datetime import datetime, timezone
+    from uuid import UUID
+
+    from gispulse.core.models import JobStatus as _JS
+    from gispulse.core.pipeline import PipelineSpec
+
+    # Load the source run.
+    # Narrow except: only catch ValueError from UUID parsing (malformed string).
+    # Repository errors must propagate — they indicate infrastructure problems.
+    try:
+        source_uuid = UUID(resume_from_run_id)
+    except ValueError as exc:
+        raise ValueError(
+            f"Job {job_id}: resume_from_run_id={resume_from_run_id!r} is not a "
+            f"valid UUID — {exc}. "
+            "code=RESUME_SOURCE_RUN_NOT_FOUND"
+        ) from exc
+
+    source_run = run_repo.get(source_uuid)
+
+    if source_run is None:
+        raise ValueError(
+            f"Job {job_id}: source run '{resume_from_run_id}' not found in the "
+            "run repository. It may have been deleted or the run_id is wrong. "
+            "code=RESUME_SOURCE_RUN_NOT_FOUND"
+        )
+
+    # Build a map of step_id → source PipelineRunStep
+    completed_step_ids: set[str] = {
+        s.step_id
+        for s in source_run.steps
+        if s.status == _JS.COMPLETED
+    }
+    source_artifacts: dict[str, dict] = {
+        s.step_id: s.artifacts
+        for s in source_run.steps
+    }
+
+    steps_in_order = spec.steps  # preserved insertion order
+
+    # Only non-capability steps that are COMPLETED in the source run are skipped.
+    # Capability steps that were COMPLETED must be re-executed to rebuild the
+    # in-memory GeoDataFrame chain — skipping them would silently corrupt data.
+    skipped_ids: set[str] = {
+        s.id
+        for s in steps_in_order
+        if s.id in completed_step_ids and s.kind != "capability"
+    }
+
+    # Collect resume_markers: one per non-skipped step that has a skip_marker
+    # in the source run's artifacts for THAT SAME step_id — regardless of the
+    # step's status (COMPLETED or FAILED).
+    #
+    # Rationale: skip_marker is a per-step opaque checkpoint token. The step
+    # itself writes GISPULSE_SKIP_MARKER=<token> on stdout during its run (either
+    # before completing cleanly or before crashing). At resume time, the SAME step
+    # re-executes and expects to receive GISPULSE_RESUME_MARKER=<token> so it can
+    # fast-forward to the checkpoint rather than starting from scratch.
+    #
+    # The old "inherit the previous skipped step's marker" logic was wrong:
+    # the marker belongs to the step that produced it, not its successor.
+    resume_markers: dict[str, str] = {}
+    for step in steps_in_order:
+        if step.id in skipped_ids:
+            # Skipped steps don't re-execute → no marker injection needed.
+            continue
+        art = source_artifacts.get(step.id, {})
+        if art and art.get("skip_marker"):
+            resume_markers[step.id] = art["skip_marker"]
+
+    # Replay skipped (non-capability COMPLETED) steps onto the sink
+    # so the cockpit sees a complete graph for the new run.
+    if event_sink is not None:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for step in steps_in_order:
+            if step.id not in skipped_ids:
+                continue
+            art = dict(source_artifacts.get(step.id, {}))
+            art["skipped_resume"] = True
+            event_sink.emit("run.step.started", {
+                "run_id": run_id,
+                "step_id": step.id,
+                "started_at": now_iso,
+            })
+            event_sink.emit("run.step.completed", {
+                "run_id": run_id,
+                "step_id": step.id,
+                "status": "completed",
+                "ended_at": now_iso,
+                "artifacts": art,
+                "metrics": {},
+            })
+
+    # Return a filtered spec without the skipped (non-capability COMPLETED) steps.
+    # Capability COMPLETED steps stay — they will be re-executed normally.
+    remaining_steps = [s for s in steps_in_order if s.id not in skipped_ids]
+    filtered_spec = PipelineSpec(
+        version=spec.version,
+        name=spec.name,
+        description=spec.description,
+        steps=remaining_steps,
+        triggers=spec.triggers,
+        ref_layers=spec.ref_layers,
+    )
+    log.info(
+        "pipeline_resume_applied",
+        job_id=job_id,
+        resume_from_run_id=resume_from_run_id,
+        skipped_count=len(skipped_ids),
+        remaining_count=len(remaining_steps),
+    )
+    return filtered_spec, resume_markers
+
+
 class JobRunner:
     """
     Exécuteur de Jobs GISPulse.
@@ -179,6 +414,7 @@ class JobRunner:
                             job, gdf, timeout,
                             event_sink=event_sink,
                             run_id=run_id,
+                            run_repo=run_repo,
                         )
                         steps_count = len(
                             job.parameters[_MANIFEST_KEY].get("models", {})
@@ -338,6 +574,13 @@ class JobRunner:
                 f"Job {job.id}: pipeline_config could not be parsed — {exc}"
             ) from exc
 
+        # --- Partial run (steps_filter) ------------------------------------
+        # Validates and applies the steps_filter to the spec before execution.
+        # Must happen AFTER parse so we have the full step id set for validation.
+        steps_filter: list[str] = job.parameters.get("steps_filter", [])
+        if steps_filter:
+            spec = _apply_steps_filter(spec, steps_filter, job_id=str(job.id))
+
         # --- Compile-time step-kind validation -----------------------------
         # Detects capability steps that depend on non-capability steps at
         # plan time — before any subprocess is spawned.
@@ -367,6 +610,33 @@ class JobRunner:
                 "load real data before executing the pipeline."
             )
 
+        # --- Resume: replay completed steps from source run ---------------
+        # When resume_from_run_id is present, load the source run and replay
+        # its COMPLETED steps onto the event sink (so the cockpit sees a full
+        # graph), then restrict the spec to only the non-COMPLETED steps.
+        # Contract: resume assumes steps are idempotent (app contract).
+        resume_from_run_id: str = job.parameters.get("resume_from_run_id", "")
+        resume_markers: dict[str, str] = {}  # step_id → skip_marker from source run
+        if resume_from_run_id and run_repo is not None and event_sink is not None:
+            spec, resume_markers = _replay_resume(
+                spec=spec,
+                resume_from_run_id=resume_from_run_id,
+                run_id=run_id or "",
+                event_sink=event_sink,
+                run_repo=run_repo,
+                job_id=str(job.id),
+            )
+        elif resume_from_run_id and run_repo is not None:
+            # No event_sink (e.g. tests without sink) — still filter the spec
+            spec, resume_markers = _replay_resume(
+                spec=spec,
+                resume_from_run_id=resume_from_run_id,
+                run_id=run_id or "",
+                event_sink=None,
+                run_repo=run_repo,
+                job_id=str(job.id),
+            )
+
         # --- Compute effective timeout -------------------------------------
         # Non-capability steps (external, dbt_build, …) declare their own
         # timeout_seconds in params.  Their declared timeouts RAISE the job
@@ -387,6 +657,7 @@ class JobRunner:
             heartbeat=heartbeat,
             scope=scope,
             run_repo=run_repo,
+            resume_markers=resume_markers,
         )
         pool = ThreadPoolExecutor(max_workers=1)
         try:
@@ -436,6 +707,7 @@ class JobRunner:
         *,
         event_sink: RunEventSink | None = None,
         run_id: str | None = None,
+        run_repo: Any | None = None,
     ) -> gpd.GeoDataFrame:
         """Execute a job whose parameters contain a ``manifest`` dict (v3 ManifestV3).
 
@@ -551,6 +823,59 @@ class JobRunner:
                     f"(layer={src.layer!r}) — {exc}"
                 ) from exc
 
+        # --- Partial run (steps_filter) ------------------------------------
+        # Validated upstream by the router (POST /manifests/run) and stored
+        # in job.parameters["steps_filter"]. Passed through to run_manifest
+        # which applies it per-model sub-spec.
+        steps_filter_manifest: list[str] = job.parameters.get("steps_filter", [])
+
+        # --- Resume: replay completed steps from source run ---------------
+        # When resume_from_run_id is present, we need to:
+        # 1. Compile the manifest to a flat PipelineSpec (same IDs as the sub-specs).
+        # 2. Call _replay_resume on the flat spec to emit replay events and
+        #    collect resume_markers.
+        # 3. The filtered flat spec tells us which step IDs to RE-RUN; the
+        #    skipped step IDs tell us which models to skip in run_manifest.
+        # 4. Pass resume_markers + effective steps_filter to run_manifest.
+        resume_from_run_id: str = job.parameters.get("resume_from_run_id", "")
+        manifest_resume_markers: dict[str, str] = {}
+        if resume_from_run_id and run_repo is not None:
+            from gispulse.core.manifest_v3 import compile_to_pipeline as _compile_manifest
+            flat_spec = _compile_manifest(manifest)
+            # Apply existing steps_filter on the flat spec first (partial resume)
+            if steps_filter_manifest:
+                flat_spec = _apply_steps_filter(
+                    flat_spec, steps_filter_manifest, job_id=str(job.id)
+                )
+            filtered_flat_spec, manifest_resume_markers = _replay_resume(
+                spec=flat_spec,
+                resume_from_run_id=resume_from_run_id,
+                run_id=run_id or "",
+                event_sink=event_sink if event_sink is not None else None,
+                run_repo=run_repo,
+                job_id=str(job.id),
+            )
+            # The filtered flat spec now contains only the steps NOT yet COMPLETED.
+            # We use its step IDs as the effective steps_filter for run_manifest,
+            # overriding the original steps_filter (which may be empty = all steps).
+            steps_filter_manifest = [s.id for s in filtered_flat_spec.steps]
+            log.info(
+                "manifest_resume_steps_to_run",
+                job_id=str(job.id),
+                resume_from_run_id=resume_from_run_id,
+                steps_to_run=steps_filter_manifest,
+                resume_markers_count=len(manifest_resume_markers),
+            )
+        elif resume_from_run_id and run_repo is None:
+            # No run_repo available — cannot replay, raise explicit error
+            # (never silent resume-from-scratch for manifest jobs).
+            raise ValueError(
+                f"Job {job.id}: resume_from_run_id={resume_from_run_id!r} is set "
+                "but no run_repo is available in this execution context. "
+                "Resume requires a run_repo to load the source run's step history. "
+                "code=MANIFEST_RESUME_NO_REPO"
+            )
+
         # --- Execute with timeout -----------------------------------------
         from gispulse.runtime.manifest_runner import run_manifest  # local to avoid circular import
 
@@ -562,6 +887,8 @@ class JobRunner:
                 source_loader=source_loader,
                 event_sink=event_sink,
                 run_id=run_id,
+                steps_filter=steps_filter_manifest if steps_filter_manifest else None,
+                resume_markers=manifest_resume_markers if manifest_resume_markers else None,
             )
             result = future.result(timeout=timeout)
         except FuturesTimeoutError:

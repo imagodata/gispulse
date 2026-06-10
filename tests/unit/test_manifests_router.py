@@ -70,7 +70,7 @@ def test_runner_manifest_dispatch_completes(runner):
     gdf = _make_gdf()
     job = Job(name="test_manifest", parameters={"manifest": _minimal_manifest_dict()})
 
-    def _fake_run_manifest(manifest, *, source_loader=None, materializer=None, event_sink=None, run_id=None):
+    def _fake_run_manifest(manifest, *, source_loader=None, materializer=None, event_sink=None, run_id=None, steps_filter=None, resume_markers=None):
         return ManifestRunResult(materialized={}, execution_order=[])
 
     with patch("gispulse.runtime.manifest_runner.run_manifest", side_effect=_fake_run_manifest):
@@ -98,7 +98,7 @@ def test_runner_manifest_takes_priority_over_pipeline_config(runner):
 
     executed = []
 
-    def _fake_run_manifest(manifest, *, source_loader=None, materializer=None, event_sink=None, run_id=None):
+    def _fake_run_manifest(manifest, *, source_loader=None, materializer=None, event_sink=None, run_id=None, steps_filter=None, resume_markers=None):
         executed.append("manifest")
         return ManifestRunResult(materialized={}, execution_order=[])
 

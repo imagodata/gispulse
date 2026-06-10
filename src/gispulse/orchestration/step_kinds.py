@@ -47,14 +47,24 @@ class StepContext:
     """Runtime context passed to every non-capability step handler.
 
     Attributes:
-        run_id:       UUID string of the parent run.
-        step_id:      Step identifier from the PipelineSpec.
-        scope:        Optional scope string (e.g. department code).
-        event_sink:   Sink for lifecycle + progress events.
-        cancel_check: Returns ``True`` when the job has been cancelled.
-        heartbeat:    Callable that must be called periodically to signal
-                      liveness and prevent stuck-job recovery from killing
-                      a healthy long-running step.
+        run_id:        UUID string of the parent run.
+        step_id:       Step identifier from the PipelineSpec.
+        scope:         Optional scope string (e.g. department code).
+        event_sink:    Sink for lifecycle + progress events.
+        cancel_check:  Returns ``True`` when the job has been cancelled.
+        heartbeat:     Callable that must be called periodically to signal
+                       liveness and prevent stuck-job recovery from killing
+                       a healthy long-running step.
+        resume_marker: Opaque token from the previous run's step artifacts
+                       (``PipelineRunStep.artifacts["skip_marker"]``).
+                       Non-empty only when this step is being re-executed as
+                       part of a resume and the previous run's corresponding
+                       step emitted a ``GISPULSE_SKIP_MARKER=<token>`` line.
+                       The ``external`` kind passes this token to the subprocess
+                       via the ``GISPULSE_RESUME_MARKER`` environment variable
+                       so idempotent scripts can restart from a known checkpoint.
+                       Contract: resume assumes steps are idempotent — the
+                       marker is a hint, not a guarantee of consistency.
     """
 
     run_id: str
@@ -63,6 +73,7 @@ class StepContext:
     event_sink: Any = None  # RunEventSink (avoid circular import)
     cancel_check: Callable[[], bool] = field(default_factory=lambda: (lambda: False))
     heartbeat: Callable[[], None] = field(default_factory=lambda: (lambda: None))
+    resume_marker: str = ""
 
     def emit_progress(self, data: dict) -> None:
         """Emit a ``run.step.progress`` event via the injected event sink.
