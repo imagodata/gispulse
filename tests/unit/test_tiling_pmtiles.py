@@ -69,6 +69,21 @@ def test_write_pmtiles_writes_valid_readable_deterministic_archive(tmp_path: Pat
     assert out_a.read_bytes() == out_b.read_bytes()
 
 
+def test_write_pmtiles_matches_pre_refactor_golden(tmp_path: Path) -> None:
+    """Garde byte-a-byte contre l'archive produite par le code AVANT refactor."""
+    write_pmtiles = import_module("gispulse.tiling").write_pmtiles
+    golden = Path(__file__).parent / "fixtures" / "golden_places_z5.pmtiles"
+    src = tmp_path / "src.parquet"
+    gpd.GeoDataFrame(
+        {"id": [1, 2], "name": ["paris", "lyon"]},
+        geometry=[Point(2.35, 48.85), Point(4.84, 45.76)],
+        crs="EPSG:4326",
+    ).to_parquet(src)
+    out = tmp_path / "out.pmtiles"
+    write_pmtiles(src, out, layer="places", min_zoom=5, max_zoom=5)
+    assert out.read_bytes() == golden.read_bytes()
+
+
 def test_pmtiles_writer_dispatches_write_spec_with_result_crs(tmp_path: Path) -> None:
     tiling = import_module("gispulse.tiling")
     registry = ProtocolRegistry()
