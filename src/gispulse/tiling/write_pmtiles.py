@@ -45,6 +45,19 @@ class _PreparedSource:
     source_crs: str | None
 
 
+@dataclass(frozen=True)
+class TileLayer:
+    """Une couche source + sa plage de zoom dediee dans une pyramide PMTiles."""
+
+    source: str | Path | SourceResult
+    layer: str
+    min_zoom: int
+    max_zoom: int
+    geometry_column: str | None = None
+    source_crs: str | None = None
+    simplify_tolerance: float | None = None
+
+
 def write_pmtiles(
     source: str | Path | SourceResult,
     out_path: str | Path,
@@ -101,6 +114,91 @@ def write_pmtiles(
         if owns_session:
             duck.close()
     return report
+
+
+def write_pmtiles_pyramid(
+    layers: Sequence[TileLayer],
+    out_path: str | Path,
+    *,
+    extent: int = 4096,
+    buffer: int = 256,
+    session: DuckDBSession | None = None,
+) -> WriteReport:
+    _validate_pyramid_layers(layers, extent=extent, buffer=buffer)
+    destination = Path(out_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    owns_session = session is None
+    duck = session or DuckDBSession()
+    if owns_session:
+        duck.open()
+
+    encoded: list[tuple[int, bytes]] = []
+    vector_layers: list[dict[str, Any]] = []
+    bounds_acc: tuple[float, float, float, float] | None = None
+    try:
+        for item in layers:
+            prepared = _prepare_source(
+                duck,
+                item.source,
+                geometry_column=item.geometry_column,
+                source_crs=item.source_crs,
+            )
+            columns = _describe_relation(duck, prepared.relation)
+            geometry = _resolve_geometry_column(columns, prepared.geometry_column)
+            count = _materialize_features(duck, prepared, columns, geometry)
+            if count == 0:
+                raise ValueError(f"layer {item.layer!r}: source contains no geometries")
+            bounds = _features_bounds_4326(duck)
+            bounds_acc = bounds if bounds_acc is None else _union_bounds(bounds_acc, bounds)
+            field_types = _metadata_field_types(columns, geometry.name)
+            tile_coords = _coverage_tiles(bounds, item.min_zoom, item.max_zoom)
+            layer_tiles = _encode_layer_tiles(
+                duck,
+                tile_coords,
+                layer=item.layer,
+                field_types=field_types,
+                simplify_tolerance=item.simplify_tolerance,
+                extent=extent,
+                buffer=buffer,
+            )
+            if not layer_tiles:
+                raise ValueError(
+                    f"layer {item.layer!r}: produced no non-empty MVT tiles in "
+                    f"zoom range [{item.min_zoom},{item.max_zoom}]"
+                )
+            encoded.extend(layer_tiles)
+            vector_layers.append({"id": item.layer, "fields": field_types})
+            _cleanup_temp_relation(duck)
+        if not encoded:
+            raise ValueError("PMTiles pyramid produced no non-empty MVT tiles")
+        assert bounds_acc is not None
+        tile_count = _finalize_archive(
+            destination,
+            encoded,
+            bounds_4326=bounds_acc,
+            vector_layers=vector_layers,
+        )
+    finally:
+        _cleanup_temp_relation(duck)
+        if owns_session:
+            duck.close()
+
+    detail = json.dumps(
+        {
+            "tiles_written": tile_count,
+            "min_zoom": min(item.min_zoom for item in layers),
+            "max_zoom": max(item.max_zoom for item in layers),
+            "layers": [item.layer for item in layers],
+        },
+        sort_keys=True,
+    )
+    return WriteReport(
+        destination=str(destination),
+        rows_written=tile_count,
+        created=True,
+        detail=detail,
+    )
 
 
 class PmtilesWriter:
@@ -169,30 +267,26 @@ def _write_with_session(
     bounds_4326 = _features_bounds_4326(session)
     field_types = _metadata_field_types(columns, geometry.name)
     tile_coords = _coverage_tiles(bounds_4326, min_zoom, max_zoom)
-    tmp_path = out_path.with_name(f".{out_path.name}.tmp")
-    if tmp_path.exists():
-        tmp_path.unlink()
-
-    tile_count = 0
     try:
-        tile_count = _write_archive(
+        encoded = _encode_layer_tiles(
             session,
-            tmp_path,
             tile_coords,
             layer=layer,
-            bounds_4326=bounds_4326,
             field_types=field_types,
             simplify_tolerance=simplify_tolerance,
             extent=extent,
             buffer=buffer,
         )
-        if tile_count == 0:
+        if not encoded:
             raise ValueError("PMTiles source produced no non-empty MVT tiles")
-        os.replace(tmp_path, out_path)
+        tile_count = _finalize_archive(
+            out_path,
+            encoded,
+            bounds_4326=bounds_4326,
+            vector_layers=[{"id": layer, "fields": field_types}],
+        )
     finally:
         _cleanup_temp_relation(session)
-        if tmp_path.exists():
-            tmp_path.unlink()
 
     detail = json.dumps(
         {
@@ -231,6 +325,31 @@ def _validate_options(
         raise ValueError("buffer must be non-negative")
     if simplify_tolerance is not None and simplify_tolerance < 0:
         raise ValueError("simplify_tolerance must be non-negative")
+
+
+def _validate_pyramid_layers(
+    layers: Sequence[TileLayer], *, extent: int, buffer: int
+) -> None:
+    if not layers:
+        raise ValueError("write_pmtiles_pyramid requires at least one TileLayer")
+    names = [item.layer for item in layers]
+    if len(set(names)) != len(names):
+        raise ValueError("layer names must be unique across the pyramid")
+    for item in layers:
+        _validate_options(
+            layer=item.layer,
+            min_zoom=item.min_zoom,
+            max_zoom=item.max_zoom,
+            simplify_tolerance=item.simplify_tolerance,
+            extent=extent,
+            buffer=buffer,
+        )
+    spans = sorted((item.min_zoom, item.max_zoom) for item in layers)
+    for (lo, hi), (nlo, nhi) in zip(spans, spans[1:]):
+        if nlo <= hi:
+            raise ValueError(
+                f"zoom ranges must be disjoint: [{lo},{hi}] overlaps [{nlo},{nhi}]"
+            )
 
 
 def _prepare_source(
@@ -285,7 +404,7 @@ def _prepare_source_result(
         )
 
     try:
-        import geopandas as gpd
+        import geopandas as gpd  # type: ignore[import-untyped]
     except Exception as exc:  # pragma: no cover - geopandas is a base dependency
         raise TypeError("GeoDataFrame SourceResult data requires geopandas") from exc
 
@@ -436,6 +555,13 @@ def _features_bounds_4326(session: DuckDBSession) -> tuple[float, float, float, 
     )
 
 
+def _union_bounds(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+
+
 def _metadata_field_types(columns: Sequence[_Column], geometry_name: str) -> dict[str, str]:
     fields: dict[str, str] = {}
     for column in columns:
@@ -500,8 +626,34 @@ def _write_archive(
     extent: int,
     buffer: int,
 ) -> int:
-    from pmtiles.tile import Compression, TileType, zxy_to_tileid
-    from pmtiles.writer import Writer
+    encoded = _encode_layer_tiles(
+        session,
+        tile_coords,
+        layer=layer,
+        field_types=field_types,
+        simplify_tolerance=simplify_tolerance,
+        extent=extent,
+        buffer=buffer,
+    )
+    return _finalize_archive(
+        out_path,
+        encoded,
+        bounds_4326=bounds_4326,
+        vector_layers=[{"id": layer, "fields": field_types}],
+    )
+
+
+def _encode_layer_tiles(
+    session: DuckDBSession,
+    tile_coords: Sequence[tuple[int, int, int, int]],
+    *,
+    layer: str,
+    field_types: dict[str, str],
+    simplify_tolerance: float | None,
+    extent: int,
+    buffer: int,
+) -> list[tuple[int, bytes]]:
+    from pmtiles.tile import zxy_to_tileid
 
     # Encodage MVT en UNE seule requete groupee (jointure spatiale features x tuiles
     # -> ST_AsMVTGeom -> GROUP BY tuile -> ST_AsMVT) au lieu d'un appel ST_AsMVT par
@@ -526,7 +678,7 @@ def _write_archive(
         xmin, ymin, xmax, ymax = _tile_bounds_3857(z, x, y)
         tile_rows.append((z, x, y, xmin, ymin, xmax, ymax))
     if not tile_rows:
-        return 0
+        return []
     session.conn.executemany(f"INSERT INTO {tiles_table} VALUES (?, ?, ?, ?, ?, ?, ?)", tile_rows)
 
     box_expr = "ST_MakeBox2D(ST_Point(tiles.xmin, tiles.ymin), ST_Point(tiles.xmax, tiles.ymax))"
@@ -570,19 +722,40 @@ def _write_archive(
         data = bytes(tile)
         if data:
             encoded.append((zxy_to_tileid(int(z), int(x), int(y)), data))
+    return encoded
+
+
+def _finalize_archive(
+    out_path: Path,
+    encoded: list[tuple[int, bytes]],
+    *,
+    bounds_4326: tuple[float, float, float, float],
+    vector_layers: list[dict[str, Any]],
+) -> int:
+    from pmtiles.tile import Compression, TileType
+    from pmtiles.writer import Writer
+
     if not encoded:
         return 0
     encoded.sort(key=lambda item: item[0])
+    tmp_path = out_path.with_name(f".{out_path.name}.tmp")
+    if tmp_path.exists():
+        tmp_path.unlink()
 
-    with out_path.open("wb") as fh:
-        writer = Writer(fh)
-        for tile_id, data in encoded:
-            writer.write_tile(tile_id, data)
-        with _deterministic_gzip():
-            writer.finalize(
-                _pmtiles_header(bounds_4326, Compression.NONE, TileType.MVT),
-                _pmtiles_metadata(layer, bounds_4326, field_types),
-            )
+    try:
+        with tmp_path.open("wb") as fh:
+            writer = Writer(fh)
+            for tile_id, data in encoded:
+                writer.write_tile(tile_id, data)
+            with _deterministic_gzip():
+                writer.finalize(
+                    _pmtiles_header(bounds_4326, Compression.NONE, TileType.MVT),
+                    _pmtiles_metadata_multi(bounds_4326, vector_layers),
+                )
+        os.replace(tmp_path, out_path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
     return len(encoded)
 
 
@@ -669,22 +842,21 @@ def _pmtiles_header(
     }
 
 
-def _pmtiles_metadata(
-    layer: str,
+def _pmtiles_metadata_multi(
     bounds_4326: tuple[float, float, float, float],
-    fields: dict[str, str],
+    vector_layers: list[dict[str, Any]],
 ) -> dict[str, Any]:
     min_lon, min_lat, max_lon, max_lat = bounds_4326
     center_lon = (min_lon + max_lon) / 2.0
     center_lat = (min_lat + max_lat) / 2.0
     return {
-        "name": layer,
+        "name": vector_layers[0]["id"],
         "type": "overlay",
         "version": "1",
         "scheme": "xyz",
         "bounds": f"{min_lon},{min_lat},{max_lon},{max_lat}",
         "center": f"{center_lon},{center_lat},0",
-        "vector_layers": [{"id": layer, "fields": fields}],
+        "vector_layers": vector_layers,
     }
 
 

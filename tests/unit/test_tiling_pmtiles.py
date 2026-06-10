@@ -6,12 +6,14 @@ from importlib.util import find_spec
 from pathlib import Path
 
 import geopandas as gpd
+import pytest
 from pmtiles.reader import MmapSource, Reader, all_tiles
 from pmtiles.tile import Compression, TileType
 from shapely.geometry import Point
 
 from gispulse.core.plugin_model import AccessProtocol, Payload, SourceResult, WriteSpec
 from gispulse.core.sources import ProtocolRegistry
+from gispulse.tiling import TileLayer
 
 
 def _toy_geoparquet(tmp_path: Path) -> Path:
@@ -173,3 +175,93 @@ def test_write_pmtiles_coerces_unsupported_property_types(tmp_path: Path) -> Non
     out = tmp_path / "dated.pmtiles"
     report = write_pmtiles(path, out, layer="dated", min_zoom=0, max_zoom=10)
     assert report.rows_written > 0
+
+
+def test_tilelayer_rejects_overlapping_zoom_ranges(tmp_path: Path) -> None:
+    write_pmtiles_pyramid = import_module("gispulse.tiling").write_pmtiles_pyramid
+    source = _toy_geoparquet(tmp_path)
+    layers = [
+        TileLayer(source=source, layer="r_low", min_zoom=0, max_zoom=6),
+        TileLayer(source=source, layer="r_high", min_zoom=6, max_zoom=10),
+    ]
+    with pytest.raises(ValueError, match="zoom ranges must be disjoint"):
+        write_pmtiles_pyramid(layers, tmp_path / "x.pmtiles")
+
+
+def test_tilelayer_rejects_duplicate_layer_names(tmp_path: Path) -> None:
+    write_pmtiles_pyramid = import_module("gispulse.tiling").write_pmtiles_pyramid
+    source = _toy_geoparquet(tmp_path)
+    layers = [
+        TileLayer(source=source, layer="dup", min_zoom=0, max_zoom=4),
+        TileLayer(source=source, layer="dup", min_zoom=5, max_zoom=8),
+    ]
+    with pytest.raises(ValueError, match="layer names must be unique"):
+        write_pmtiles_pyramid(layers, tmp_path / "x.pmtiles")
+
+
+def test_pyramid_writes_two_layers_disjoint_zooms_one_archive(tmp_path: Path) -> None:
+    tiling = import_module("gispulse.tiling")
+    source = _toy_geoparquet(tmp_path)
+    out = tmp_path / "pyramid.pmtiles"
+
+    report = tiling.write_pmtiles_pyramid(
+        [
+            tiling.TileLayer(source=source, layer="coarse", min_zoom=4, max_zoom=5),
+            tiling.TileLayer(source=source, layer="fine", min_zoom=8, max_zoom=8),
+        ],
+        out,
+    )
+
+    header, metadata, tiles = _read_pmtiles(out)
+    assert header["min_zoom"] == 4
+    assert header["max_zoom"] == 8
+    ids = {vl["id"] for vl in metadata["vector_layers"]}
+    assert ids == {"coarse", "fine"}
+    zooms = {zxy[0] for zxy, _ in tiles}
+    assert zooms <= {4, 5, 8}
+    assert {4, 8} <= zooms
+    assert report.created is True
+    assert report.rows_written == header["addressed_tiles_count"]
+
+
+def test_pyramid_archive_is_byte_deterministic(tmp_path: Path) -> None:
+    tiling = import_module("gispulse.tiling")
+    source = _toy_geoparquet(tmp_path)
+    spec = [
+        tiling.TileLayer(source=source, layer="coarse", min_zoom=4, max_zoom=5),
+        tiling.TileLayer(source=source, layer="fine", min_zoom=8, max_zoom=8),
+    ]
+    a = tmp_path / "a.pmtiles"
+    b = tmp_path / "b.pmtiles"
+    tiling.write_pmtiles_pyramid(spec, a)
+    time.sleep(1.1)
+    tiling.write_pmtiles_pyramid(spec, b)
+    assert a.read_bytes() == b.read_bytes()
+
+
+def test_pyramid_empty_source_names_the_layer(tmp_path: Path) -> None:
+    tiling = import_module("gispulse.tiling")
+    empty = tmp_path / "empty.parquet"
+    gpd.GeoDataFrame({"id": []}, geometry=[], crs="EPSG:4326").to_parquet(empty)
+    with pytest.raises(ValueError, match="layer 'ghost': source contains no geometries"):
+        tiling.write_pmtiles_pyramid(
+            [tiling.TileLayer(source=empty, layer="ghost", min_zoom=0, max_zoom=4)],
+            tmp_path / "x.pmtiles",
+        )
+
+
+def test_pyramid_report_detail_lists_layers(tmp_path: Path) -> None:
+    import json as _json
+
+    tiling = import_module("gispulse.tiling")
+    source = _toy_geoparquet(tmp_path)
+    report = tiling.write_pmtiles_pyramid(
+        [
+            tiling.TileLayer(source=source, layer="coarse", min_zoom=4, max_zoom=5),
+            tiling.TileLayer(source=source, layer="fine", min_zoom=8, max_zoom=8),
+        ],
+        tmp_path / "x.pmtiles",
+    )
+    detail = _json.loads(report.detail)
+    assert detail["layers"] == ["coarse", "fine"]
+    assert detail["min_zoom"] == 4 and detail["max_zoom"] == 8
