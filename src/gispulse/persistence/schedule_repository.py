@@ -32,12 +32,20 @@ CREATE TABLE IF NOT EXISTS scheduled_pipelines (
     name TEXT NOT NULL DEFAULT '',
     cron_expression TEXT NOT NULL DEFAULT '0 * * * *',
     pipeline_config TEXT NOT NULL DEFAULT '{}',
+    dataset_id TEXT,
     enabled INTEGER NOT NULL DEFAULT 1,
     last_run TEXT,
     next_run TEXT,
     created_by TEXT
 )
 """
+
+# Idempotent migration: add dataset_id to existing tables that pre-date this
+# column.  SQLite does not support IF NOT EXISTS on ALTER TABLE ADD COLUMN, so
+# we swallow the "duplicate column" error instead.
+_MIGRATE_ADD_DATASET_ID = (
+    "ALTER TABLE scheduled_pipelines ADD COLUMN dataset_id TEXT"
+)
 
 
 class ScheduleRepository:
@@ -51,6 +59,12 @@ class ScheduleRepository:
         self._lock = threading.Lock()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._execute(_CREATE_TABLE_SQL)
+        # Idempotent migration: add dataset_id on existing DBs.
+        try:
+            self._execute(_MIGRATE_ADD_DATASET_ID)
+        except Exception:
+            # Column already exists — safe to ignore.
+            pass
 
     # ------------------------------------------------------------------
     # Connection helpers
@@ -84,6 +98,7 @@ class ScheduleRepository:
             "name": sp.name,
             "cron_expression": sp.cron_expression,
             "pipeline_config": json.dumps(sp.pipeline_config, default=str),
+            "dataset_id": str(sp.dataset_id) if sp.dataset_id is not None else None,
             "enabled": int(sp.enabled),
             "last_run": sp.last_run.isoformat() if sp.last_run else None,
             "next_run": sp.next_run.isoformat() if sp.next_run else None,
@@ -93,11 +108,13 @@ class ScheduleRepository:
     @staticmethod
     def _from_row(row: sqlite3.Row) -> ScheduledPipeline:
         d = dict(row)
+        raw_dataset_id = d.get("dataset_id")
         return ScheduledPipeline(
             id=UUID(d["id"]),
             name=d.get("name", ""),
             cron_expression=d.get("cron_expression", "0 * * * *"),
             pipeline_config=json.loads(d.get("pipeline_config", "{}") or "{}"),
+            dataset_id=UUID(raw_dataset_id) if raw_dataset_id else None,
             enabled=bool(d.get("enabled", 1)),
             last_run=(
                 datetime.fromisoformat(d["last_run"]) if d.get("last_run") else None
