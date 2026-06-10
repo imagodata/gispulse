@@ -77,12 +77,20 @@ def _execute_step_kind(
     cancel_check: Callable[[], bool],
     heartbeat: Callable[[], None],
     run_repo: Any | None = None,
+    resume_marker: str = "",
 ) -> "Any":
     """Dispatch a non-capability step to the step-kind registry.
 
     Returns a :class:`~gispulse.orchestration.step_kinds.StepResult`.
     Raises :exc:`KeyError` if the kind is not registered (surfaces as a
     failed step with a clear message).
+
+    Args:
+        resume_marker: Opaque token from the previous run's step artifacts
+                       (``PipelineRunStep.artifacts["skip_marker"]``).
+                       Passed to ``StepContext.resume_marker`` so the
+                       ``external`` kind can inject it as
+                       ``GISPULSE_RESUME_MARKER`` in the subprocess env.
     """
     from gispulse.orchestration.step_kinds import (
         StepContext,
@@ -109,6 +117,7 @@ def _execute_step_kind(
         event_sink=event_sink,
         cancel_check=cancel_check,
         heartbeat=heartbeat,
+        resume_marker=resume_marker,
     )
     return handler(step.params, ctx)
 
@@ -202,6 +211,7 @@ class PipelineExecutor:
         heartbeat: Callable[[], None] | None = None,
         scope: str = "",
         run_repo: Any | None = None,
+        resume_markers: dict[str, str] | None = None,
     ) -> None:
         if capability_getter is None:
             from gispulse.capabilities import get as _get
@@ -212,6 +222,11 @@ class PipelineExecutor:
         self._heartbeat: Callable[[], None] = heartbeat or (lambda: None)
         self._scope = scope
         self._run_repo = run_repo
+        # resume_markers: step_id → skip_marker from the source run's artifacts.
+        # When non-empty, the external kind injects the marker as
+        # GISPULSE_RESUME_MARKER in the subprocess environment so the script
+        # can restart from a known checkpoint.
+        self._resume_markers: dict[str, str] = resume_markers or {}
 
     def execute(
         self,
@@ -283,6 +298,7 @@ class PipelineExecutor:
                         cancel_check=self._cancel_check,
                         heartbeat=self._heartbeat,
                         run_repo=self._run_repo,
+                        resume_marker=self._resume_markers.get(step.id, ""),
                     )
                 except Exception as exc:
                     step_ended_at = datetime.now(timezone.utc)
@@ -460,6 +476,7 @@ class PipelineExecutor:
                     cancel_check=self._cancel_check,
                     heartbeat=self._heartbeat,
                     run_repo=self._run_repo,
+                    resume_marker=self._resume_markers.get(step.id, ""),
                 )
             except Exception as exc:
                 step_ended_at = datetime.now(timezone.utc)

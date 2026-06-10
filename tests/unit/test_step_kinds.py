@@ -757,7 +757,7 @@ class TestBuiltinKindAutoRegistration:
             capture_output=True,
             text=True,
             timeout=30,
-            cwd="/Users/erwanpesle/Documents/GitHub/gispulse/core-wt-external-steps",
+            cwd=str(Path(__file__).resolve().parents[2]),
             env={**__import__("os").environ},
         )
         assert result.returncode == 0, (

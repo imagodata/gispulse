@@ -177,6 +177,17 @@ class JobWorker:
             scope=str(job.parameters.get("scope", "")),
             depth=trigger_depth,
         )
+        # Vague 5: stocker le job_id dans le run pour que POST /runs/{id}/cancel
+        # puisse déléguer à job_queue.cancel(job_id) sans passer par le job_repo.
+        run.job_id = job_id
+        # Propager le filtre de steps si présent (run partiel)
+        steps_filter = job.parameters.get("steps_filter", [])
+        if isinstance(steps_filter, list):
+            run.steps_filter = steps_filter
+        # Propager le resumed_from_run_id si présent
+        resume_from = job.parameters.get("resume_from_run_id", "")
+        if resume_from:
+            run.resumed_from_run_id = resume_from
 
         # RecordingSink keeps PipelineRunStep entries in sync with the run entity
         # and persists after each step event. The outer _event_sink (e.g. EventHubSink)
