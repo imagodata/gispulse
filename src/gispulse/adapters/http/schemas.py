@@ -249,6 +249,29 @@ class JobCreate(BaseModel):
         description="Execution parameters (e.g. rule_ids to apply).",
     )
 
+    @field_validator("parameters")
+    @classmethod
+    def _reject_reserved_keys(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Reject orchestration-internal keys that must go through dedicated endpoints.
+
+        These keys are injected by the scheduler, trigger bridge, or
+        ``POST /manifests/run`` — they are not valid external job parameters.
+        Accepting them via ``POST /jobs`` would bypass auth/validation on those
+        dedicated routes.
+        """
+        _RESERVED: dict[str, str] = {
+            "manifest": "POST /manifests/run",
+            "pipeline_config": "POST /pipelines/<id>/run (or the scheduler)",
+            "trigger_depth": "internal trigger bridge (not settable externally)",
+        }
+        for key, hint in _RESERVED.items():
+            if key in v:
+                raise ValueError(
+                    f"'{key}' is a reserved orchestration parameter and cannot "
+                    f"be set via POST /jobs. Use {hint} instead."
+                )
+        return v
+
 
 class JobResponse(BaseModel):
     """Serialised Job returned by the API."""
