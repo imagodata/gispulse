@@ -866,6 +866,18 @@ class JobRunner:
                 steps_to_run=steps_filter_manifest,
                 resume_markers_count=len(manifest_resume_markers),
             )
+            # F1 guard: when the resume has already skipped ALL steps (the
+            # source run was fully COMPLETED), steps_filter_manifest is empty.
+            # Do NOT convert [] → None (= "no filter" = re-run everything).
+            # Short-circuit here: replay events have already been emitted by
+            # _replay_resume; there is nothing left to execute.
+            if not steps_filter_manifest:
+                log.info(
+                    "manifest_resume_nothing_to_execute",
+                    job_id=str(job.id),
+                    resume_from_run_id=resume_from_run_id,
+                )
+                return gdf
         elif resume_from_run_id and run_repo is None:
             # No run_repo available — cannot replay, raise explicit error
             # (never silent resume-from-scratch for manifest jobs).
@@ -887,7 +899,12 @@ class JobRunner:
                 source_loader=source_loader,
                 event_sink=event_sink,
                 run_id=run_id,
-                steps_filter=steps_filter_manifest if steps_filter_manifest else None,
+                # Preserve [] as [] — empty list means "nothing to run for this
+                # partial resume", not "run everything". None means no filter.
+                # The F1 guard above already returns early when the list is empty
+                # after a resume; this line is reached only for non-resume paths
+                # or resume paths with a non-empty remaining list.
+                steps_filter=steps_filter_manifest or None,
                 resume_markers=manifest_resume_markers if manifest_resume_markers else None,
             )
             result = future.result(timeout=timeout)

@@ -305,11 +305,16 @@ SCHEMA_V3: dict[str, Any] = {
         },
         "model": {
             "type": "object",
-            "required": ["select"],
             "properties": {
                 "select": {
                     "type": "string",
-                    "description": "Upstream layer reference — a source name or another model.",
+                    "description": (
+                        "Upstream layer reference — a source name or another model. "
+                        "Optional when all transform items are non-capability (kind != "
+                        "'capability'). Semantic validation of this constraint is performed "
+                        "by validate_manifest(), not by the JSON schema, because the schema "
+                        "cannot inspect transform item keys."
+                    ),
                 },
                 "transform": {
                     "type": "array",
@@ -555,8 +560,9 @@ def _validate_v3_basic(raw: dict[str, Any]) -> list[str]:
         if not isinstance(model, dict):
             errors.append(f"models.{name}: must be an object")
             continue
-        if "select" not in model:
-            errors.append(f"models.{name}: missing required field 'select'")
+        # 'select' is semantically required for capability models, but the basic
+        # structural check does not enforce it — validate_manifest() owns that
+        # constraint because it can inspect transform item kinds.
         transform = model.get("transform")
         if transform is not None:
             if not isinstance(transform, list):

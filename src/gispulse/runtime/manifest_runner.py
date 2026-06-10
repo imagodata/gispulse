@@ -194,7 +194,8 @@ def _inter_model_edges(manifest: ManifestV3) -> list[tuple[str, str]]:
     model_names = set(manifest.models)
     edges: list[tuple[str, str]] = []
     for name, model in manifest.models.items():
-        if model.select in model_names:
+        # select may be None for non-capability models
+        if model.select is not None and model.select in model_names:
             edges.append((model.select, name))
         for step in model.transform or []:
             if not isinstance(step, dict) or len(step) != 1:
@@ -226,6 +227,7 @@ def _build_sub_pipeline(
             StepSpec(
                 id=s.id,
                 type=s.type,
+                kind=s.kind,  # preserve non-capability kind (e.g. "external")
                 capability=s.capability,
                 params=dict(s.params),
                 input=inp,
@@ -292,7 +294,7 @@ def validate_steps_filter_models(
         }
         # Combine: select ref + all with: refs
         _all_upstream_refs: set[str] = set()
-        if _mdl.select in model_names:
+        if _mdl.select is not None and _mdl.select in model_names:
             _all_upstream_refs.add(_mdl.select)
         _all_upstream_refs.update(_ref_layer_refs)
 
@@ -353,15 +355,41 @@ def run_manifest(
     """
     validate_manifest(manifest)  # raises on cycles / unresolved refs
 
+    # Determine whether any model needs a source loader — specifically, a model
+    # whose ``select`` resolves to a *declared source* (not to another model).
+    # Models whose ``select`` points to another model never call source_loader
+    # directly; they call _resolve() which reads from the materializer cache.
+    # Models with select=None (non-capability) never call _resolve() at all.
+    #
+    # This guard prevents the misleading "requires engine or source_loader"
+    # error when the only non-None selects reference other models (including
+    # no-data models) rather than real data sources. The actionable error
+    # "produces no data output" surfaces later in the execution loop.
+    _declared_sources = set(manifest.sources)
+    _needs_loader = any(
+        m.select is not None and m.select in _declared_sources
+        for m in manifest.models.values()
+    )
+
     if source_loader is None:
-        if engine is None:
+        if engine is None and _needs_loader:
             raise RuntimeError(
                 "run_manifest requires either an engine (uses engine.load_layer) "
                 "or a source_loader callable"
             )
-
-        def source_loader(src: SourceSpec) -> gpd.GeoDataFrame:
-            return engine.load_layer(src.uri, layer=src.layer or "")
+        if engine is not None:
+            def source_loader(src: SourceSpec) -> gpd.GeoDataFrame:
+                return engine.load_layer(src.uri, layer=src.layer or "")
+        else:
+            # No engine, no loader — but _needs_loader is False so _resolve()
+            # will never be called for sources. Provide a sentinel that raises
+            # clearly if called anyway (defensive programming).
+            def source_loader(src: SourceSpec) -> gpd.GeoDataFrame:  # type: ignore[misc]
+                raise RuntimeError(
+                    f"run_manifest: no source_loader or engine provided, "
+                    f"but source '{src.name}' was requested — "
+                    "check the manifest's model dependencies"
+                )
 
     if materializer is None:
         materializer = Materializer(engine=engine)
@@ -422,8 +450,70 @@ def run_manifest(
     _resume_markers: dict[str, str] = resume_markers or {}
     executed_order: list[str] = []  # models actually materialized (filter-aware)
 
+    # Track which models have no data output (external / non-capability models
+    # without select). Downstream capability models that try to _resolve() these
+    # get a clear error rather than a silent KeyError.
+    _no_data_models: set[str] = set()
+
     for model_name in order:
         model = manifest.models[model_name]
+
+        # --- Non-capability model (select=None) — execute steps, no data output ---
+        # These are models whose every transform item is non-capability (kind !=
+        # "capability"). They launch external work (subprocess, dbt, …) but produce
+        # no GeoDataFrame.
+        # IMPORTANT: a non-capability model excluded by steps_filter must NOT
+        # run (no subprocess) and must NOT appear in executed_order — same
+        # contract as capability models. Check _included_models first.
+        if model.select is None:
+            if model_name not in _included_models:
+                # Excluded by steps_filter — skip entirely, no subprocess.
+                log.debug(
+                    "manifest_model_noncapability_skipped_by_filter",
+                    model=model_name,
+                    steps_filter=list(_effective_filter) if _effective_filter else [],
+                )
+                _no_data_models.add(model_name)
+                # Do NOT add to executed_order — the model was not run.
+                continue
+            log.debug(
+                "manifest_model_noncapability",
+                model=model_name,
+                mode=model.materialize,
+            )
+            sub_spec = _build_sub_pipeline(model, manifest.sources, model_names)
+            if _effective_filter is not None:
+                from gispulse.core.pipeline import PipelineSpec as _PS
+                filtered_steps = [s for s in sub_spec.steps if s.id in _effective_filter]
+                sub_spec = _PS(
+                    version=sub_spec.version,
+                    name=sub_spec.name,
+                    steps=filtered_steps,
+                    triggers=sub_spec.triggers,
+                    ref_layers=sub_spec.ref_layers,
+                )
+            model_step_ids_for_resume = {s.id for s in sub_spec.steps}
+            model_resume_markers = {
+                sid: marker
+                for sid, marker in _resume_markers.items()
+                if sid in model_step_ids_for_resume
+            }
+            # No primary data — pass an empty inputs dict. PipelineExecutor's
+            # _execute_linear/_execute_dag dispatch non-capability steps directly
+            # to the step-kind registry; they don't consume GeoDataFrame inputs.
+            model_executor = PipelineExecutor(
+                execution_context=None,
+                resume_markers=model_resume_markers if model_resume_markers else None,
+            )
+            # Provide a sentinel empty inputs dict; sub_spec only has non-capability
+            # steps so PipelineExecutor never tries to read from it as a GeoDataFrame.
+            model_executor.execute(
+                sub_spec, {}, None, event_sink=_sink, run_id=run_id  # type: ignore[arg-type]
+            )
+            _no_data_models.add(model_name)
+            executed_order.append(model_name)
+            # No assertions on non-capability models (no data to assert on).
+            continue
 
         if model_name not in _included_models:
             # --- Skipped model: materialise primary as passthrough, NO steps executed ---
@@ -447,6 +537,16 @@ def run_manifest(
             )
             # Do NOT add to executed_order — the model was not run.
             continue
+
+        # --- Included capability model: check upstream has data ---
+        if model.select in _no_data_models:
+            raise ValueError(
+                f"run_manifest: model '{model_name}' selects model "
+                f"'{model.select}' which produces no data output "
+                f"(it is a non-capability model with no select). "
+                f"Downstream capability models cannot receive GeoDataFrame "
+                f"data from a non-capability upstream."
+            )
 
         # --- Included model: build sub-spec, optionally filtered ---
         sub_spec = _build_sub_pipeline(model, manifest.sources, model_names)
