@@ -403,7 +403,11 @@ def run_manifest(
         materializer = Materializer(engine=engine)
 
     model_names = set(manifest.models)
-    order = topological_sort(list(model_names), _inter_model_edges(manifest))
+    # topological_sort is STABLE on input order for nodes sharing an
+    # in-degree of zero — feed it the DECLARATION order, never a set():
+    # edge-less (selectless) models must run in declaration order, the
+    # same contract the compile path (_topo_models) already honours.
+    order = topological_sort(list(manifest.models), _inter_model_edges(manifest))
     log.info(
         "manifest_run_start",
         manifest=manifest.name or "(unnamed)",
