@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import geopandas as gpd
+import pandas as pd
 from shapely.geometry import Polygon
 
 from gispulse.plugins.api import Capability
 from gispulse.plugins.api import register_capability as register
+
+# Multi-metric spec: output column name -> (source column or None for count, func).
+AggSpec = dict[str, "tuple[str | None, str]"]
 
 
 def _h3_available() -> bool:
@@ -45,6 +49,14 @@ class H3AggregateCapability(Capability):
                     "default": "count",
                     "description": "Aggregation function",
                 },
+                "aggregations": {
+                    "type": "object",
+                    "description": (
+                        "Multi-metric aggregation: output column name -> [source column "
+                        "or null for count, function]. Computed in a single H3 pass. "
+                        "Overrides agg_column/agg_func when provided."
+                    ),
+                },
             },
             "additionalProperties": False,
         }
@@ -56,6 +68,7 @@ class H3AggregateCapability(Capability):
         resolution: int = 7,
         agg_column: str | None = None,
         agg_func: str = "count",
+        aggregations: AggSpec | None = None,
         **_kw,
     ) -> gpd.GeoDataFrame:
         if not _h3_available():
@@ -69,20 +82,37 @@ class H3AggregateCapability(Capability):
         if src.crs and src.crs.to_epsg() != 4326:
             src = src.to_crs(epsg=4326)
 
-        # Assign H3 index to each point
+        # Assign the H3 index to each point ONCE (shared by every metric).
         src["_h3_index"] = src.geometry.apply(
             lambda g: h3.latlng_to_cell(g.y, g.x, resolution)
         )
 
-        # Aggregate
-        if agg_column and agg_column in src.columns:
-            grouped = src.groupby("_h3_index")[agg_column].agg(agg_func).reset_index()
-            grouped.columns = ["h3_index", "value"]
+        # One groupby, one column per requested metric. Single-metric callers
+        # (agg_column/agg_func) keep the historical {"value": ...} shape and its
+        # lenient "missing column -> count" fallback. Explicit multi-metric specs
+        # are validated up front: a missing source column raises instead of
+        # silently producing a count where a sum/mean was asked.
+        if aggregations is None:
+            specs: AggSpec = {"value": (agg_column, agg_func)}
         else:
-            grouped = src.groupby("_h3_index").size().reset_index(name="value")
-            grouped.columns = ["h3_index", "value"]
+            if not aggregations:
+                raise ValueError(
+                    "aggregations must be a non-empty mapping {name: (column or None, func)}"
+                )
+            for name, (col, _func) in aggregations.items():
+                if col is not None and col not in src.columns:
+                    raise ValueError(
+                        f"aggregations[{name!r}]: source column {col!r} not found in input"
+                    )
+            specs = aggregations
+        groups = src.groupby("_h3_index")
+        columns = {
+            name: (groups[col].agg(func) if col and col in src.columns else groups.size())
+            for name, (col, func) in specs.items()
+        }
+        grouped = pd.DataFrame(columns).reset_index().rename(columns={"_h3_index": "h3_index"})
 
-        # Convert H3 cells to polygons
+        # Convert H3 cells to polygons ONCE (boundary is shared across metrics).
         def h3_to_polygon(h3_index):
             boundary = h3.cell_to_boundary(h3_index)
             return Polygon([(lng, lat) for lat, lng in boundary])
