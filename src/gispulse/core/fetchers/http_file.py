@@ -48,6 +48,21 @@ def _vsicurl(endpoint: str) -> str:
     return endpoint
 
 
+def _resolve_vsi_uri(access: AccessSpec) -> str:
+    """GDAL virtual path for the scanned file, ``/vsizip/`` when targeting a zip member.
+
+    When ``access.params['archive_member']`` is set and the endpoint is a ``.zip``
+    archive (e.g. a Geofabrik ``.shp.zip``), build
+    ``/vsizip/<inner>/<member>`` where ``<inner>`` is the ``/vsicurl/``-wrapped
+    remote zip (or the local path). GDAL reads that single member in place — no
+    physical extraction of the whole archive. Otherwise, plain ``/vsicurl/``.
+    """
+    member = access.params.get("archive_member")
+    if member and access.endpoint.split("?")[0].lower().endswith(".zip"):
+        return f"/vsizip/{_vsicurl(access.endpoint)}/{member}"
+    return _vsicurl(access.endpoint)
+
+
 class HttpFileFetcher(LazyFetcher):
     """Remote single-file adapter — ``/vsicurl/`` lazy scan + streamed download.
 
@@ -56,6 +71,9 @@ class HttpFileFetcher(LazyFetcher):
     * ``lat`` / ``lon`` — column names for a point CSV (default
       ``"latitude"`` / ``"longitude"``); only consulted for ``.csv``.
     * ``layer`` — layer name for a multi-layer source (GPKG).
+    * ``archive_member`` — for a ``.zip`` endpoint, the single vector member to
+      read in place via ``/vsizip/`` (e.g. ``"gis_osm_roads_free_1.shp"``); no
+      full archive extraction.
     * ``local_path`` — materialise destination (default: a temp file).
     * ``s3_uri`` / ``s3_key`` — opt-in materialisation destination. When
       present, DuckDB writes the parsed scan to S3/Garage as Parquet.
@@ -92,8 +110,12 @@ class HttpFileFetcher(LazyFetcher):
         return f"(SELECT *, {geom} AS geometry FROM read_csv_auto('{uri}'){where})"
 
     def _spatial_scan(self, access: AccessSpec, extent: Any | None) -> str:
-        """Spatial-file scan via ``ST_Read`` (GeoJSON / GPKG / FGB / SHP)."""
-        uri = _vsicurl(access.endpoint).replace("'", "''")
+        """Spatial-file scan via ``ST_Read`` (GeoJSON / GPKG / FGB / SHP).
+
+        Supports a shapefile (or any GDAL vector) inside a remote ``.zip`` via the
+        ``archive_member`` param (``/vsizip/`` virtual path) — no full extraction.
+        """
+        uri = _resolve_vsi_uri(access).replace("'", "''")
         layer = access.params.get("layer")
         st_read = f"ST_Read('{uri}'"
         if layer:
@@ -149,6 +171,30 @@ class HttpFileFetcher(LazyFetcher):
             )
 
         local_path = access.params.get("local_path")
+
+        # Un membre d'archive (.zip) ne peut pas être streamé brut : read_vector ne lit
+        # pas un .zip. On matérialise le membre cible en Parquet LOCAL via le même scan
+        # /vsizip/ que le chemin S3/Garage — sortie lisible et cohérente.
+        if access.params.get("archive_member"):
+            from gispulse.persistence.duckdb_engine import DuckDBSession
+
+            if not local_path:
+                handle = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
+                handle.close()
+                local_path = handle.name
+            select = self._reference_scan(access, extent)
+            dest = str(local_path).replace("'", "''")
+            copy_sql = f"COPY (SELECT * FROM {select}) TO '{dest}' (FORMAT PARQUET)"
+            with DuckDBSession() as session:
+                session.conn.execute(copy_sql)
+            log.info("http_file_materialized", path=local_path)
+            return SourceResult(
+                payload=self.payload,
+                mode=FetchMode.MATERIALIZE,
+                data=local_path,
+                metadata={"copy_sql": copy_sql, "archive_member": access.params["archive_member"]},
+            )
+
         if not local_path:
             suffix = "." + access.endpoint.split("?")[0].rsplit(".", 1)[-1]
             handle = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
