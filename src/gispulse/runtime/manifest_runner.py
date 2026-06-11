@@ -324,8 +324,16 @@ def run_manifest(
     run_id: str | None = None,
     steps_filter: list[str] | None = None,
     resume_markers: dict[str, str] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    heartbeat: Callable[[], None] | None = None,
 ) -> ManifestRunResult:
     """Execute a v3 manifest end-to-end.
+
+    ``cancel_check``/``heartbeat`` are forwarded to every per-model
+    PipelineExecutor so long-running non-capability steps (external
+    subprocesses) can be cancelled mid-step and keep the worker's
+    stuck-recovery fed — without them a manifest job is only cancellable
+    between models.
 
     Walks the models in topological order and, for each one, resolves
     its ``select`` and any transform-level ``with:`` references into
@@ -503,6 +511,8 @@ def run_manifest(
             # to the step-kind registry; they don't consume GeoDataFrame inputs.
             model_executor = PipelineExecutor(
                 execution_context=None,
+                cancel_check=cancel_check,
+                heartbeat=heartbeat,
                 resume_markers=model_resume_markers if model_resume_markers else None,
             )
             # Provide a sentinel empty inputs dict; sub_spec only has non-capability
@@ -612,6 +622,8 @@ def run_manifest(
             # the current model's step IDs (no cross-model marker leakage).
             model_executor = PipelineExecutor(
                 execution_context=None,
+                cancel_check=cancel_check,
+                heartbeat=heartbeat,
                 resume_markers=model_resume_markers if model_resume_markers else None,
             )
             results = model_executor.execute(sub_spec, inputs, None, event_sink=_sink, run_id=run_id)  # type: ignore[arg-type]

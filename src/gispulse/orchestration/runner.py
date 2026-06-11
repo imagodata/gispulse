@@ -415,6 +415,8 @@ class JobRunner:
                             event_sink=event_sink,
                             run_id=run_id,
                             run_repo=run_repo,
+                            cancel_check=cancel_check,
+                            heartbeat=heartbeat,
                         )
                         steps_count = len(
                             job.parameters[_MANIFEST_KEY].get("models", {})
@@ -708,6 +710,8 @@ class JobRunner:
         event_sink: RunEventSink | None = None,
         run_id: str | None = None,
         run_repo: Any | None = None,
+        cancel_check: Any | None = None,
+        heartbeat: Any | None = None,
     ) -> gpd.GeoDataFrame:
         """Execute a job whose parameters contain a ``manifest`` dict (v3 ManifestV3).
 
@@ -891,6 +895,23 @@ class JobRunner:
         # --- Execute with timeout -----------------------------------------
         from gispulse.runtime.manifest_runner import run_manifest  # local to avoid circular import
 
+        # Per-step timeout elevation (#448) must apply on the manifest path
+        # too: a manifest external step declaring timeout_seconds=21600 was
+        # killed by the 300 s job default (found in live phase-A validation).
+        from gispulse.core.manifest_v3 import compile_to_pipeline as _compile_for_timeout
+
+        effective_timeout = _compute_effective_timeout(
+            timeout, _compile_for_timeout(manifest)
+        )
+        if effective_timeout != timeout:
+            log.info(
+                "job_timeout_elevated",
+                job_id=str(job.id),
+                original_timeout=timeout,
+                effective_timeout=effective_timeout,
+            )
+            timeout = effective_timeout
+
         pool = ThreadPoolExecutor(max_workers=1)
         try:
             future = pool.submit(
@@ -906,6 +927,8 @@ class JobRunner:
                 # or resume paths with a non-empty remaining list.
                 steps_filter=steps_filter_manifest or None,
                 resume_markers=manifest_resume_markers if manifest_resume_markers else None,
+                cancel_check=cancel_check,
+                heartbeat=heartbeat,
             )
             result = future.result(timeout=timeout)
         except FuturesTimeoutError:
