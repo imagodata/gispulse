@@ -56,6 +56,31 @@ def test_reference_scan_gpkg_with_layer() -> None:
     assert "layer='parcels'" in scan
 
 
+def test_reference_scan_shapefile_inside_remote_zip_via_vsizip() -> None:
+    # Un .shp dans un .zip distant (ex. extrait Geofabrik) : on lit le seul membre
+    # cible via /vsizip//vsicurl/ sans extraire toute l'archive.
+    result = HttpFileFetcher().virtual_table(
+        _access(
+            "https://host.example.org/belgium-free.shp.zip",
+            archive_member="gis_osm_roads_free_1.shp",
+        )
+    )
+    assert result.metadata[DUCKDB_SCAN_KEY] == (
+        "ST_Read('/vsizip//vsicurl/https://host.example.org/"
+        "belgium-free.shp.zip/gis_osm_roads_free_1.shp')"
+    )
+
+
+def test_reference_scan_local_zip_member_via_vsizip() -> None:
+    # .zip local : /vsizip/ sans /vsicurl/ (sert les fixtures hors-ligne).
+    result = HttpFileFetcher().virtual_table(
+        _access("/tmp/belgium-free.shp.zip", archive_member="gis_osm_roads_free_1.shp")
+    )
+    assert result.metadata[DUCKDB_SCAN_KEY] == (
+        "ST_Read('/vsizip//tmp/belgium-free.shp.zip/gis_osm_roads_free_1.shp')"
+    )
+
+
 def test_reference_scan_pushdown_bbox_for_spatial_file() -> None:
     result = HttpFileFetcher().virtual_table(
         _access("https://host.example.org/cities.geojson"),
@@ -178,6 +203,46 @@ def test_fetch_materialize_can_copy_csv_directly_to_s3_uri(
     assert f"TO '{uri}' (FORMAT PARQUET)" in executed[0]
     assert "read_csv_auto('/vsicurl/https://host.example.org/sites.csv')" in executed[0]
     assert "ST_MakeEnvelope(0.0, 0.0, 1.0, 1.0)" in executed[0]
+
+
+def test_fetch_materialize_zip_member_writes_local_parquet_via_vsizip(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    # Un .shp dans un .zip ne peut pas être streamé brut : le materialize local doit
+    # produire un Parquet via le scan /vsizip/ (même mécanisme que le chemin S3/Garage).
+    executed: list[str] = []
+
+    class _FakeConn:
+        def execute(self, sql: str) -> None:
+            executed.append(sql)
+
+    class _FakeSession:
+        conn = _FakeConn()
+
+        def __enter__(self) -> "_FakeSession":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    import gispulse.persistence.duckdb_engine as duckdb_engine
+
+    monkeypatch.setattr(duckdb_engine, "DuckDBSession", _FakeSession)
+
+    dest = str(tmp_path) + "/roads.parquet"  # type: ignore[operator]
+    result = HttpFileFetcher().fetch(
+        _access(
+            "https://host.example.org/belgium-free.shp.zip",
+            archive_member="gis_osm_roads_free_1.shp",
+            local_path=dest,
+        ),
+        mode=FetchMode.MATERIALIZE,
+    )
+
+    assert result.mode is FetchMode.MATERIALIZE
+    assert result.data == dest
+    assert f"TO '{dest}' (FORMAT PARQUET)" in executed[0]
+    assert "/vsizip//vsicurl/https://host.example.org/belgium-free.shp.zip/" in executed[0]
 
 
 def test_fetch_materialize_builds_s3_uri_from_configured_bucket(
