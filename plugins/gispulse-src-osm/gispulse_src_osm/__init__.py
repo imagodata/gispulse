@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gispulse_src_osm.materialize import materialize_pbf
 from gispulse_src_osm.pbf import OsmPbfReadError, read_pbf_roads
 
 
@@ -13,4 +14,4 @@ def register() -> None:
     SOURCES.register(OsmSource())
 
 
-__all__ = ["OsmPbfReadError", "read_pbf_roads", "register"]
+__all__ = ["OsmPbfReadError", "materialize_pbf", "read_pbf_roads", "register"]
