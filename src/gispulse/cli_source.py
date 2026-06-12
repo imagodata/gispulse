@@ -475,18 +475,12 @@ def _row_count(result: Any) -> int | None:
 
 
 def _storage_for_dest(dest: str) -> Any:
+    from gispulse.persistence.storage import create_storage
+
     if dest == "local":
-        from gispulse.core.config import settings
-        from gispulse.persistence.storage import LocalStorage
-
-        return LocalStorage(base_path=settings.storage.data_dir)
+        return create_storage(mode="local")
     if dest == "s3":
-        from gispulse.core.config import settings
-        from gispulse.persistence.storage import create_storage
-
-        if not settings.s3.endpoint:
-            raise ValueError("dest=s3 requires GISPULSE_S3_ENDPOINT")
-        return create_storage()
+        return create_storage(mode="s3")
     raise ValueError(f"Invalid --dest {dest!r}; expected local or s3")
 
 
@@ -881,6 +875,12 @@ def source_catalog(
             protocol_filter=protocol,
         )
     except Exception as exc:  # noqa: BLE001 - CLI boundary
+        to_dict = getattr(exc, "to_dict", None)
+        if json_output and callable(to_dict):
+            payload = {"status": "error"}
+            payload.update(to_dict())
+            typer.echo(json.dumps(payload, sort_keys=True))
+            raise typer.Exit(1) from exc
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1) from exc
     for warning in payload["warnings"]:
@@ -931,6 +931,12 @@ def source_ingest(
             prefix=prefix,
         )
     except Exception as exc:  # noqa: BLE001 - CLI boundary
+        to_dict = getattr(exc, "to_dict", None)
+        if json_output and callable(to_dict):
+            payload = {"status": "error"}
+            payload.update(to_dict())
+            typer.echo(json.dumps(payload, sort_keys=True))
+            raise typer.Exit(1) from exc
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1) from exc
 
