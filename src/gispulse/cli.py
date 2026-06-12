@@ -1553,8 +1553,10 @@ app.command(name="mcp")(cmd_mcp)
 # ---------------------------------------------------------------------------
 
 from gispulse.cli_source import source_app  # noqa: E402
+from gispulse.cli_storage import storage_app  # noqa: E402
 
 app.add_typer(source_app, name="source")
+app.add_typer(storage_app, name="storage")
 
 
 # ---------------------------------------------------------------------------

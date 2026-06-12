@@ -301,7 +301,7 @@ class StorageSettings(BaseSettings):
 
 
 class S3Settings(BaseSettings):
-    """S3/MinIO object storage (Pro tier)."""
+    """S3/MinIO/Garage object storage configuration."""
 
     model_config = SettingsConfigDict(env_prefix="GISPULSE_S3_")
 

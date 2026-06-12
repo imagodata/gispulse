@@ -164,7 +164,11 @@ La precedence globale est : env `GISPULSE_*` > `gispulse.toml` > defauts.
 
 Deux chemins S3 coexistent :
 
-- `DatasetStorage` / `S3Storage` dans `src/gispulse/persistence/storage.py` : utilise boto3, active S3 seulement si `GISPULSE_S3_ENDPOINT` est defini et si `check_tier("pro")` passe; sinon fallback local.
+- `DatasetStorage` / `S3Storage` dans `src/gispulse/persistence/storage.py` :
+  utilise boto3. `create_storage(mode="auto")` choisit S3 si
+  `GISPULSE_S3_ENDPOINT` est defini, sinon local. `create_storage(mode="s3")`
+  refuse tout fallback local et leve `STORAGE_S3_NOT_CONFIGURED` si l'endpoint
+  manque. Diagnostiquer avec `gispulse storage status --json`.
 - `DuckDBSession` : configure le secret DuckDB si `settings.s3.endpoint` est defini. Ce chemin sert a `read_parquet`, `ST_Read`, `COPY ... TO 's3://...'`. Il ne passe pas par `create_storage()`.
 
 Inconnues runtime VPS a verifier plus tard, sans le faire dans ce cadrage :
@@ -173,7 +177,8 @@ Inconnues runtime VPS a verifier plus tard, sans le faire dans ce cadrage :
 - presence du bucket `gispulse`;
 - validite des credentials et de `GISPULSE_S3_REGION=garage`;
 - capacite DuckDB/httpfs sur le VPS a ecrire puis relire un Parquet de smoke test;
-- besoin ou non du tier Pro si le runner N3 utilise `S3Storage` pour uploader les archives brutes;
+- politique produit/licence a documenter au niveau offre si necessaire ; le
+  branchement technique `S3Storage` lui-meme n'impose plus de gate Pro;
 - comportement Caddy/Garage si endpoint public HTTPS est utilise pour de gros objets.
 
 ## 4. Plan de cablage par source bulk #356

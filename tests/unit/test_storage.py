@@ -15,6 +15,7 @@ from gispulse.persistence.storage import (
     LocalStorage,
     StorageError,
     create_storage,
+    describe_storage_backend,
     _make_s3_boto_config,
     validate_storage_key,
 )
@@ -32,6 +33,14 @@ def _run(coro):
         return loop.run_until_complete(coro)
     finally:
         loop.close()
+
+
+class _CaptureLogger:
+    def __init__(self) -> None:
+        self.infos: list[dict[str, object]] = []
+
+    def info(self, event: str, **context: object) -> None:
+        self.infos.append({"event": event, **context})
 
 
 def _make_mock_boto3():
@@ -305,35 +314,88 @@ class TestS3Storage:
 
 
 class TestCreateStorage:
-    def test_default_local(self):
+    def test_default_local(self, monkeypatch: pytest.MonkeyPatch):
         """Without S3 env vars, create_storage returns LocalStorage."""
+        logger = _CaptureLogger()
+        monkeypatch.setattr("gispulse.persistence.storage.log", logger)
         env = {k: v for k, v in os.environ.items() if not k.startswith("GISPULSE_S3_")}
         with patch.dict(os.environ, env, clear=True):
             storage = create_storage()
         assert isinstance(storage, LocalStorage)
+        selected = [
+            entry for entry in logger.infos if entry["event"] == "storage_backend_selected"
+        ]
+        assert selected == [
+            {
+                "event": "storage_backend_selected",
+                "requested_mode": "auto",
+                "backend": "local",
+                "storage_class": "LocalStorage",
+                "endpoint_configured": False,
+                "bucket": None,
+            }
+        ]
 
-    def test_s3_without_pro_tier_falls_back(self):
-        """S3 endpoint set but tier is community => falls back to local."""
+    def test_explicit_s3_without_endpoint_fails_structured(self):
+        """Explicit S3 mode must not silently fall back to LocalStorage."""
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GISPULSE_S3_")}
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(StorageError) as exc:
+                create_storage(mode="s3")
+        assert exc.value.code == "STORAGE_S3_NOT_CONFIGURED"
+        assert exc.value.context == {"mode": "s3", "endpoint_configured": False}
+        assert "GISPULSE_S3_ENDPOINT" in exc.value.recovery
+
+    def test_explicit_local_ignores_s3_endpoint(self):
+        """Local mode is an explicit opt-in, not an accidental S3 fallback."""
         env = {
             "GISPULSE_S3_ENDPOINT": "http://localhost:9000",
-            "GISPULSE_TIER": "community",
+            "GISPULSE_S3_BUCKET": "test",
         }
         with patch.dict(os.environ, env, clear=False):
-            storage = create_storage()
+            storage = create_storage(mode="local")
         assert isinstance(storage, LocalStorage)
 
-    def test_s3_with_pro_tier(self):
-        """S3 endpoint set with pro tier => creates S3Storage."""
+    def test_describe_storage_backend_auto_local(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GISPULSE_S3_")}
+        with patch.dict(os.environ, env, clear=True):
+            report = describe_storage_backend(mode="auto")
+        assert report == {
+            "requested_mode": "auto",
+            "backend": "local",
+            "storage_class": "LocalStorage",
+            "endpoint_configured": False,
+            "bucket": None,
+            "region": None,
+            "local_path": os.path.expanduser("~/.gispulse/data"),
+            "selection_reason": "GISPULSE_S3_ENDPOINT is not set; auto mode selected local storage.",
+            "fallback": False,
+        }
+
+    def test_describe_storage_backend_explicit_s3_missing_endpoint(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GISPULSE_S3_")}
+        with patch.dict(os.environ, env, clear=True):
+            report = describe_storage_backend(mode="s3")
+        assert report["backend"] == "unconfigured"
+        assert report["storage_class"] is None
+        assert report["error"]["code"] == "STORAGE_S3_NOT_CONFIGURED"
+        assert report["fallback"] is False
+
+    def test_s3_endpoint_uses_s3_storage_without_license_gate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """S3 endpoint set => creates S3Storage without a paid-tier license."""
         from gispulse.persistence.storage import S3Storage
 
+        logger = _CaptureLogger()
+        monkeypatch.setattr("gispulse.persistence.storage.log", logger)
         env = {
             "GISPULSE_S3_ENDPOINT": "http://localhost:9000",
             "GISPULSE_S3_BUCKET": "test",
             "GISPULSE_S3_ACCESS_KEY": "admin",
             "GISPULSE_S3_SECRET_KEY": "secret",
-            "GISPULSE_TIER": "pro",
-            "GISPULSE_LICENCE_SKIP_VERIFY": "true",
-            "GISPULSE_LICENSE_KEY": "eyJvcmciOiAidGVzdCIsICJ0aWVyIjogInBybyIsICJleHAiOiAiMjAzMC0wMS0wMVQwMDowMDowMFoifQ.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "GISPULSE_TIER": "community",
+            "GISPULSE_LICENSE_KEY": "",
         }
         mock_boto3, mock_botocore_config, mock_client = _make_mock_boto3()
 
@@ -349,6 +411,21 @@ class TestCreateStorage:
             with patch.dict(os.environ, env, clear=False):
                 storage = create_storage()
             assert isinstance(storage, S3Storage)
+            selected = [
+                entry
+                for entry in logger.infos
+                if entry["event"] == "storage_backend_selected"
+            ]
+            assert selected == [
+                {
+                    "event": "storage_backend_selected",
+                    "requested_mode": "auto",
+                    "backend": "s3",
+                    "storage_class": "S3Storage",
+                    "endpoint_configured": True,
+                    "bucket": "test",
+                }
+            ]
         finally:
             if saved_boto3 is not None:
                 sys.modules["boto3"] = saved_boto3

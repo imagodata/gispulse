@@ -1,5 +1,5 @@
 """
-Dataset storage abstraction — local filesystem (default) and S3/MinIO (Pro).
+Dataset storage abstraction — local filesystem (default) and S3/MinIO.
 
 Provides a unified interface for storing, retrieving, and managing dataset
 files regardless of the underlying storage backend.
@@ -27,8 +27,9 @@ import asyncio
 import functools
 import shutil
 from abc import ABC, abstractmethod
+from io import BytesIO
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Literal, cast
 
 from gispulse.core.config import settings
 from gispulse.core.logging import get_logger
@@ -36,8 +37,38 @@ from gispulse.core.logging import get_logger
 log = get_logger(__name__)
 
 
+StorageMode = Literal["auto", "local", "s3"]
+
+
 class StorageError(Exception):
-    """Raised when a storage operation fails."""
+    """Raised when a storage operation fails.
+
+    The string message remains backward-compatible, while ``code``/``context``/
+    ``recovery`` give CLIs and agents a stable machine-readable surface.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "STORAGE_ERROR",
+        context: dict[str, object] | None = None,
+        recovery: str = "",
+    ) -> None:
+        self.code = code
+        self.context = context or {}
+        self.recovery = recovery
+        super().__init__(message)
+
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "code": self.code,
+            "message": str(self),
+            "context": self.context,
+        }
+        if self.recovery:
+            payload["recovery"] = self.recovery
+        return payload
 
 
 def _make_s3_boto_config(BotoConfig):
@@ -214,7 +245,7 @@ class LocalStorage(DatasetStorage):
 
 
 # ---------------------------------------------------------------------------
-# S3Storage — S3/MinIO backend (Pro tier)
+# S3Storage — S3/MinIO backend
 # ---------------------------------------------------------------------------
 
 
@@ -282,8 +313,7 @@ class S3Storage(DatasetStorage):
             extra["ContentType"] = content_type
 
         if isinstance(data, bytes):
-            from io import BytesIO
-            body = BytesIO(data)
+            body = cast(BinaryIO, BytesIO(data))
         else:
             body = data
 
@@ -363,36 +393,160 @@ class S3Storage(DatasetStorage):
 
 
 # ---------------------------------------------------------------------------
-# Factory
+# Factory / diagnostics
 # ---------------------------------------------------------------------------
 
 
-def create_storage() -> DatasetStorage:
-    """Create the appropriate storage backend based on environment variables.
+def _normalize_storage_mode(mode: str) -> StorageMode:
+    clean = mode.strip().lower()
+    if clean in {"auto", "local", "s3"}:
+        return clean  # type: ignore[return-value]
+    raise StorageError(
+        f"Invalid storage mode {mode!r}; expected auto, local, or s3",
+        code="STORAGE_MODE_INVALID",
+        context={"mode": mode},
+        recovery="Use mode='auto', mode='local', or mode='s3'.",
+    )
 
-    If ``GISPULSE_S3_ENDPOINT`` is set, returns an :class:`S3Storage`
-    (requires Pro tier). Otherwise returns a :class:`LocalStorage`.
+
+def _s3_not_configured_error(mode: StorageMode) -> StorageError:
+    return StorageError(
+        "S3/Garage storage was explicitly requested but GISPULSE_S3_ENDPOINT is not configured",
+        code="STORAGE_S3_NOT_CONFIGURED",
+        context={"mode": mode, "endpoint_configured": False},
+        recovery=(
+            "Set GISPULSE_S3_ENDPOINT plus GISPULSE_S3_BUCKET/"
+            "GISPULSE_S3_ACCESS_KEY/GISPULSE_S3_SECRET_KEY, or choose mode='local' "
+            "explicitly for local development."
+        ),
+    )
+
+
+def describe_storage_backend(mode: str = "auto") -> dict[str, object]:
+    """Describe the storage backend selection without opening network connections.
+
+    ``mode='auto'`` preserves the historical behavior: S3/Garage when
+    ``GISPULSE_S3_ENDPOINT`` is configured, local storage otherwise. Explicit
+    ``mode='s3'`` never falls back to local storage.
     """
+    requested_mode = _normalize_storage_mode(mode)
     s3_url = settings.s3.endpoint
-    if s3_url:
-        from gispulse.persistence.tier import check_tier, TierError
+    endpoint_configured = bool(s3_url)
+    local_path = str(Path(settings.storage.data_dir).expanduser().resolve())
 
-        try:
-            check_tier("pro")
-        except TierError:
-            log.warning(
-                "s3_tier_blocked",
-                msg="GISPULSE_S3_ENDPOINT is set but S3 storage requires Pro tier. "
-                "Falling back to local storage.",
-            )
-            return LocalStorage(base_path=settings.storage.data_dir)
+    if requested_mode == "local":
+        return {
+            "requested_mode": requested_mode,
+            "backend": "local",
+            "storage_class": "LocalStorage",
+            "endpoint_configured": endpoint_configured,
+            "bucket": None,
+            "region": None,
+            "local_path": local_path,
+            "selection_reason": "mode=local explicitly selected local storage.",
+            "fallback": False,
+        }
 
+    if requested_mode == "s3" and not endpoint_configured:
+        error = _s3_not_configured_error(requested_mode)
+        return {
+            "requested_mode": requested_mode,
+            "backend": "unconfigured",
+            "storage_class": None,
+            "endpoint_configured": False,
+            "bucket": settings.s3.bucket,
+            "region": settings.s3.region,
+            "local_path": None,
+            "selection_reason": "mode=s3 requires GISPULSE_S3_ENDPOINT.",
+            "fallback": False,
+            "error": error.to_dict(),
+        }
+
+    if endpoint_configured:
+        reason = (
+            "mode=s3 explicitly selected S3/Garage storage."
+            if requested_mode == "s3"
+            else "GISPULSE_S3_ENDPOINT is set; auto mode selected S3/Garage storage."
+        )
+        return {
+            "requested_mode": requested_mode,
+            "backend": "s3",
+            "storage_class": "S3Storage",
+            "endpoint_configured": True,
+            "endpoint": s3_url,
+            "bucket": settings.s3.bucket,
+            "region": settings.s3.region,
+            "local_path": None,
+            "selection_reason": reason,
+            "fallback": False,
+        }
+
+    return {
+        "requested_mode": requested_mode,
+        "backend": "local",
+        "storage_class": "LocalStorage",
+        "endpoint_configured": False,
+        "bucket": None,
+        "region": None,
+        "local_path": local_path,
+        "selection_reason": "GISPULSE_S3_ENDPOINT is not set; auto mode selected local storage.",
+        "fallback": False,
+    }
+
+
+def create_storage(mode: str = "auto") -> DatasetStorage:
+    """Create a storage backend from an explicit mode.
+
+    ``mode='auto'`` keeps backward compatibility: S3/Garage when
+    ``GISPULSE_S3_ENDPOINT`` is set, local storage otherwise. Explicit
+    ``mode='s3'`` refuses to fall back to local storage.
+    """
+    report = describe_storage_backend(mode)
+    backend = report["backend"]
+
+    if backend == "s3":
+        log.info(
+            "storage_backend_selected",
+            requested_mode=report["requested_mode"],
+            backend=backend,
+            storage_class=report["storage_class"],
+            endpoint_configured=report["endpoint_configured"],
+            bucket=report["bucket"],
+        )
         return S3Storage(
-            endpoint_url=s3_url,
+            endpoint_url=str(report["endpoint"]),
             bucket=settings.s3.bucket,
             access_key=settings.s3.access_key,
             secret_key=settings.s3.secret_key,
             region=settings.s3.region,
         )
 
-    return LocalStorage(base_path=settings.storage.data_dir)
+    if backend == "local":
+        log.info(
+            "storage_backend_selected",
+            requested_mode=report["requested_mode"],
+            backend=backend,
+            storage_class=report["storage_class"],
+            endpoint_configured=report["endpoint_configured"],
+            bucket=report["bucket"],
+        )
+        return LocalStorage(base_path=settings.storage.data_dir)
+
+    error_payload = report.get("error")
+    if isinstance(error_payload, dict):
+        raise StorageError(
+            str(error_payload.get("message", "Storage backend is not configured")),
+            code=str(error_payload.get("code", "STORAGE_BACKEND_UNCONFIGURED")),
+            context=(
+                error_payload.get("context")
+                if isinstance(error_payload.get("context"), dict)
+                else {}
+            ),
+            recovery=str(error_payload.get("recovery", "")),
+        )
+    raise StorageError(
+        "Storage backend is not configured",
+        code="STORAGE_BACKEND_UNCONFIGURED",
+        context={"mode": mode},
+        recovery="Check storage configuration and retry.",
+    )
