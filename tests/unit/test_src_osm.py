@@ -16,14 +16,25 @@ _PKG_PATH = str(_PKG)
 if _PKG_PATH in sys.path:
     sys.path.remove(_PKG_PATH)
 sys.path.insert(0, _PKG_PATH)
-for _module in ("gispulse_src_osm.pbf", "gispulse_src_osm.source", "gispulse_src_osm"):
+for _module in (
+    "gispulse_src_osm.materialize",
+    "gispulse_src_osm.pbf",
+    "gispulse_src_osm.source",
+    "gispulse_src_osm",
+):
     sys.modules.pop(_module, None)
 
-from gispulse_src_osm import read_pbf_roads  # noqa: E402
+from gispulse_src_osm import materialize_pbf, read_pbf_roads  # noqa: E402
 from gispulse_src_osm.pbf import OsmPbfReadError  # noqa: E402
 from gispulse_src_osm.source import OsmSource  # noqa: E402
 
-from gispulse.core.plugin_model import AccessProtocol, Payload, SourceDomain  # noqa: E402
+from gispulse.core.plugin_model import (  # noqa: E402
+    AccessProtocol,
+    FetchMode,
+    Payload,
+    SourceDomain,
+    SourceResult,
+)
 from gispulse.core.sources import DataSource  # noqa: E402
 
 pytestmark = pytest.mark.usefixtures("offline_ssrf")
@@ -87,6 +98,70 @@ def test_pbf_entry_exposes_full_extract_and_reader_hint(source: OsmSource) -> No
     assert access.format == "application/x-osm-pbf"
     assert access.params["reader"] == "duckdb.ST_ReadOSM"
     assert source.schema("osm-pbf-be")["surface"] == "str"
+
+
+def test_materialize_pbf_delegates_declared_pbf_access_to_download_fetcher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: OsmSource,
+) -> None:
+    dest = tmp_path / "raw" / "belgium.osm.pbf"
+    calls = []
+
+    def fake_fetch(self, access, *, mode):
+        calls.append((self, access, mode))
+        return SourceResult(payload=Payload.VECTOR, mode=mode, data=str(dest))
+
+    monkeypatch.setattr("gispulse_src_osm.materialize.HttpFileFetcher.fetch", fake_fetch)
+
+    result = materialize_pbf(dest)
+
+    assert result == dest
+    assert dest.parent.is_dir()
+    assert len(calls) == 1
+    _fetcher, access, mode = calls[0]
+    declared = source.access_for("osm-pbf-be")
+    assert mode is FetchMode.MATERIALIZE
+    assert access.protocol is AccessProtocol.DOWNLOAD
+    assert access.endpoint == declared.endpoint
+    assert access.params["local_path"] == str(dest)
+    assert "local_path" not in declared.params
+
+
+def test_materialize_pbf_skips_existing_file_without_force(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dest = tmp_path / "belgium.osm.pbf"
+    dest.write_bytes(b"already here")
+
+    def fail_fetch(self, access, *, mode):
+        pytest.fail("materialize_pbf should not fetch when dest exists")
+
+    monkeypatch.setattr("gispulse_src_osm.materialize.HttpFileFetcher.fetch", fail_fetch)
+
+    assert materialize_pbf(dest) == dest
+
+
+def test_materialize_pbf_force_fetches_existing_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dest = tmp_path / "belgium.osm.pbf"
+    dest.write_bytes(b"stale")
+    calls = []
+
+    def fake_fetch(self, access, *, mode):
+        calls.append((access, mode))
+        return SourceResult(payload=Payload.VECTOR, mode=mode, data=str(dest))
+
+    monkeypatch.setattr("gispulse_src_osm.materialize.HttpFileFetcher.fetch", fake_fetch)
+
+    assert materialize_pbf(dest, force=True) == dest
+    assert len(calls) == 1
+    access, mode = calls[0]
+    assert mode is FetchMode.MATERIALIZE
+    assert access.params["local_path"] == str(dest)
 
 
 def test_read_pbf_roads_builds_duckdb_query_and_flattens_tags(

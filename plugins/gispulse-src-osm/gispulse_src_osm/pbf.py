@@ -143,7 +143,7 @@ def _frame_to_gdf(frame: Any, *, target_crs: str | None) -> gpd.GeoDataFrame:
     return gdf
 
 
-def _load_wkb(value: object) -> object:
+def _load_wkb(value: Any) -> object:
     from shapely import wkb
 
     if value is None:
