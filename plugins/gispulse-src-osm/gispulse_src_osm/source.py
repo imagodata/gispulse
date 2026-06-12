@@ -29,6 +29,7 @@ _TARGET_CRS = "EPSG:31370"
 _SOURCE_CRS = "EPSG:4326"  # OSM/Geofabrik native
 
 GEOFABRIK_BE_SHP = "https://download.geofabrik.de/europe/belgium-latest-free.shp.zip"
+GEOFABRIK_BE_PBF = "https://download.geofabrik.de/europe/belgium-latest.osm.pbf"
 
 # Geofabrik *free* shapefile roads layer (gis_osm_roads_free_1) attributes.
 # Confirmé sur la doc/exports Geofabrik : osm_id, code, fclass, name, ref, oneway,
@@ -85,6 +86,36 @@ _ENTRIES: dict[str, dict[str, Any]] = {
         ),
         "schema": _ROADS_SCHEMA,
         "canonical_field_map": _ROADS_FIELD_MAP,
+        "source_crs": _SOURCE_CRS,
+    },
+    "osm-pbf-be": {
+        "label": "OSM full extract — Belgium (Geofabrik PBF)",
+        "provider": "Geofabrik / OpenStreetMap",
+        "platform": "Geofabrik download server (PBF)",
+        "region": "BE",
+        "endpoint": GEOFABRIK_BE_PBF,
+        "access": AccessSpec(
+            protocol=AccessProtocol.DOWNLOAD,
+            endpoint=GEOFABRIK_BE_PBF,
+            params={
+                "source_crs": _SOURCE_CRS,
+                "target_crs": _TARGET_CRS,
+                "reader": "duckdb.ST_ReadOSM",
+            },
+            format="application/x-osm-pbf",
+        ),
+        "schema": {
+            "id": "int",
+            "highway": "str",
+            "surface": "str",
+            "geometry": f"geometry[{_TARGET_CRS}]",
+        },
+        "canonical_field_map": {
+            "id": "id",
+            "highway": "tags.highway",
+            "surface": "tags.surface",
+            "geometry": "geom",
+        },
         "source_crs": _SOURCE_CRS,
     },
 }
