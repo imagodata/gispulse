@@ -432,6 +432,37 @@ def test_source_ingest_ambiguous_source_without_plugin_fails(
     assert "gispulse-src-rival:ax-source" in result.output
 
 
+def test_source_ingest_s3_without_endpoint_returns_structured_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetcher = _JsonFetcher()
+    registry = ProtocolRegistry()
+    registry.register(fetcher)
+    _patch_source_hub(monkeypatch, registry=registry)
+    monkeypatch.delenv("GISPULSE_S3_ENDPOINT", raising=False)
+    monkeypatch.delenv("GISPULSE_S3_ACCESS_KEY", raising=False)
+    monkeypatch.delenv("GISPULSE_S3_SECRET_KEY", raising=False)
+
+    result = runner.invoke(
+        app,
+        [
+            "source",
+            "ingest",
+            "ax-source",
+            "parcelles",
+            "--dest",
+            "s3",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["status"] == "error"
+    assert payload["code"] == "STORAGE_S3_NOT_CONFIGURED"
+    assert "GISPULSE_S3_ENDPOINT" in payload["recovery"]
+
+
 def test_source_ingest_uses_bulk_runner_for_s3_table_entries(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from os import PathLike
 import tempfile
 import time
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, cast
 from urllib.parse import urlencode, urljoin, urlsplit
 
 from gispulse.adapters.rest.retry import RetrySpec, get_json_with_retry, sleep as _sleep
@@ -232,9 +232,7 @@ def _upload_jsonl_to_s3(s3_uri: str, body: BinaryIO) -> None:
         raise ValueError("REST_TABLE S3 materialization requires GISPULSE_S3_ENDPOINT")
 
     from gispulse.persistence.storage import S3Storage
-    from gispulse.persistence.tier import check_tier
 
-    check_tier("pro")
     storage = S3Storage(
         endpoint_url=settings.s3.endpoint,
         bucket=bucket,
@@ -283,9 +281,12 @@ class RestTableFetcher:
         s3_uri = _resolve_s3_materialize_uri(params)
         local_path = params.get("local_path")
         if s3_uri:
-            fh: BinaryIO = tempfile.SpooledTemporaryFile(
-                max_size=64 * 1024 * 1024,
-                mode="w+b",
+            fh = cast(
+                BinaryIO,
+                tempfile.SpooledTemporaryFile(
+                    max_size=64 * 1024 * 1024,
+                    mode="w+b",
+                ),
             )
         else:
             if not local_path:
