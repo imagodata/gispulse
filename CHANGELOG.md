@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Consolidate-networks capabilities (`cn_*` family,
+  `gispulse.capabilities.network_consolidate`).** Faithful pure-shapely port of
+  the QGIS *Consolidate Networks* plugin
+  (`github.com/sducournau/consolidate_networks`), bringing eight line-network
+  topology cleaners to every GISPulse surface without QGIS:
+  `cn_calculate_dbscan`, `cn_consolidate_with_dbscan`,
+  `cn_make_intersections_vertexes`, `cn_endpoints_trim_extend`,
+  `cn_endpoints_snapping`, `cn_hub_snapping`, `cn_snap_hubs_to_layer`,
+  `cn_snap_endpoints_to_layer`. All work in `crs_meters`, never mutate input,
+  and support `explode_and_gather` / `entity_identification_fields`; the two
+  `*_to_layer` capabilities take a reference layer via `ref_layer` → `ref_gdf`.
+
 ## [2.2.3]
 
 ### Added

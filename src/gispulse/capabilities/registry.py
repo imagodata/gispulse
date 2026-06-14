@@ -151,6 +151,7 @@ def _ensure_defaults_loaded() -> None:
             import gispulse.capabilities.vector  # noqa: F401
             import gispulse.capabilities.validation  # noqa: F401
             import gispulse.capabilities.network_topology  # noqa: F401
+            import gispulse.capabilities.network_consolidate  # noqa: F401
             import gispulse.capabilities.network_graph  # noqa: F401
             import gispulse.capabilities.network_components  # noqa: F401
             import gispulse.capabilities.polygon_topology  # noqa: F401
