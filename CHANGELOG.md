@@ -7,19 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-06-14
+
 ### Added
 
-- **Consolidate-networks capabilities (`cn_*` family,
-  `gispulse.capabilities.network_consolidate`).** Faithful pure-shapely port of
-  the QGIS *Consolidate Networks* plugin
+- **Manifest v3 orchestration suite (#440).** End-to-end pipeline runtime:
+  `PipelineRun` entity + lifecycle events on the EventHub (#442), run-completion
+  as a trigger source with scenario wiring (#445), run + validate manifest v3
+  pipelines over HTTP (#447), a step-kind registry with external subprocess
+  steps (#450), a run control surface — cancel / resume / partial execution
+  (#452), and non-capability steps + selectless models in manifest v3 (#454).
+- **Saved-map CRUD API (#405, #446).** Persist and reload maps — layers, styles,
+  view and filters — over the HTTP API.
+- **Consolidate-networks capabilities (`cn_*` family, #465).** Faithful
+  pure-shapely port of the QGIS *Consolidate Networks* plugin
   (`github.com/sducournau/consolidate_networks`), bringing eight line-network
   topology cleaners to every GISPulse surface without QGIS:
   `cn_calculate_dbscan`, `cn_consolidate_with_dbscan`,
   `cn_make_intersections_vertexes`, `cn_endpoints_trim_extend`,
   `cn_endpoints_snapping`, `cn_hub_snapping`, `cn_snap_hubs_to_layer`,
   `cn_snap_endpoints_to_layer`. All work in `crs_meters`, never mutate input,
-  and support `explode_and_gather` / `entity_identification_fields`; the two
+  support `explode_and_gather` / `entity_identification_fields`; the two
   `*_to_layer` capabilities take a reference layer via `ref_layer` → `ref_gdf`.
+- **`measure_spatial_impact` capability (#436).** Clip + overlap measurement for
+  feature × parcel impact checks.
+- **H3 multi-metric aggregation (#457).** Several metrics in a single H3 pass.
+- **New open-data source plugins.** `src-dpe` (energy performance, #422),
+  `src-ocsge` (land cover, #423), `src-sitadel` (building permits, #424), public
+  OSM + GRB sources with in-zip member reading via `/vsizip` (#459), and OSM PBF
+  road-tag extraction + `materialize_pbf` local download (#463).
+- **Geo commons primitives (#438).** Reusable HTTP / WFS / GeoJSON building
+  blocks and generic geo models.
+- **`write_pmtiles_pyramid` (#435).** Multi-LOD layers in a single PMTiles
+  archive.
+- **Universal loader for non-geo tabular sources (#449).** CSV/tabular inputs
+  flow through the same loader path.
+- **PG-direct building blocks (#432).** `ST_Subdivide` materializer + batched
+  DuckDB → PostGIS loader.
+- **Source readiness probe engine (#431)** with extensible probe kinds, and a
+  **bounded vector tiler (#430)** — bbox-tiled parallel ingest to parquet.
+- **Manifest-gated PostGIS column shed (#429, dry-run by default)**, **opt-in
+  DuckDB resource limits (memory/temp/threads, #427)**, a **unified source CLI
+  (#421)**, **`stream_vector_to_parquet` (#420)**, **CSV encoding detection with
+  fallback (#426)**, and **BulkIngestRunner skip-if-staged resume (#433)** plus
+  dept scope-stamp / `bulk_access_for` / GeoJSON aliases (#419).
+
+### Fixed
+
+- **Security audit 2026-06-09 (#418).** SQL injection, HTTP-router auth, zip-slip
+  (7z), SSRF and DoS hardening, plus CSV/XLSX write and COG export gaps.
+- **CDC v2.3.0 hardening (#441).** `pg_notify` DELETE/PK handling, composite
+  primary keys, and documentation drift.
+- **Scheduled pipelines actually execute their `pipeline_config` (#439).**
+- **Manifest path fixes.** Selectless models run in declaration order (#458);
+  cancel, heartbeat and timeout elevation on the manifest path (#456).
+- **Storage:** make the Garage backend explicit (#462).
+
+### Changed
+
+- **CI / supply-chain (#400, #401, #444).** SHA-pinned GitHub Actions,
+  least-privilege DCO, and `pyjwt` / `urllib3` bumps.
+- **Python baseline raised to 3.12+.** Dropped Python 3.11 support and aligned
+  the plugin template and ruff target accordingly.
 
 ## [2.2.3]
 
