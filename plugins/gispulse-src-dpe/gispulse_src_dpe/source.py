@@ -70,6 +70,7 @@ Géolocalisation / liaison foncier:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import replace
 import re
@@ -113,6 +114,11 @@ _CODE_DEPARTEMENT_RE = re.compile(
     rf"|{_CORSICA_DEPARTMENT_PATTERN}"
     rf"|{_OVERSEAS_DEPARTMENT_PATTERN})"
 )
+
+# RNB building ids are alphanumeric (e.g. "Z2BPZA9WPXFP"). Validating them keeps
+# the Lucene ``qs`` free of injection when scoping DPE to specific buildings.
+_RNB_FIELD = "id_rnb"
+_RNB_ID_RE = re.compile(r"[A-Za-z0-9]+")
 
 # Entries: entry_id → dataset config.
 # ``filter_field`` names the ADEME column used to filter at commune scope.
@@ -281,6 +287,28 @@ def _normalise_code(value: object, *, field: str, pattern: re.Pattern[str]) -> s
     return text
 
 
+def _rnb_qs_filter(id_rnb: str | Sequence[str], *, entry_id: str) -> str:
+    """Build the ``id_rnb:(A OR B)`` Lucene clause, validating each id.
+
+    Accepts a single id or a sequence; rejects empties and non-alphanumeric
+    values so nothing untrusted reaches the ``qs`` string.
+    """
+    raw_ids = [id_rnb] if isinstance(id_rnb, str) else list(id_rnb)
+    if not raw_ids:
+        raise ValueError(f"entry {entry_id!r}: id_rnb must be a non-empty id or sequence")
+    safe: list[str] = []
+    for raw in raw_ids:
+        value = str(raw).strip()
+        if not _RNB_ID_RE.fullmatch(value):
+            raise ValueError(
+                f"entry {entry_id!r}: invalid id_rnb {raw!r} (expected an alphanumeric RNB id)"
+            )
+        safe.append(value)
+    if len(safe) == 1:
+        return f"{_RNB_FIELD}:{safe[0]}"
+    return f"{_RNB_FIELD}:({' OR '.join(safe)})"
+
+
 def _probe_revision(dataset_id: str) -> str | None:
     """Return ``dataUpdatedAt`` from the ADEME data-fair dataset metadata API.
 
@@ -370,6 +398,7 @@ class DpeSource(DeclarativeSource):
         *,
         code_insee: str | None = None,
         code_departement: str | None = None,
+        id_rnb: str | Sequence[str] | None = None,
         local_path: str | None = None,
         s3_uri: str | None = None,
         s3_key: str | None = None,
@@ -377,12 +406,19 @@ class DpeSource(DeclarativeSource):
         """Build a per-query :class:`AccessSpec` for one spatial unit.
 
         The declarative entry carries the endpoint and its static query;
-        this helper folds in the runtime spatial key as a Lucene ``qs``
-        filter (``code_insee_ban:{code}`` or ``code_departement_ban:{dept}``),
-        which is the filter mechanism of the ADEME data-fair ``/lines`` API.
+        this helper folds in the runtime key as a Lucene ``qs`` filter, which is
+        the filter mechanism of the ADEME data-fair ``/lines`` API. Three scopes,
+        by decreasing breadth:
 
-        At least one of ``code_insee`` or ``code_departement`` must be provided.
-        ``code_insee`` takes precedence when both are given.
+        * ``id_rnb`` — one or more RNB building ids (``id_rnb:(A OR B)``). RNB ids
+          are nationally unique, so this pins the query to exactly those
+          buildings' diagnostics regardless of commune — the cheap way to attach
+          a DPE to a known parcel without paging a whole city's table.
+        * ``code_insee`` — ``code_insee_ban:{code}`` (commune).
+        * ``code_departement`` — ``code_departement_ban:{dept}``.
+
+        Exactly one scope must be given; ``id_rnb`` takes precedence, then
+        ``code_insee``, then ``code_departement``.
 
         No network — it only shapes the :class:`AccessSpec` the orchestrator
         hands to the :class:`RestTableFetcher`.
@@ -390,7 +426,9 @@ class DpeSource(DeclarativeSource):
         entry = self._entry(entry_id)
         spec = _ENTRIES[entry_id]
 
-        if code_insee is not None:
+        if id_rnb is not None:
+            qs_filter = _rnb_qs_filter(id_rnb, entry_id=entry_id)
+        elif code_insee is not None:
             code = _normalise_code(
                 code_insee, field="code_insee", pattern=_CODE_INSEE_RE
             )
@@ -404,7 +442,7 @@ class DpeSource(DeclarativeSource):
             qs_filter = f"{spec['dept_field']}:{dept}"
         else:
             raise ValueError(
-                f"entry {entry_id!r}: pass code_insee=<code> or "
+                f"entry {entry_id!r}: pass id_rnb=<ids>, code_insee=<code> or "
                 "code_departement=<dept>"
             )
 
