@@ -208,6 +208,35 @@ def test_access_for_code_insee_takes_precedence_over_departement(
     assert access.params["query"]["qs"] == "code_insee_ban:63113"
 
 
+def test_access_for_scopes_by_single_id_rnb(source: DpeSource) -> None:
+    access = source.access_for("logements-existants", id_rnb="Z2BPZA9WPXFP")
+    assert access.params["query"]["qs"] == "id_rnb:Z2BPZA9WPXFP"
+
+
+def test_access_for_scopes_by_multiple_id_rnb(source: DpeSource) -> None:
+    access = source.access_for(
+        "logements-existants", id_rnb=["Z2BPZA9WPXFP", "RWT57ZFCDWDM"]
+    )
+    assert access.params["query"]["qs"] == "id_rnb:(Z2BPZA9WPXFP OR RWT57ZFCDWDM)"
+
+
+def test_access_for_id_rnb_takes_precedence_over_code_insee(source: DpeSource) -> None:
+    access = source.access_for(
+        "logements-existants", id_rnb="Z2BPZA9WPXFP", code_insee="63113"
+    )
+    assert access.params["query"]["qs"] == "id_rnb:Z2BPZA9WPXFP"
+
+
+def test_access_for_rejects_unsafe_id_rnb(source: DpeSource) -> None:
+    with pytest.raises(ValueError, match="id_rnb"):
+        source.access_for("logements-existants", id_rnb="ABC OR *:*")
+
+
+def test_access_for_rejects_empty_id_rnb_sequence(source: DpeSource) -> None:
+    with pytest.raises(ValueError, match="id_rnb"):
+        source.access_for("logements-existants", id_rnb=[])
+
+
 def test_access_for_preserves_static_page_size(source: DpeSource) -> None:
     access = source.access_for("logements-existants", code_insee="63113")
     assert access.params["query"]["size"] == 10000
