@@ -610,3 +610,272 @@ class STDBSCANClusterCapability(Capability):
             },
             "required": ["time_col"],
         }
+
+
+# ---------------------------------------------------------------------------
+# Balanced (size-bounded) K-Means
+# ---------------------------------------------------------------------------
+#
+# Pure-numpy port of a size-constrained partitioner: deterministic k-means
+# (k-means++ init + Lloyd), then a split/merge rebalance that forces every
+# cluster into ``[min_size, max_size]``. Faithful to the source algorithm
+# (``partition_sites``); here it operates directly on the projected centroids
+# returned by :func:`_coords_from_gdf` rather than on domain objects.
+
+
+def _kmeans_plusplus_init(
+    points: np.ndarray, k: int, rng: np.random.Generator
+) -> np.ndarray:
+    """k-means++ seeding — return the row indices of *k* initial centers."""
+    n = points.shape[0]
+    first = int(rng.integers(n))
+    centers = [first]
+    closest_sq = np.sum((points - points[first]) ** 2, axis=1)
+    for _ in range(1, k):
+        total = float(closest_sq.sum())
+        if total <= 0.0:
+            # All points coincide with an existing center: fill arbitrarily
+            # but stably.
+            remaining = [i for i in range(n) if i not in centers]
+            centers.append(remaining[0] if remaining else centers[-1])
+            continue
+        probs = closest_sq / total
+        nxt = int(rng.choice(n, p=probs))
+        centers.append(nxt)
+        dist_sq = np.sum((points - points[nxt]) ** 2, axis=1)
+        closest_sq = np.minimum(closest_sq, dist_sq)
+    return np.array(centers, dtype=int)
+
+
+def _lloyd(
+    points: np.ndarray, k: int, rng: np.random.Generator, iters: int = 100
+) -> np.ndarray:
+    """Lloyd's k-means; one label per point. Centers seeded with k-means++."""
+    n = points.shape[0]
+    if k >= n:
+        return np.arange(n, dtype=int)
+    centers = points[_kmeans_plusplus_init(points, k, rng)].copy()
+    labels = np.zeros(n, dtype=int)
+    for i in range(iters):
+        # Assign to the nearest center (deterministic tie-break via argmin).
+        d = np.sum((points[:, None, :] - centers[None, :, :]) ** 2, axis=2)
+        new_labels = np.argmin(d, axis=1)
+        if np.array_equal(new_labels, labels) and i > 0:
+            break
+        labels = new_labels
+        for c in range(k):
+            members = points[labels == c]
+            if len(members) > 0:
+                centers[c] = members.mean(axis=0)
+            # Empty cluster: keep the old center (stable; resolved on rebalance).
+    return labels
+
+
+def _choose_k(n: int, min_size: int, max_size: int) -> int:
+    """k so the mean cluster size lands mid-``[min_size, max_size]``, bounded feasible."""
+    if n <= max_size:
+        return 1
+    k_lo = -(-n // max_size)  # ceil(n / max_size): lower bound honouring max
+    k_hi = max(k_lo, n // min_size)  # floor(n / min_size): upper bound honouring min
+    target = (min_size + max_size) / 2.0
+    k = round(n / target)
+    return int(min(max(k, k_lo), k_hi))
+
+
+def _compact_relabel(labels: np.ndarray) -> np.ndarray:
+    """Renumber 0..K-1 deterministically (clusters by size desc, then id)."""
+    uniq = sorted(
+        np.unique(labels).tolist(), key=lambda c: (-int((labels == c).sum()), c)
+    )
+    remap = {old: new for new, old in enumerate(uniq)}
+    return np.array([remap[int(c)] for c in labels], dtype=int)
+
+
+def _rebalance(
+    points: np.ndarray,
+    labels: np.ndarray,
+    min_size: int,
+    max_size: int,
+    rng: np.random.Generator,
+    max_passes: int = 50,
+) -> np.ndarray:
+    """Force every cluster into ``[min_size, max_size]`` by split (2-means) / merge.
+
+    Irreducible remainder tolerated: with ``n < min_size`` the min bound cannot
+    be met (a single cluster remains).
+    """
+    labels = labels.copy()
+    for _ in range(max_passes):
+        sizes = {c: int((labels == c).sum()) for c in np.unique(labels)}
+        # 1) Split the largest cluster above max_size.
+        over = [c for c, s in sizes.items() if s > max_size]
+        if over:
+            c = max(over, key=lambda c: sizes[c])
+            idx = np.where(labels == c)[0]
+            sub = _lloyd(points[idx], 2, rng)
+            new_id = (labels.max() + 1) if len(labels) else 0
+            labels[idx[sub == 1]] = new_id
+            continue
+        # 2) Merge a below-min cluster into the nearest centroid (with margin).
+        under = [c for c, s in sizes.items() if s < min_size]
+        if under and len(sizes) > 1:
+            c = min(under, key=lambda c: sizes[c])
+            idx = np.where(labels == c)[0]
+            centroid = points[idx].mean(axis=0)
+            others = [o for o in sizes if o != c]
+            # Target: the nearest that stays within max_size after absorption;
+            # failing that, the nearest outright (re-split next pass). Explicit
+            # loop (no closure capturing the loop var, cf. ruff B023).
+            best_o = others[0]
+            best_score: tuple[int, float] | None = None
+            for o in others:
+                cent_o = points[labels == o].mean(axis=0)
+                dist_sq = float(np.sum((cent_o - centroid) ** 2))
+                overflow = 1 if sizes[o] + sizes[c] > max_size else 0
+                score = (overflow, dist_sq)
+                if best_score is None or score < best_score:
+                    best_score = score
+                    best_o = o
+            labels[idx] = best_o
+            continue
+        break
+    return _compact_relabel(labels)
+
+
+@register
+class BalancedKMeansClusterCapability(Capability):
+    """Size-balanced K-Means — clusters bounded to ``[min_size, max_size]``."""
+
+    name = "cluster_balanced_kmeans"
+    description = (
+        "Balanced K-Means — partition geometry centroids into clusters whose "
+        "size is bounded in [min_size, max_size]. Deterministic k-means++ / "
+        "Lloyd followed by a split/merge rebalance. Unlike 'cluster_kmeans' it "
+        "enforces per-cluster size bounds; k is chosen automatically from "
+        "min_size/max_size. When the split/merge rebalance cannot meet the "
+        "bounds — infeasible for the point count (e.g. min_size == max_size not "
+        "dividing n) or a cluster of excess co-located/duplicate points that "
+        "cannot be split — it raises a ValueError listing the out-of-bounds "
+        "clusters, rather than returning an out-of-contract result silently. "
+        "Adds a 'cluster' column."
+    )
+
+    def execute(
+        self,
+        gdf: gpd.GeoDataFrame,
+        min_size: int = 20,
+        max_size: int = 50,
+        cluster_col: str = "cluster",
+        random_state: int = 42,
+        crs_meters: str = "EPSG:3857",
+        **_,
+    ) -> gpd.GeoDataFrame:
+        """
+        Args:
+            gdf:          Input GeoDataFrame (non-point geometries use their
+                          centroid).
+            min_size:     Lower bound on cluster size (>= 1). A leftover
+                          cluster below this is tolerated only when
+                          ``len(gdf) < min_size`` (nothing to merge into).
+            max_size:     Upper bound on cluster size (>= min_size).
+            cluster_col:  Output cluster id column name.
+            random_state: Reproducibility seed (k-means++ init and splits).
+            crs_meters:   Metric CRS used for the centroid geometry.
+
+        Returns:
+            Copy of *gdf* with an added integer *cluster_col*, renumbered
+            0..K-1 by descending cluster size then id (deterministic). Every
+            cluster satisfies ``[min_size, max_size]``, except the single
+            leftover cluster tolerated when ``len(gdf) < min_size``.
+
+        Raises:
+            ValueError: ``min_size < 1`` or ``min_size > max_size``; or the
+                split/merge rebalance cannot enforce ``[min_size, max_size]``
+                for this point set — infeasible bounds for the point count
+                (e.g. ``min_size == max_size`` not dividing n) or a cluster of
+                excess co-located/duplicate points that cannot be split. The
+                error lists the out-of-bounds clusters and their sizes with a
+                recovery hint; the bound guarantee is never violated silently.
+        """
+        if min_size < 1:
+            raise ValueError("min_size must be >= 1.")
+        if min_size > max_size:
+            raise ValueError(f"min_size ({min_size}) > max_size ({max_size}).")
+
+        if gdf.empty:
+            out = gdf.copy()
+            out[cluster_col] = np.array([], dtype=np.int64)
+            return out
+
+        coords = _coords_from_gdf(gdf, crs_meters)
+        n = coords.shape[0]
+        rng = np.random.default_rng(random_state)
+
+        k = _choose_k(n, min_size, max_size)
+        labels = _lloyd(coords, k, rng) if k > 1 else np.zeros(n, dtype=int)
+        labels = _rebalance(coords, labels, min_size, max_size, rng)
+
+        # Enforce the hard [min_size, max_size] guarantee at the boundary (AX
+        # #5 validate before returning, #4 machine-readable error). The
+        # split/merge rebalance cannot always converge — infeasible bounds for
+        # this n (e.g. min_size == max_size not dividing n), or a cluster of
+        # excess co-located/duplicate points that k-means++ cannot split (the
+        # 2-means split of coincident points is a no-op) — and would otherwise
+        # return an out-of-contract result silently. The only excused
+        # violation is the documented irreducible remainder: with
+        # n < min_size there is nothing to merge into, so a single undersized
+        # cluster is tolerated.
+        sizes = {int(c): int((labels == c).sum()) for c in np.unique(labels)}
+        excused = n < min_size and len(sizes) == 1
+        if not excused:
+            offending = {
+                c: s for c, s in sizes.items() if s < min_size or s > max_size
+            }
+            if offending:
+                raise ValueError(
+                    "cluster_balanced_kmeans: cannot enforce cluster size "
+                    f"bounds [{min_size}, {max_size}] for n={n} points — "
+                    f"out-of-bounds clusters (cluster_id: size): {offending}. "
+                    "The bounds are infeasible for this point set: either "
+                    "min_size == max_size does not divide n, or a cluster holds "
+                    "more than max_size co-located/duplicate points that cannot "
+                    "be split. Recovery: increase max_size, reduce min_size, "
+                    "widen the [min_size, max_size] range, or de-duplicate the "
+                    "co-located points."
+                )
+
+        out = gdf.copy()
+        out[cluster_col] = labels.astype(np.int64)
+        return out
+
+    def get_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "min_size": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 20,
+                    "description": "Lower bound on cluster size.",
+                },
+                "max_size": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 50,
+                    "description": "Upper bound on cluster size (>= min_size).",
+                },
+                "cluster_col": {
+                    "type": "string",
+                    "default": "cluster",
+                    "description": "Output column name.",
+                },
+                "random_state": {
+                    "type": "integer",
+                    "default": 42,
+                },
+                "crs_meters": {
+                    "type": "string",
+                    "default": "EPSG:3857",
+                },
+            },
+        }
