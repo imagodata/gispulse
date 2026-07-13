@@ -536,6 +536,7 @@ Install via `pip install "gispulse[cluster]"`. Each capability adds a `cluster` 
 | `cluster_kmeans` | K-Means on geometry centroids. | `k`, `random_state` |
 | `cluster_dbscan` | Density-based DBSCAN. | `eps`, `min_samples` |
 | `cluster_hdbscan` | Hierarchical HDBSCAN, varying densities. | `min_cluster_size`, `min_samples` |
+| `cluster_balanced_kmeans` | Balanced K-Means: cluster sizes bounded to `[min_size, max_size]` (pure numpy, no scikit-learn). | `min_size`, `max_size`, `random_state` |
 
 ```json
 { "capability": "cluster_dbscan", "config": { "eps": 200, "min_samples": 5 } }
@@ -659,6 +660,7 @@ Requires `networkx` and a Pro license.
 | `mst` | Minimum spanning tree of a line network. | `weight_col` |
 | `network_allocation` | Allocates demand points to the nearest supply node on the network. | `supply_layer`, `weight_col`, `max_cost` |
 | `connectivity_check` | Ensures the network forms a connected graph and returns connected components. | — |
+| `network_greedy_expansion` | Greedy multi-source expansion: absorbs at each step the reachable node of minimal marginal cost (edge weight + node activation cost). | `ref_layers` (frontier, costs), `cost_col`, `weight_col` |
 
 ```json
 {
@@ -718,12 +720,12 @@ The DSN is never read from `config` — it is resolved from `GISPULSE_POSTGIS_DS
 | Classification & styling | 8 | Community | `mapclassify` (for jenks) |
 | Spatial statistics | 3 | Community | — |
 | Density & tessellation | 3 | Community | — |
-| Clustering | 3 | Community | `gispulse[cluster]` (`scikit-learn`, `hdbscan`) |
+| Clustering | 4 | Community | `gispulse[cluster]` (`scikit-learn`, `hdbscan`) |
 | Line-network topology | 5 | Community | — |
 | Polygon topology | 4 | Community | — |
 | 3D Pointcloud | 4 | Community | `gispulse[pointcloud]` (`laspy`, `lazrs`) |
 | Raster | 6 | **Pro** | `gispulse[raster]` (`rasterio`, `rasterstats`) |
-| Network analysis | 6 | **Pro** | `gispulse[network]` (`networkx`) |
+| Network analysis | 7 | **Pro** | `gispulse[network]` (`networkx`) |
 | PostGIS SQL | 1 | **Pro** | `gispulse[postgis]` + DSN |
 | **Total** | **118** | | |
 

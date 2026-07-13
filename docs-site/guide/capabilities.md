@@ -536,6 +536,7 @@ Installable via `pip install "gispulse[cluster]"`. Chaque cap ajoute une colonne
 | `cluster_kmeans` | K-Means sur les centroïdes. | `k`, `random_state` |
 | `cluster_dbscan` | DBSCAN density-based. | `eps`, `min_samples` |
 | `cluster_hdbscan` | HDBSCAN hiérarchique, densités variables. | `min_cluster_size`, `min_samples` |
+| `cluster_balanced_kmeans` | K-Means équilibré : taille des clusters bornée dans `[min_size, max_size]` (pur numpy, sans scikit-learn). | `min_size`, `max_size`, `random_state` |
 
 ```json
 { "capability": "cluster_dbscan", "config": { "eps": 200, "min_samples": 5 } }
@@ -659,6 +660,7 @@ Nécessite `networkx` et une licence Pro.
 | `mst` | Arbre couvrant minimum d'un réseau linéaire. | `weight_col` |
 | `network_allocation` | Alloue points de demande ↔ offre les plus proches sur le réseau. | `supply_layer`, `weight_col`, `max_cost` |
 | `connectivity_check` | Vérifie que le réseau forme un graphe connecté et retourne les composantes. | — |
+| `network_greedy_expansion` | Expansion gloutonne multi-sources : absorbe à chaque pas le nœud atteignable au coût marginal minimal (poids d'arête + coût d'activation du nœud). | `ref_layers` (frontière, coûts), `cost_col`, `weight_col` |
 
 ```json
 {
@@ -718,12 +720,12 @@ Le DSN n'est jamais lu depuis `config` — il est résolu depuis `GISPULSE_POSTG
 | Classification & styling | 8 | Community | `mapclassify` (pour jenks) |
 | Statistiques spatiales | 3 | Community | — |
 | Densité & tessellation | 3 | Community | — |
-| Clustering | 3 | Community | `gispulse[cluster]` (`scikit-learn`, `hdbscan`) |
+| Clustering | 4 | Community | `gispulse[cluster]` (`scikit-learn`, `hdbscan`) |
 | Topologie — lignes | 5 | Community | — |
 | Topologie — polygones | 4 | Community | — |
 | 3D Pointcloud | 4 | Community | `gispulse[pointcloud]` (`laspy`, `lazrs`) |
 | Raster | 6 | **Pro** | `gispulse[raster]` (`rasterio`, `rasterstats`) |
-| Réseau — analyse | 6 | **Pro** | `gispulse[network]` (`networkx`) |
+| Réseau — analyse | 7 | **Pro** | `gispulse[network]` (`networkx`) |
 | PostGIS SQL | 1 | **Pro** | `gispulse[postgis]` + DSN |
 | **Total** | **118** | | |
 
