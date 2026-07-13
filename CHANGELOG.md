@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`network_redundancy` capability.** Per-site redundancy audit: for every
+  input point, counts the mutually disjoint routes (capped at `k`, default
+  2) through a line network to a set of facility points — 0 = unreachable,
+  1 = single point of failure, `k` = protected. `ref_layers` lists
+  `[network, facilities]`; same Suurballe engine as `disjoint_paths`
+  (`mode="node"`/`"edge"`), with per-component facility grouping and
+  co-located-site memoization. Pro tier.
+- **`reseau_expansion_resilience` pipeline template.** First template
+  composing the newly ported network capabilities end-to-end: connected
+  components → bridge tagging (structural SPOFs) → per-site redundancy
+  audit against source facilities → SPOF filter → greedy marginal-cost
+  expansion order from the facilities.
 - **`calibrate_detour_bands` capability.** Closes the routing loop: feed it
   routed observations (typically the output of `route_pairs` with
   `provider="osrm"`) and it recalibrates the detour ("tortuosity") factors —

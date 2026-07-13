@@ -663,6 +663,7 @@ Nécessite `networkx` et une licence Pro.
 | `network_greedy_expansion` | Expansion gloutonne multi-sources : absorbe à chaque pas le nœud atteignable au coût marginal minimal (poids d'arête + coût d'activation du nœud). | `ref_layers` (frontière, coûts), `cost_col`, `weight_col` |
 | `disjoint_paths` | K chemins mutuellement disjoints (nœuds ou arêtes) de coût total minimal entre deux points (Suurballe) ; moins de `k` chemins trouvés = signal SPOF, pas une erreur. | `k`, `mode`, `weight_col` |
 | `network_bridges` | Marque chaque ligne dont la suppression déconnecte sa composante (pont / SPOF structurel, Tarjan itératif) ; les lignes parallèles ne sont jamais des ponts. | `bridge_col`, `snap_decimals` |
+| `network_redundancy` | Audit de redondance par site : compte les routes disjointes (plafonné à `k`) de chaque point vers un ensemble d'installations — 0 = injoignable, 1 = SPOF, k = protégé (Suurballe). | `ref_layers` (réseau, installations), `k`, `mode` |
 | `route_pairs` | Route des paires de points par la voirie sans couche réseau : estimation tortuosité hors-ligne (défaut), instance OSRM (avec planchage des drops dégénérés), ou cache GeoParquet pré-routé. | `provider`, `tortuosity_bands`, `osrm_endpoint`, `on_no_route` |
 | `calibrate_detour_bands` | Recale les facteurs de détour de `route_pairs` contre des distances routées réelles : médiane des ratios routé/vol-d'oiseau par palier (bornes conservées). | `bands`, `straight_col`, `routed_col`, `min_straight_m` |
 | `sample_surface_along_lines` | Segmente chaque ligne par classe de surface traversée (référencement linéaire) : tronçons homogènes ordonnés avec longueur, part et sous-géométrie ; recouvrements résolus par ordre de couche ou liste de priorité. | `class_col`, `fallback_class`, `priority` |
@@ -730,7 +731,7 @@ Le DSN n'est jamais lu depuis `config` — il est résolu depuis `GISPULSE_POSTG
 | Topologie — polygones | 4 | Community | — |
 | 3D Pointcloud | 4 | Community | `gispulse[pointcloud]` (`laspy`, `lazrs`) |
 | Raster | 6 | **Pro** | `gispulse[raster]` (`rasterio`, `rasterstats`) |
-| Réseau — analyse | 12 | **Pro** | `gispulse[network]` (`networkx`) |
+| Réseau — analyse | 13 | **Pro** | `gispulse[network]` (`networkx`) |
 | PostGIS SQL | 1 | **Pro** | `gispulse[postgis]` + DSN |
 | **Total** | **118** | | |
 
