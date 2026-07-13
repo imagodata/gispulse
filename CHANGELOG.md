@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Road-routing providers + `route_pairs` capability.** New
+  `gispulse.core.routing_providers` module — a `RoutingProvider` abstraction
+  (distance + trace between two points of a caller-chosen CRS) with three
+  implementations: `TortuosityProvider` (offline: straight-line × calibrated
+  detour factor per distance band), `OSRMProvider` (real road routing over
+  httpx — `/route` per pair and `/table` batch matrices, degenerate-drop
+  flooring back to the tortuosity bands when OSRM snaps both endpoints onto
+  the same road node, thread-safe drop telemetry), and
+  `CachedRoutingProvider` (pre-routed GeoParquet keyed by canonical
+  geometric pair keys, direction-independent, with read-side repair of
+  degenerate stored traces and provenance of baked tortuosity fallbacks).
+  Errors are machine-readable (`RoutingError` with `code` + `context`). The
+  `route_pairs` capability (Pro) bridges them into pipelines: one line per
+  point pair with `distance_m`, `straight_m` and `routing_source`;
+  `on_no_route="skip"` drops only the genuinely unroutable pairs while
+  infrastructure failures still raise.
 - **`disjoint_paths` capability.** K mutually disjoint paths of minimum
   **total** cost between two points through a line network (Suurballe —
   successive shortest paths with Johnson potentials on a split-node residual

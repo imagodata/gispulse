@@ -663,6 +663,7 @@ Requires `networkx` and a Pro license.
 | `network_greedy_expansion` | Greedy multi-source expansion: absorbs at each step the reachable node of minimal marginal cost (edge weight + node activation cost). | `ref_layers` (frontier, costs), `cost_col`, `weight_col` |
 | `disjoint_paths` | K mutually disjoint paths (node or edge mode) of minimum total cost between two points (Suurballe); fewer than `k` paths found is the SPOF signal, not an error. | `k`, `mode`, `weight_col` |
 | `network_bridges` | Tags every line whose removal disconnects its component (bridge / structural SPOF, iterative Tarjan); parallel lines are never bridges. | `bridge_col`, `snap_decimals` |
+| `route_pairs` | Routes point pairs over the road network without a line layer: offline tortuosity estimate (default), an OSRM instance (with degenerate-drop flooring), or a pre-routed GeoParquet cache. | `provider`, `tortuosity_bands`, `osrm_endpoint`, `on_no_route` |
 
 ```json
 {
@@ -727,7 +728,7 @@ The DSN is never read from `config` — it is resolved from `GISPULSE_POSTGIS_DS
 | Polygon topology | 4 | Community | — |
 | 3D Pointcloud | 4 | Community | `gispulse[pointcloud]` (`laspy`, `lazrs`) |
 | Raster | 6 | **Pro** | `gispulse[raster]` (`rasterio`, `rasterstats`) |
-| Network analysis | 9 | **Pro** | `gispulse[network]` (`networkx`) |
+| Network analysis | 10 | **Pro** | `gispulse[network]` (`networkx`) |
 | PostGIS SQL | 1 | **Pro** | `gispulse[postgis]` + DSN |
 | **Total** | **118** | | |
 
