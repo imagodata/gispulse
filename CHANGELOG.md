@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`disjoint_paths` capability.** K mutually disjoint paths of minimum
+  **total** cost between two points through a line network (Suurballe —
+  successive shortest paths with Johnson potentials on a split-node residual
+  graph). `mode="node"` (default) forbids sharing interior nodes,
+  `mode="edge"` only forbids sharing edges. Finding fewer than `k` paths is
+  reported through the `paths_found` column rather than raised: the shortfall
+  *is* the single-point-of-failure signal. Finds pairs that a naive
+  remove-first-path-then-retry scan provably misses. Pure Python,
+  deterministic, NaN/negative-weight fast-fail. Pro tier.
+- **`network_bridges` capability.** Tags every line whose removal disconnects
+  its component (bridge / cut-edge — the structural SPOFs of a network) with
+  a boolean `is_bridge` column. Iterative Tarjan over the endpoint graph with
+  per-edge identity, so parallel lines between the same two nodes are never
+  bridges; multi-part rows are flagged when any part is a bridge. A connected
+  network with no bridge is 2-edge-connected (survives any single line
+  failure). Dependency-free (no networkx). Pro tier.
 - **`network_greedy_expansion` capability.** Greedy multi-source Prim-style
   network expansion with a per-node activation cost. Grows a tree/forest out
   of a set of frontier (root) nodes, absorbing at each step the reachable node

@@ -661,6 +661,8 @@ Nécessite `networkx` et une licence Pro.
 | `network_allocation` | Alloue points de demande ↔ offre les plus proches sur le réseau. | `supply_layer`, `weight_col`, `max_cost` |
 | `connectivity_check` | Vérifie que le réseau forme un graphe connecté et retourne les composantes. | — |
 | `network_greedy_expansion` | Expansion gloutonne multi-sources : absorbe à chaque pas le nœud atteignable au coût marginal minimal (poids d'arête + coût d'activation du nœud). | `ref_layers` (frontière, coûts), `cost_col`, `weight_col` |
+| `disjoint_paths` | K chemins mutuellement disjoints (nœuds ou arêtes) de coût total minimal entre deux points (Suurballe) ; moins de `k` chemins trouvés = signal SPOF, pas une erreur. | `k`, `mode`, `weight_col` |
+| `network_bridges` | Marque chaque ligne dont la suppression déconnecte sa composante (pont / SPOF structurel, Tarjan itératif) ; les lignes parallèles ne sont jamais des ponts. | `bridge_col`, `snap_decimals` |
 
 ```json
 {
@@ -725,7 +727,7 @@ Le DSN n'est jamais lu depuis `config` — il est résolu depuis `GISPULSE_POSTG
 | Topologie — polygones | 4 | Community | — |
 | 3D Pointcloud | 4 | Community | `gispulse[pointcloud]` (`laspy`, `lazrs`) |
 | Raster | 6 | **Pro** | `gispulse[raster]` (`rasterio`, `rasterstats`) |
-| Réseau — analyse | 7 | **Pro** | `gispulse[network]` (`networkx`) |
+| Réseau — analyse | 9 | **Pro** | `gispulse[network]` (`networkx`) |
 | PostGIS SQL | 1 | **Pro** | `gispulse[postgis]` + DSN |
 | **Total** | **118** | | |
 

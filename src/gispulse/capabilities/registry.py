@@ -171,6 +171,10 @@ def _ensure_defaults_loaded() -> None:
             except ImportError:
                 pass
             try:
+                import gispulse.capabilities.network_resilience  # noqa: F401
+            except ImportError:
+                pass
+            try:
                 import gispulse.capabilities.postgis_sql  # noqa: F401
             except ImportError:
                 pass
