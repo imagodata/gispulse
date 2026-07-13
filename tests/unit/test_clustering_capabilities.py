@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import geopandas as gpd
+import numpy as np
 import pytest
 from shapely.geometry import Point, Polygon
 
 from gispulse.capabilities.clustering import (
+    BalancedKMeansClusterCapability,
     DBSCANClusterCapability,
     HDBSCANClusterCapability,
     KMeansClusterCapability,
@@ -135,3 +137,120 @@ class TestHDBSCAN:
         result = HDBSCANClusterCapability().execute(empty)
         assert len(result) == 0
         assert "cluster" in result.columns
+
+
+@pytest.fixture
+def asymmetric_blobs() -> gpd.GeoDataFrame:
+    """A 47-point blob near the origin + a 3-point blob far away (50 points)."""
+    rng = np.random.default_rng(123)
+    big = rng.normal(loc=(0.0, 0.0), scale=30.0, size=(47, 2))
+    small = rng.normal(loc=(5000.0, 5000.0), scale=10.0, size=(3, 2))
+    coords = np.vstack([big, small])
+    return gpd.GeoDataFrame(
+        {"id": list(range(len(coords)))},
+        geometry=[Point(float(x), float(y)) for x, y in coords],
+        crs="EPSG:2154",
+    )
+
+
+class TestBalancedKMeans:
+
+    def test_size_bounds_respected(self, asymmetric_blobs):
+        result = BalancedKMeansClusterCapability().execute(
+            asymmetric_blobs, min_size=10, max_size=20, crs_meters="EPSG:2154"
+        )
+        counts = result["cluster"].value_counts()
+        assert counts.min() >= 10
+        assert counts.max() <= 20
+        # Every point labelled, no gaps in the 0..K-1 numbering.
+        labels = sorted(result["cluster"].unique().tolist())
+        assert labels == list(range(len(labels)))
+
+    def test_deterministic_labels(self, asymmetric_blobs):
+        a = BalancedKMeansClusterCapability().execute(
+            asymmetric_blobs, min_size=10, max_size=20, crs_meters="EPSG:2154"
+        )
+        b = BalancedKMeansClusterCapability().execute(
+            asymmetric_blobs, min_size=10, max_size=20, crs_meters="EPSG:2154"
+        )
+        assert (a["cluster"].to_numpy() == b["cluster"].to_numpy()).all()
+
+    def test_min_greater_than_max_raises(self, asymmetric_blobs):
+        with pytest.raises(ValueError, match="min_size"):
+            BalancedKMeansClusterCapability().execute(
+                asymmetric_blobs, min_size=30, max_size=20
+            )
+
+    def test_empty_gdf(self):
+        empty = gpd.GeoDataFrame({"geometry": []}, crs="EPSG:2154")
+        result = BalancedKMeansClusterCapability().execute(empty)
+        assert len(result) == 0
+        assert "cluster" in result.columns
+
+    def test_single_cluster_when_small(self):
+        """n <= max_size → a single cluster (k == 1)."""
+        gdf = gpd.GeoDataFrame(
+            {"id": list(range(15))},
+            geometry=[Point(float(i), 0.0) for i in range(15)],
+            crs="EPSG:2154",
+        )
+        result = BalancedKMeansClusterCapability().execute(
+            gdf, min_size=10, max_size=20, crs_meters="EPSG:2154"
+        )
+        assert set(result["cluster"]) == {0}
+
+    def test_excess_duplicate_points_raise(self):
+        """Excess co-located points that cannot be split → explicit ValueError.
+
+        25 identical points with max_size=20 collapse into one cluster the
+        2-means split cannot separate (coincident k-means++ centres → a no-op
+        split). The bound guarantee must surface as an actionable error rather
+        than be violated silently (an out-of-bounds cluster of 25).
+        """
+        gdf = gpd.GeoDataFrame(
+            {"id": list(range(25))},
+            geometry=[Point(0.0, 0.0) for _ in range(25)],
+            crs="EPSG:2154",
+        )
+        with pytest.raises(ValueError, match="cluster size bounds"):
+            BalancedKMeansClusterCapability().execute(
+                gdf, min_size=5, max_size=20, crs_meters="EPSG:2154"
+            )
+
+    def test_infeasible_bounds_raise(self):
+        """min_size == max_size not dividing n → no valid partition → ValueError.
+
+        No partition of 10 points into clusters all of size exactly 7 exists, so
+        the split/merge rebalance oscillates and must fail loudly instead of
+        returning under/over-sized clusters silently.
+        """
+        gdf = gpd.GeoDataFrame(
+            {"id": list(range(10))},
+            geometry=[Point(float(i * 1000), 0.0) for i in range(10)],
+            crs="EPSG:2154",
+        )
+        with pytest.raises(ValueError, match="cluster size bounds"):
+            BalancedKMeansClusterCapability().execute(
+                gdf, min_size=7, max_size=7, crs_meters="EPSG:2154"
+            )
+
+    def test_feasible_bounds_do_not_raise(self):
+        """Well-separated points with feasible bounds succeed (no false positive)."""
+        rng = np.random.default_rng(7)
+        coords = np.vstack(
+            [
+                rng.normal(loc=(0.0, 0.0), scale=20.0, size=(20, 2)),
+                rng.normal(loc=(5000.0, 0.0), scale=20.0, size=(20, 2)),
+            ]
+        )
+        gdf = gpd.GeoDataFrame(
+            {"id": list(range(len(coords)))},
+            geometry=[Point(float(x), float(y)) for x, y in coords],
+            crs="EPSG:2154",
+        )
+        result = BalancedKMeansClusterCapability().execute(
+            gdf, min_size=10, max_size=20, crs_meters="EPSG:2154"
+        )
+        counts = result["cluster"].value_counts()
+        assert counts.min() >= 10
+        assert counts.max() <= 20

@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Road-routing providers + `route_pairs` capability.** New
+  `gispulse.core.routing_providers` module — a `RoutingProvider` abstraction
+  (distance + trace between two points of a caller-chosen CRS) with three
+  implementations: `TortuosityProvider` (offline: straight-line × calibrated
+  detour factor per distance band), `OSRMProvider` (real road routing over
+  httpx — `/route` per pair and `/table` batch matrices, degenerate-drop
+  flooring back to the tortuosity bands when OSRM snaps both endpoints onto
+  the same road node, thread-safe drop telemetry), and
+  `CachedRoutingProvider` (pre-routed GeoParquet keyed by canonical
+  geometric pair keys, direction-independent, with read-side repair of
+  degenerate stored traces and provenance of baked tortuosity fallbacks).
+  Errors are machine-readable (`RoutingError` with `code` + `context`). The
+  `route_pairs` capability (Pro) bridges them into pipelines: one line per
+  point pair with `distance_m`, `straight_m` and `routing_source`;
+  `on_no_route="skip"` drops only the genuinely unroutable pairs while
+  infrastructure failures still raise.
+- **`disjoint_paths` capability.** K mutually disjoint paths of minimum
+  **total** cost between two points through a line network (Suurballe —
+  successive shortest paths with Johnson potentials on a split-node residual
+  graph). `mode="node"` (default) forbids sharing interior nodes,
+  `mode="edge"` only forbids sharing edges. Finding fewer than `k` paths is
+  reported through the `paths_found` column rather than raised: the shortfall
+  *is* the single-point-of-failure signal. Finds pairs that a naive
+  remove-first-path-then-retry scan provably misses. Pure Python,
+  deterministic, NaN/negative-weight fast-fail. Pro tier.
+- **`network_bridges` capability.** Tags every line whose removal disconnects
+  its component (bridge / cut-edge — the structural SPOFs of a network) with
+  a boolean `is_bridge` column. Iterative Tarjan over the endpoint graph with
+  per-edge identity, so parallel lines between the same two nodes are never
+  bridges; multi-part rows are flagged when any part is a bridge. A connected
+  network with no bridge is 2-edge-connected (survives any single line
+  failure). Dependency-free (no networkx). Pro tier.
+- **`network_greedy_expansion` capability.** Greedy multi-source Prim-style
+  network expansion with a per-node activation cost. Grows a tree/forest out
+  of a set of frontier (root) nodes, absorbing at each step the reachable node
+  of minimal marginal cost (edge weight + target activation cost). Unlike
+  `mst` (spans everything, no roots) and `steiner_tree` (connects a fixed
+  terminal set), it starts from multiple roots, has no mandatory targets, and
+  charges a one-off activation cost per node. Frontier via `ref_layer`; optional
+  per-node activation costs via a second `ref_layers` entry (`cost_col`). The
+  frontier and activation-cost layers are each reprojected onto the network's
+  working CRS on their own CRS gap — independently of whether the network
+  itself needed reprojection — so a frontier/cost layer supplied in a different
+  CRS from a projected network is aligned rather than mismatched (frontier
+  match failing, or cost silently dropped). Pure `heapq` implementation with a
+  deterministic tie-break and a NaN-cost fast-fail (`inf` allowed). Pro-tier,
+  works offline like its `network.py` siblings.
+- **`cluster_balanced_kmeans` capability.** Size-bounded K-Means: partitions
+  geometry centroids into clusters whose size stays within `[min_size,
+  max_size]`. Deterministic k-means++ / Lloyd followed by a split/merge
+  rebalance; `k` is chosen automatically from the size bounds. Unlike
+  `cluster_kmeans` it enforces per-cluster size bounds — and when the rebalance
+  cannot meet them (bounds infeasible for the point count, e.g.
+  `min_size == max_size` not dividing `n`, or a cluster of excess
+  co-located/duplicate points that cannot be split) it raises an explicit
+  `ValueError` listing the out-of-bounds clusters rather than returning an
+  out-of-contract result silently (the only tolerated remainder is a single
+  undersized cluster when `len(gdf) < min_size`). Pure numpy, seeded
+  (`random_state`), with a stable size-descending relabel.
+
 ## [2.3.0] - 2026-06-14
 
 ### Added
