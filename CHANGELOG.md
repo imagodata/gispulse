@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`calibrate_detour_bands` capability.** Closes the routing loop: feed it
+  routed observations (typically the output of `route_pairs` with
+  `provider="osrm"`) and it recalibrates the detour ("tortuosity") factors —
+  per band, the median routed/straight ratio of the observations falling in
+  the band. Band bounds are never recomputed; a band with no observation
+  keeps its current factor (`sample_count=0` makes it visible). The
+  `applied_factor` column feeds straight back into `route_pairs`'
+  `tortuosity_bands`. Pro tier.
+- **`sample_surface_along_lines` capability.** Linear referencing: splits
+  every line into its ordered sequence of homogeneous segments by the
+  surface class it crosses (polygon `ref_layer` + class column) — one row
+  per segment with `length_m`, `share` and the sub-line geometry. Uncovered
+  stretches get `fallback_class`; overlaps are resolved by layer order
+  (first wins) or an explicit `priority` list (last listed wins; an unlisted
+  class deliberately outranks listed ones so an unranked cover never loses
+  silently). Composes with `route_pairs` to classify routed traces. Pro
+  tier.
 - **Road-routing providers + `route_pairs` capability.** New
   `gispulse.core.routing_providers` module — a `RoutingProvider` abstraction
   (distance + trace between two points of a caller-chosen CRS) with three
