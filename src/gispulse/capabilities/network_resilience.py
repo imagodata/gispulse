@@ -627,3 +627,230 @@ class NetworkBridgesCapability(Capability):
                 },
             },
         }
+
+
+@register
+class NetworkRedundancyCapability(Capability):
+    """Compte, par site, les routes disjointes (plafonnées à k) vers des installations."""
+
+    name = "network_redundancy"
+    description = (
+        "Per-site redundancy audit: for every input point, counts the "
+        "mutually disjoint routes (capped at k, default 2) through a line "
+        "network to a set of facility points — 0 = unreachable, 1 = single "
+        "point of failure, k = protected. ref_layers must list "
+        "[network_alias, facilities_alias] in that order. Uses the same "
+        "Suurballe engine as 'disjoint_paths' (mode='node' by default), so "
+        "a site is protected exactly when two genuinely disjoint arms reach "
+        "a facility — pairs a naive remove-first-path scan misses are found."
+    )
+
+    def execute(
+        self,
+        gdf: gpd.GeoDataFrame,
+        ref_gdfs: list[gpd.GeoDataFrame] | None = None,
+        k: int = 2,
+        mode: str = "node",
+        weight_col: str | None = None,
+        redundancy_col: str = "redundancy",
+        crs_meters: str | None = None,
+        **_: Any,
+    ) -> gpd.GeoDataFrame:
+        """
+        Args:
+            gdf:            Sites à auditer (points ; les géométries non
+                            ponctuelles utilisent leur centroïde). La sortie
+                            est une copie annotée de cette couche.
+            ref_gdfs:       ``[réseau, installations]`` injectés via
+                            ``ref_layers``, dans cet ordre : le réseau de
+                            lignes traversé, puis les points d'installation
+                            (sources/objectifs de rattachement). Les deux
+                            sont requis.
+            k:              Plafond du comptage (>= 1, défaut 2 — le contrat
+                            protection classique : 2 = protégé).
+            mode:           ``"node"`` (défaut) : les routes ne partagent
+                            aucun nœud intérieur ; ``"edge"`` : seuls les
+                            arcs sont à usage unique.
+            weight_col:     Colonne de poids des arcs du réseau ; longueur
+                            géométrique sinon.
+            redundancy_col: Nom de la colonne entière ajoutée.
+            crs_meters:     CRS métrique de travail quand le réseau est
+                            angulaire (défaut EPSG:3857).
+
+        Returns:
+            Copie du ``gdf`` avec *redundancy_col* : nombre de routes
+            disjointes trouvées vers la meilleure installation, plafonné à
+            ``k``. ``0`` = aucune installation atteignable, ``1`` = une seule
+            route (SPOF), ``k`` = protégé. Un site posé sur une installation
+            vaut ``k``. Sites sans géométrie => ``0``.
+
+        Raises:
+            ValueError: couches réseau/installations absentes, ``k < 1``,
+                ``mode`` inconnu, ou poids d'arc NaN / négatif.
+        """
+        check_tier("pro")
+
+        if k < 1:
+            raise ValueError(f"network_redundancy: k must be >= 1 (got {k}).")
+        if mode not in ("node", "edge"):
+            raise ValueError(
+                f"network_redundancy: mode must be 'node' or 'edge' (got {mode!r})."
+            )
+        if ref_gdfs is None or len(ref_gdfs) < 2:
+            raise ValueError(
+                "network_redundancy requires ref_layers=[network_alias, "
+                "facilities_alias] (two layers, in that order)."
+            )
+        network_gdf, facilities_gdf = ref_gdfs[0], ref_gdfs[1]
+        if facilities_gdf is None or facilities_gdf.empty:
+            raise ValueError(
+                "network_redundancy: the facilities layer (ref_layers[1]) is empty."
+            )
+
+        result = gdf.copy()
+        if gdf.empty:
+            result[redundancy_col] = []
+            return result
+        if network_gdf is None or network_gdf.empty:
+            result[redundancy_col] = 0
+            return result
+
+        try:
+            import networkx as nx
+        except ImportError as exc:
+            raise ImportError("NetworkRedundancyCapability requires 'networkx'.") from exc
+
+        reproject = is_angular(network_gdf)
+        effective_crs = crs_meters or "EPSG:3857"
+        network_m = network_gdf.to_crs(effective_crs) if reproject else network_gdf
+        working_crs = network_m.crs
+
+        def _align(layer: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+            if layer.crs is not None and layer.crs != working_crs:
+                return layer.to_crs(working_crs)
+            return layer
+
+        sites_m = _align(gdf)
+        facilities_m = _align(facilities_gdf)
+
+        graph = NetworkGraph.from_lines(network_m, weight_col)
+        G = graph.graph
+        if len(graph) == 0:
+            result[redundancy_col] = 0
+            return result
+
+        # NaN / negative fast-fail — same data-quality guard as disjoint_paths.
+        edges: dict[int, tuple[int, int, float]] = {}
+        for eid, (u, v) in enumerate(sorted(G.edges())):
+            w = float(G.edges[u, v]["weight"])
+            if math.isnan(w):
+                raise ValueError(
+                    "network_redundancy: NaN edge weight — NaN costs break "
+                    "the deterministic route order (inf is allowed)."
+                )
+            if w < 0.0:
+                raise ValueError(
+                    "network_redundancy: negative edge weight — Suurballe "
+                    "requires non-negative arc costs."
+                )
+            a, b = (u, v) if u <= v else (v, u)
+            edges[eid] = (a, b, w)
+        all_nodes = list(G.nodes())
+
+        # Facility nodes (nearest snap, deduplicated) grouped by component so
+        # unreachable facilities are skipped without a Suurballe run.
+        facility_nodes: set[int] = set()
+        for geom in facilities_m.geometry:
+            if geom is None or geom.is_empty:
+                continue
+            pt = geom if geom.geom_type == "Point" else geom.centroid
+            nid = graph.nearest_node(pt)
+            if nid >= 0:
+                facility_nodes.add(nid)
+        component_of: dict[int, int] = {}
+        for comp_id, comp in enumerate(nx.connected_components(G)):
+            for node in comp:
+                component_of[node] = comp_id
+        facilities_by_component: dict[int, list[int]] = {}
+        for nid in sorted(facility_nodes):
+            facilities_by_component.setdefault(component_of[nid], []).append(nid)
+
+        node_disjoint = mode == "node"
+        counts: list[int] = []
+        # Same-node results are memoized: co-located sites share one audit.
+        memo: dict[int, int] = {}
+        for geom in sites_m.geometry:
+            if geom is None or geom.is_empty:
+                counts.append(0)
+                continue
+            pt = geom if geom.geom_type == "Point" else geom.centroid
+            site_node = graph.nearest_node(pt)
+            cached = memo.get(site_node)
+            if cached is not None:
+                counts.append(cached)
+                continue
+            if site_node in facility_nodes:
+                count = k
+            else:
+                reachable = facilities_by_component.get(component_of[site_node], [])
+                count = 0
+                for facility in reachable:
+                    found = len(
+                        _suurballe_disjoint_paths(
+                            edges,
+                            all_nodes,
+                            site_node,
+                            facility,
+                            k,
+                            node_disjoint=node_disjoint,
+                        )
+                    )
+                    count = max(count, found)
+                    if count >= k:
+                        break
+            memo[site_node] = count
+            counts.append(count)
+
+        result[redundancy_col] = counts
+        return result
+
+    def get_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "ref_layers": {
+                    "type": ["array", "null"],
+                    "items": {"type": "string"},
+                    "description": (
+                        "[network_alias, facilities_alias] in that order — "
+                        "the line network, then the facility points."
+                    ),
+                },
+                "k": {
+                    "type": "integer",
+                    "default": 2,
+                    "minimum": 1,
+                    "description": "Count cap (2 = classic protected/SPOF contract).",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["node", "edge"],
+                    "default": "node",
+                    "description": "'node': no shared interior node; 'edge': only edges are single-use.",
+                },
+                "weight_col": {
+                    "type": ["string", "null"],
+                    "description": "Column for arc weight. If null, geometric length after metric reprojection.",
+                },
+                "redundancy_col": {
+                    "type": "string",
+                    "default": "redundancy",
+                    "description": "Name of the integer output column (0=unreachable, 1=SPOF, k=protected).",
+                },
+                "crs_meters": {
+                    "type": ["string", "null"],
+                    "default": None,
+                    "description": "Metric CRS used to reproject an angular network. Use EPSG:2154 in France.",
+                },
+            },
+        }

@@ -82,6 +82,12 @@ entries:
     steps: 9
     domain: "mobilite"
     file: mobilite_accessibilite_services.json
+  - name: reseau_expansion_resilience
+    title: "reseau_expansion_resilience"
+    description: "Planification et audit de resilience d'un reseau lineaire (fibre, eau, energie) — composantes connexes, ponts (SPOF structurels), redondance par site vers les postes sources (Suurballe), puis ordre d'extension glouton au cout marginal depuis les postes."
+    steps: 6
+    domain: "reseau"
+    file: reseau_expansion_resilience.json
   - name: reseau_topology_prep
     title: "reseau_topology_prep"
     description: "Preparation d'un graphe lineaire propre (FTTH, routes, hydro, reseau electrique) avant analyse reseau (shortest_path, isochrone, connectivity_check). Rapproche les endpoints, prolonge les dangles, noude au niveau des intersections, retire duplicats et pseudo-nodes."

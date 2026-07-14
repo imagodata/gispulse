@@ -1,0 +1,68 @@
+{
+  "version": 2,
+  "name": "reseau_expansion_resilience",
+  "description": "Planification et audit de résilience d'un réseau linéaire (fibre, eau, énergie) — composantes connexes, ponts (SPOF structurels), redondance par site vers les postes sources, puis ordre d'extension glouton au coût marginal depuis les postes.",
+  "domain": "reseau",
+  "author": "GISPulse",
+  "tags": ["reseau", "resilience", "spof", "expansion", "suurballe", "prim"],
+  "requires_pro": true,
+  "ref_layers": {
+    "reseau_lineaire": "data/reseau_troncons.gpkg",
+    "sites": "data/sites_a_raccorder.gpkg",
+    "postes_source": "data/postes_source.gpkg"
+  },
+  "inputs_notes": "reseau_lineaire = tronçons LineString (une colonne de poids optionnelle, sinon longueur géométrique). sites = points à auditer/raccorder. postes_source = points d'injection (NRO, postes, réservoirs...) servant de frontière d'expansion et d'objectif de redondance. Attention : pour l'étape network_greedy_expansion, les postes_source doivent coïncider avec des nœuds du réseau (extrémités de tronçon, arrondi 6 décimales) — l'étape échoue explicitement sinon (fail-fast) ; network_redundancy, elle, accroche au nœud le plus proche.",
+  "steps": [
+    {
+      "id": "reseau_2154",
+      "type": "capability",
+      "capability": "reproject",
+      "params": { "target_crs": "EPSG:2154" },
+      "input": "reseau_lineaire"
+    },
+    {
+      "id": "composantes",
+      "type": "capability",
+      "capability": "connected_components",
+      "params": {},
+      "input": "reseau_2154"
+    },
+    {
+      "id": "ponts_spof",
+      "type": "capability",
+      "capability": "network_bridges",
+      "params": { "bridge_col": "is_bridge" },
+      "input": "reseau_2154"
+    },
+    {
+      "id": "redondance_sites",
+      "type": "capability",
+      "capability": "network_redundancy",
+      "params": {
+        "ref_layers": ["reseau_2154", "postes_source"],
+        "k": 2,
+        "mode": "node",
+        "redundancy_col": "redundancy",
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "sites"
+    },
+    {
+      "id": "sites_spof",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "redundancy < 2" },
+      "input": "redondance_sites"
+    },
+    {
+      "id": "ordre_expansion",
+      "type": "capability",
+      "capability": "network_greedy_expansion",
+      "params": {
+        "ref_layer": "postes_source",
+        "crs_meters": "EPSG:2154"
+      },
+      "input": "reseau_2154"
+    }
+  ]
+}

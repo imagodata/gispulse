@@ -23,6 +23,7 @@ Bibliothèque de workflows métier prêts à l'emploi. Chaque preset est un fich
 |--------|--------|------------|-------|
 | [ftth_network_analysis.json](ftth_network_analysis.json) | v1 | ★★ | Import reseau + isochrones NRO + stats par ID_NRO + taux couverture. **⚠ utilise `network_check` → corriger en `connectivity_check`** |
 | [ftth_demande_hotspots.json](ftth_demande_hotspots.json) | v2 | ★★★ | Hotspots de demande FTTH par HDBSCAN + concave_hull par grappe + distance NRO la plus proche. Priorisation déploiement |
+| [reseau_expansion_resilience.json](reseau_expansion_resilience.json) | v2 | ★★★ | Résilience + planification : connected_components → network_bridges (SPOF structurels) → network_redundancy (protégé/SPOF par site, Suurballe) → network_greedy_expansion (ordre d'extension au coût marginal). Postes source = nœuds exacts du réseau pour l'expansion |
 
 ### Urbanisme / PLU / ZAN
 

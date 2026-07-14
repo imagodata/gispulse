@@ -17,6 +17,8 @@ Requires ``tier="pro"`` like the rest of the routing/network family.
 
 from __future__ import annotations
 
+import math
+import statistics
 from typing import Any
 
 import geopandas as gpd
@@ -333,6 +335,177 @@ class RoutePairsCapability(Capability):
                     "type": ["string", "null"],
                     "default": None,
                     "description": "Metric working CRS for angular layers. Use EPSG:2154 in France.",
+                },
+            },
+        }
+
+
+# --------------------------------------------------------------------------- #
+# Detour-band calibration                                                      #
+# --------------------------------------------------------------------------- #
+
+# Column contract of the calibration output.
+_CALIBRATE_COLUMNS = [
+    "band_index",
+    "max_straight_m",
+    "current_factor",
+    "recommended_factor",
+    "applied_factor",
+    "sample_count",
+    "used_observations",
+    "skipped_observations",
+    "geometry",
+]
+
+
+@register
+class CalibrateDetourBandsCapability(Capability):
+    """Recale les facteurs de détour (tortuosité) contre des distances routées réelles."""
+
+    name = "calibrate_detour_bands"
+    description = (
+        "Recalibrates the detour ('tortuosity') factors of route_pairs "
+        "against real routed distances. Feed it routed observations (e.g. "
+        "the output of route_pairs with provider='osrm': straight_m + "
+        "distance_m columns); for each band the recommended factor is the "
+        "median routed/straight ratio of the observations falling in the "
+        "band. Band bounds are never recomputed — only the factors. A band "
+        "with no observation keeps its current factor (sample_count=0 tells "
+        "you it was not recalibrated)."
+    )
+
+    def execute(
+        self,
+        gdf: gpd.GeoDataFrame,
+        bands: Any = None,
+        straight_col: str = "straight_m",
+        routed_col: str = "distance_m",
+        min_straight_m: float = 0.0,
+        **_: Any,
+    ) -> gpd.GeoDataFrame:
+        """
+        Args:
+            gdf:            Observations routées — typiquement la sortie de
+                            ``route_pairs`` (provider OSRM) : une ligne par
+                            paire mesurée.
+            bands:          Paliers courants ``[{max_straight_m, factor}, ...]``
+                            (même format que ``tortuosity_bands`` de
+                            ``route_pairs``). Les bornes sont conservées, seuls
+                            les facteurs sont recalés. Défaut : un palier
+                            unique attrape-tout de facteur 1.0 (calibre un
+                            facteur global).
+            straight_col:   Colonne de distance à vol d'oiseau (m).
+            routed_col:     Colonne de distance routée réelle (m).
+            min_straight_m: Seuil bas (m) sous lequel une observation est
+                            rejetée (bruit du routeur sur les très courtes
+                            paires).
+
+        Returns:
+            GeoDataFrame, une ligne par palier : ``band_index``,
+            ``max_straight_m``, ``current_factor``, ``recommended_factor``
+            (médiane des ratios ; NaN quand aucune observation),
+            ``applied_factor`` (recommandé, ou courant faute d'observation —
+            la liste prête à réinjecter dans ``tortuosity_bands``),
+            ``sample_count``, ``used_observations`` / ``skipped_observations``
+            (répétés, totaux du run), ``geometry`` (union des géométries des
+            observations du palier, None quand vide).
+
+        Raises:
+            ValueError: colonne absente, ou paliers invalides.
+
+        Note (fidélité de port): la source historique affectait une
+        observation à son palier par borne haute *exclusive*, alors que son
+        provider sélectionnait le facteur par borne *inclusive*. Le port
+        aligne les deux sur la règle inclusive du provider (une observation à
+        exactement ``max_straight_m`` calibre le palier qu'elle utiliserait).
+        """
+        check_tier("pro")
+
+        parsed_bands = _parse_bands(bands)
+        for col in (straight_col, routed_col):
+            if col not in gdf.columns:
+                raise ValueError(
+                    f"calibrate_detour_bands: column {col!r} not in the "
+                    "observation layer."
+                )
+
+        ratios_by_band: list[list[float]] = [[] for _ in parsed_bands]
+        geoms_by_band: list[list[Any]] = [[] for _ in parsed_bands]
+        used = 0
+        skipped = 0
+        for row in gdf.itertuples():
+            straight = float(getattr(row, straight_col))
+            routed = float(getattr(row, routed_col))
+            if (
+                not math.isfinite(straight)
+                or not math.isfinite(routed)
+                or straight <= 0
+                or straight < min_straight_m
+            ):
+                skipped += 1
+                continue
+            idx = next(
+                i
+                for i, band in enumerate(parsed_bands)
+                if band.max_straight_m is None or straight <= band.max_straight_m
+            )
+            ratios_by_band[idx].append(routed / straight)
+            geom = getattr(row, "geometry", None)
+            if geom is not None and not geom.is_empty:
+                geoms_by_band[idx].append(geom)
+            used += 1
+
+        from shapely.ops import unary_union
+
+        rows: list[dict[str, Any]] = []
+        for i, (band, ratios, geoms) in enumerate(
+            zip(parsed_bands, ratios_by_band, geoms_by_band, strict=True)
+        ):
+            recommended = statistics.median(ratios) if ratios else None
+            rows.append(
+                {
+                    "band_index": i,
+                    "max_straight_m": band.max_straight_m,
+                    "current_factor": band.factor,
+                    "recommended_factor": recommended,
+                    # Without observations the current factor is kept: the
+                    # applied_factor column is directly reusable as
+                    # tortuosity_bands input.
+                    "applied_factor": recommended if recommended is not None else band.factor,
+                    "sample_count": len(ratios),
+                    "used_observations": used,
+                    "skipped_observations": skipped,
+                    "geometry": unary_union(geoms) if geoms else None,
+                }
+            )
+
+        return gpd.GeoDataFrame(rows, geometry="geometry", crs=gdf.crs)
+
+    def get_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "bands": {
+                    "type": ["array", "null"],
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "max_straight_m": {"type": ["number", "null"]},
+                            "factor": {"type": "number"},
+                        },
+                        "required": ["factor"],
+                    },
+                    "description": (
+                        "Current detour bands; bounds are kept, only factors are "
+                        "recalibrated. Default: one catch-all band, factor 1.0."
+                    ),
+                },
+                "straight_col": {"type": "string", "default": "straight_m"},
+                "routed_col": {"type": "string", "default": "distance_m"},
+                "min_straight_m": {
+                    "type": "number",
+                    "default": 0.0,
+                    "description": "Observations below this straight-line distance are skipped.",
                 },
             },
         }
