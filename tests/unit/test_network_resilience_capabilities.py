@@ -12,6 +12,7 @@ from shapely.geometry import LineString, MultiLineString
 from gispulse.capabilities.network_resilience import (
     DisjointPathsCapability,
     NetworkBridgesCapability,
+    NetworkRedundancyCapability,
 )
 
 
@@ -267,3 +268,93 @@ class TestNetworkBridges:
         net = _network([(A, B), (B, C), (C, A), far])
         result = NetworkBridgesCapability().execute(net)
         assert list(result["is_bridge"]) == [False, False, False, True]
+
+
+def _pts(coords) -> gpd.GeoDataFrame:
+    from shapely.geometry import Point
+
+    return gpd.GeoDataFrame(geometry=[Point(*c) for c in coords], crs=_CRS)
+
+
+class TestNetworkRedundancy:
+    def _ring_with_spur(self):
+        """Ring S-A-T-B-S, spur T-D, plus a far disconnected segment."""
+        S, A, T, B, D = (0, 0), (1, 1), (2, 0), (1, -1), (3, 0)
+        far = ((50, 50), (51, 50))
+        net = _network([(S, A), (A, T), (T, B), (B, S), (T, D), far])
+        return net, {"S": S, "A": A, "T": T, "B": B, "D": D, "far": far[0]}
+
+    def test_protected_spof_and_unreachable(self):
+        """T on the ring = protected (2), spur end D = SPOF (1), far = 0."""
+        net, p = self._ring_with_spur()
+        sites = _pts([p["T"], p["D"], p["far"]])
+        result = NetworkRedundancyCapability().execute(
+            sites, ref_gdfs=[net, _pts([p["S"]])]
+        )
+        assert list(result["redundancy"]) == [2, 1, 0]
+
+    def test_site_on_facility_counts_k(self):
+        net, p = self._ring_with_spur()
+        sites = _pts([p["S"]])
+        result = NetworkRedundancyCapability().execute(
+            sites, ref_gdfs=[net, _pts([p["S"]])], k=2
+        )
+        assert list(result["redundancy"]) == [2]
+
+    def test_second_facility_rescues_spof(self):
+        """A facility on the spur end makes D reachable twice? No — D-T is
+        still the only arm to the ring facility, but a facility AT D makes
+        D itself protected (site==facility) and T gains nothing new."""
+        net, p = self._ring_with_spur()
+        sites = _pts([p["D"]])
+        result = NetworkRedundancyCapability().execute(
+            sites, ref_gdfs=[net, _pts([p["S"], p["D"]])]
+        )
+        assert list(result["redundancy"]) == [2]  # sits on a facility
+
+    def test_edge_mode_shared_node(self):
+        """Two routes forced through middle node M: node mode 1, edge mode 2."""
+        S, a, b, M, c, d, T = (
+            (0, 0), (1, 1), (1, -1), (2, 0), (3, 1), (3, -1), (4, 0),
+        )
+        net = _network(
+            [(S, a), (a, M), (S, b), (b, M), (M, c), (c, T), (M, d), (d, T)]
+        )
+        sites = _pts([S])
+        node_result = NetworkRedundancyCapability().execute(
+            sites, ref_gdfs=[net, _pts([T])], mode="node"
+        )
+        edge_result = NetworkRedundancyCapability().execute(
+            sites, ref_gdfs=[net, _pts([T])], mode="edge"
+        )
+        assert list(node_result["redundancy"]) == [1]
+        assert list(edge_result["redundancy"]) == [2]
+
+    def test_annotated_copy_preserves_input(self):
+        net, p = self._ring_with_spur()
+        sites = _pts([p["T"], p["D"]])
+        sites["name"] = ["t-site", "d-site"]
+        result = NetworkRedundancyCapability().execute(
+            sites, ref_gdfs=[net, _pts([p["S"]])], redundancy_col="protection"
+        )
+        assert list(result["name"]) == ["t-site", "d-site"]
+        assert list(result["protection"]) == [2, 1]
+        assert "protection" not in sites.columns  # input untouched
+
+    def test_missing_layers_raise(self):
+        net, p = self._ring_with_spur()
+        sites = _pts([p["T"]])
+        with pytest.raises(ValueError, match="ref_layers"):
+            NetworkRedundancyCapability().execute(sites)
+        with pytest.raises(ValueError, match="facilities"):
+            NetworkRedundancyCapability().execute(
+                sites, ref_gdfs=[net, _pts([])]
+            )
+
+    def test_empty_network_all_zero(self):
+        empty_net = gpd.GeoDataFrame(geometry=[], crs=_CRS)
+        sites = _pts([(0, 0)])
+        result = NetworkRedundancyCapability().execute(
+            sites, ref_gdfs=[empty_net, _pts([(1, 1)])]
+        )
+        assert list(result["redundancy"]) == [0]

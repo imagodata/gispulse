@@ -179,6 +179,10 @@ def _ensure_defaults_loaded() -> None:
             except ImportError:
                 pass
             try:
+                import gispulse.capabilities.surface_sampling  # noqa: F401
+            except ImportError:
+                pass
+            try:
                 import gispulse.capabilities.postgis_sql  # noqa: F401
             except ImportError:
                 pass
