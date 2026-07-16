@@ -1010,7 +1010,14 @@ class SteinerTreeCapability(Capability):
                 "network (no path between some of them)."
             )
 
-        tree = steiner_tree(G, terminal_nodes, weight="weight")
+        # Restrict the solve to the terminals' connected component. Mehlhorn
+        # (networkx's default heuristic since 3.2) runs a multi_source_dijkstra
+        # from the terminals and then indexes EVERY node of the graph; a
+        # component with no terminal (common in a raw OSM road network) is
+        # unreachable from all sources and raises KeyError. ``reachable`` is
+        # exactly that component (already computed above) and holds every
+        # terminal, so the tree is unchanged for a fully connected network.
+        tree = steiner_tree(G.subgraph(reachable), terminal_nodes, weight="weight")
 
         rows: list[dict[str, Any]] = []
         for u, v, data in tree.edges(data=True):

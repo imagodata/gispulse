@@ -98,6 +98,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   undersized cluster when `len(gdf) < min_size`). Pure numpy, seeded
   (`random_state`), with a stable size-descending relabel.
 
+### Fixed
+
+- **`steiner_tree` on a graph with a terminal-less component.** The Mehlhorn
+  heuristic (networkx's default since 3.2) indexes every node of the graph
+  after a multi-source Dijkstra from the terminals, so a disconnected
+  component without any terminal — common in a raw OSM road network — raised
+  `KeyError`. The solve is now restricted to the terminals' connected
+  component (already computed for the connectivity guard); unchanged for a
+  fully connected network.
+
 ## [2.3.0] - 2026-06-14
 
 ### Added

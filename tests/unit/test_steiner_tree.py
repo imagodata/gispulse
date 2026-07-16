@@ -72,6 +72,25 @@ def test_disconnected_terminals_raise(network):
         _run(isolated, _terminals([(0, 0), (100, 100)]))
 
 
+def test_disconnected_island_without_terminal_does_not_crash():
+    # Network = main A-B-C component + an extra island with NO terminal
+    # (common in a raw OSM road network: an isolated service-road stub). The
+    # terminals (A, C) are connected to each other; the solver must NOT raise
+    # KeyError on the island's nodes — regression guard for the Mehlhorn bug
+    # (multi_source_dijkstra from the terminals then indexing every graph node).
+    net = gpd.GeoDataFrame(
+        geometry=[
+            LineString([(0, 0), (10, 0)]),         # A-B
+            LineString([(10, 0), (20, 0)]),        # B-C
+            LineString([(100, 100), (110, 100)]),  # disconnected island, no terminal
+        ],
+        crs="EPSG:3857",
+    )
+    tree = _run(net, _terminals([(0, 0), (20, 0)]))  # A and C, connected
+    assert len(tree) == 2  # A-B, B-C
+    assert tree["weight"].sum() == pytest.approx(20.0)
+
+
 def test_fewer_than_two_terminals_returns_empty(network):
     tree = _run(network, _terminals([(0, 0)]))
     assert len(tree) == 0
