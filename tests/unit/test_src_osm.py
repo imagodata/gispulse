@@ -18,14 +18,12 @@ if _PKG_PATH in sys.path:
 sys.path.insert(0, _PKG_PATH)
 for _module in (
     "gispulse_src_osm.materialize",
-    "gispulse_src_osm.pbf",
     "gispulse_src_osm.source",
     "gispulse_src_osm",
 ):
     sys.modules.pop(_module, None)
 
-from gispulse_src_osm import materialize_pbf, read_pbf_roads  # noqa: E402
-from gispulse_src_osm.pbf import OsmPbfReadError  # noqa: E402
+from gispulse_src_osm import materialize_pbf  # noqa: E402
 from gispulse_src_osm.source import OsmSource  # noqa: E402
 
 from gispulse.core.plugin_model import (  # noqa: E402
@@ -162,67 +160,3 @@ def test_materialize_pbf_force_fetches_existing_file(
     access, mode = calls[0]
     assert mode is FetchMode.MATERIALIZE
     assert access.params["local_path"] == str(dest)
-
-
-def test_read_pbf_roads_builds_duckdb_query_and_flattens_tags(
-    tmp_path: Path,
-) -> None:
-    import pandas as pd
-    from shapely.geometry import LineString
-
-    pbf = tmp_path / "belgium-latest.osm.pbf"
-    pbf.write_bytes(b"fake")
-    road_wkb = LineString([(4.0, 50.0), (4.1, 50.1)]).wkb
-
-    class FakeCursor:
-        def fetchdf(self) -> pd.DataFrame:
-            return pd.DataFrame(
-                {
-                    "id": [42],
-                    "highway": ["residential"],
-                    "surface": ["sett"],
-                    "geometry": [road_wkb],
-                }
-            )
-
-    class FakeConnection:
-        sql: str | None = None
-        params: list[str] | None = None
-
-        def execute(self, sql: str, params: list[str]) -> FakeCursor:
-            self.sql = sql
-            self.params = params
-            return FakeCursor()
-
-    conn = FakeConnection()
-
-    gdf = read_pbf_roads(
-        pbf,
-        tags=("surface",),
-        target_crs=None,
-        connection_factory=lambda: conn,
-    )
-
-    assert len(gdf) == 1
-    assert gdf.crs == "EPSG:4326"
-    assert gdf.loc[0, "highway"] == "residential"
-    assert gdf.loc[0, "surface"] == "sett"
-    assert conn.params == [str(pbf)]
-    assert conn.sql is not None
-    assert "ST_ReadOSM(?)" in conn.sql
-    assert "tags['surface']::VARCHAR AS \"surface\"" in conn.sql
-    assert "tags['highway'] IS NOT NULL" in conn.sql
-
-
-def test_read_pbf_roads_rejects_unsafe_tag_key(tmp_path: Path) -> None:
-    pbf = tmp_path / "belgium-latest.osm.pbf"
-    pbf.write_bytes(b"fake")
-
-    with pytest.raises(OsmPbfReadError) as excinfo:
-        read_pbf_roads(
-            pbf,
-            tags=("surface']; DROP TABLE osm; --",),
-            connection_factory=lambda: object(),
-        )
-
-    assert excinfo.value.code == "OSM_PBF_TAG_INVALID"
