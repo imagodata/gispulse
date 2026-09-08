@@ -18,9 +18,11 @@ Importing this module self-registers the fetcher in the process-wide
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 from urllib.parse import urlencode
 
+from gispulse.adapters.rest.offset_pages import OffsetPagination, collect_offset_pages
 from gispulse.adapters.rest.retry import RetrySpec, get_json_with_retry, sleep as _sleep
 from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
@@ -38,7 +40,9 @@ _GEOJSON_CRS = "EPSG:4326"
 _DEFAULT_TIMEOUT_S = 20.0
 #: AccessSpec.params keys the fetcher consumes itself — every *other* key
 #: is forwarded verbatim as an HTTP query parameter.
-_RESERVED_PARAMS = frozenset({"geom_param", "timeout", "retry"})
+_RESERVED_PARAMS = frozenset(
+    {"geom_param", "bbox_param", "require_extent", "pagination", "timeout", "retry"}
+)
 
 
 def _bbox_from_extent(extent: Any) -> tuple[float, float, float, float] | None:
@@ -110,6 +114,9 @@ class RestGeoJsonFetcher:
       the fetch ``extent`` as a GeoJSON polygon (API Carto uses ``geom``)
     - ``timeout`` — HTTP timeout in seconds *(default: 20)*
     - ``retry`` — retry/backoff policy for transient HTTP/transport errors
+    - ``bbox_param`` — query field receiving a WGS84 envelope
+    - ``require_extent`` — reject requests without an explicit extent
+    - ``pagination`` — explicit counted offset recipe (including cursor policy)
     - every other key — forwarded verbatim as an HTTP query parameter
     """
 
@@ -128,22 +135,45 @@ class RestGeoJsonFetcher:
         timeout = float(params.get("timeout", _DEFAULT_TIMEOUT_S))
         retry = RetrySpec.from_params(params)
         geom_param = params.get("geom_param")
+        bbox_param = params.get("bbox_param")
+        if geom_param and bbox_param:
+            raise ValueError("REST_EXTENT_INVALID: geom_param and bbox_param are exclusive")
+        pagination = (
+            OffsetPagination.from_params(params["pagination"]) if "pagination" in params else None
+        )
         query: dict[str, Any] = {k: v for k, v in params.items() if k not in _RESERVED_PARAMS}
         bbox = _bbox_from_extent(extent)
+        if params.get("require_extent") and bbox is None:
+            raise ValueError("REST_EXTENT_REQUIRED: supply a WGS84 bounding box")
+        if bbox_param and bbox is not None:
+            if (
+                not all(math.isfinite(c) for c in bbox)
+                or not -180 <= bbox[0] < bbox[2] <= 180
+                or not -90 <= bbox[1] < bbox[3] <= 90
+            ):
+                raise ValueError("REST_EXTENT_INVALID: ordered finite WGS84 bbox required")
+            query[str(bbox_param)] = ",".join(str(c) for c in bbox)
         if geom_param and bbox is not None:
             query[str(geom_param)] = json.dumps(_bbox_polygon(bbox), separators=(",", ":"))
-        url = access.endpoint
-        if query:
-            sep = "&" if "?" in url else "?"
-            url = f"{url}{sep}{urlencode(query)}"
 
-        payload = _get_geojson_with_retry(url, timeout, retry)
-        if payload.get("type") != "FeatureCollection":
-            raise ValueError(
-                f"REST endpoint did not return a GeoJSON FeatureCollection "
-                f"(got type={payload.get('type')!r}): {access.endpoint}"
-            )
-        features = payload.get("features") or []
+        def request(query_params: dict[str, Any]) -> dict[str, Any]:
+            url = access.endpoint
+            if query_params:
+                sep = "&" if "?" in url else "?"
+                url = f"{url}{sep}{urlencode(query_params)}"
+            return _get_geojson_with_retry(url, timeout, retry)
+
+        report: dict[str, Any] = {}
+        if pagination is not None:
+            features, report = collect_offset_pages(pagination, query, request)
+        else:
+            payload = request(query)
+            if payload.get("type") != "FeatureCollection":
+                raise ValueError(
+                    f"REST endpoint did not return a GeoJSON FeatureCollection "
+                    f"(got type={payload.get('type')!r}): {access.endpoint}"
+                )
+            features = payload.get("features") or []
         if features:
             gdf = gpd.GeoDataFrame.from_features(features, crs=_GEOJSON_CRS)
         else:
@@ -158,7 +188,7 @@ class RestGeoJsonFetcher:
             mode=mode,
             data=gdf,
             crs=_GEOJSON_CRS,
-            metadata={"endpoint": access.endpoint, "feature_count": len(gdf)},
+            metadata={"endpoint": access.endpoint, "feature_count": len(gdf), **report},
         )
 
 
