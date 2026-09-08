@@ -73,6 +73,12 @@ Input order does not change IDs. The bundle always states `ready_for_costing=fal
 functional classification, axis/structure reconciliation and client costing are
 subsequent steps. A clean partition is not yet a road-crossing proof.
 
+The core helper `validate_functional_faces` enforces the next boundary: it accepts
+only explicit upstream `functional_class` values (`carriageway_paved`, `sidewalk`,
+or `unmapped`). It never infers a side from WGO geometry. Unknown or missing
+classes fail or remain unmapped, so a raw candidate bundle cannot silently enter
+GC costing.
+
 
 ## Validation
 
