@@ -3,12 +3,32 @@
 from __future__ import annotations
 
 import math
+import re
+import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import urlencode
 
-from gispulse.adapters.rest.retry import RetrySpec
+from gispulse.adapters.rest.retry import RetrySpec, get_json_with_retry
 from gispulse.adapters.rest.offset_pages import OffsetPagination, collect_offset_pages
 from gispulse.adapters.rest.rest_fetcher import _get_geojson_with_retry
+
+
+def _get_wfs_hits(url: str, timeout: float) -> dict:
+    """Parse only WFS 2.0 hits; unknown counts and service exceptions fail closed."""
+    import httpx
+
+    response = httpx.get(url, timeout=timeout, follow_redirects=True)
+    response.raise_for_status()
+    try:
+        root = ET.fromstring(response.content)
+    except ET.ParseError as exc:
+        raise ValueError("WFS_COUNT_INVALID: malformed XML hits response") from exc
+    raw = root.get("numberMatched", "")
+    if root.tag != "{http://www.opengis.net/wfs/2.0}FeatureCollection" or not re.fullmatch(
+        r"[0-9]+", raw
+    ):
+        raise ValueError("WFS_COUNT_INVALID: exact WFS numberMatched required")
+    return {"count": int(raw)}
 
 
 def fetch_counted_wfs(cfg: Any, params: dict[str, Any], bbox: tuple | None) -> tuple[Any, dict]:
@@ -38,16 +58,41 @@ def fetch_counted_wfs(cfg: Any, params: dict[str, Any], bbox: tuple | None) -> t
         "srsName": cfg.crs,
         **cfg.params,
     }
-    if bbox is not None:
-        query["bbox"] = ",".join(str(c) for c in bbox) + f",{cfg.crs}"
-    if params.get("cql_filter"):
-        query["CQL_FILTER"] = params["cql_filter"]
+    spatial_mode = params.get("bbox_filter", "bbox")
+    count_format = params.get("count_format", "json")
+    if spatial_mode not in ("bbox", "intersects") or count_format not in ("json", "wfs_hits_xml"):
+        raise ValueError("WFS_RECIPE_INVALID: unsupported spatial/count mode")
+    if count_format == "wfs_hits_xml" and (
+        spec.count_key != "count" or spec.count_query.get("resultType") != "hits"
+    ):
+        raise ValueError("WFS_RECIPE_INVALID: XML hits requires count key and resultType=hits")
+    cql = params.get("cql_filter")
+    if spatial_mode == "intersects":
+        field = params.get("geometry_field")
+        if not isinstance(field, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", field):
+            raise ValueError("WFS_GEOMETRY_FIELD_INVALID: explicit geometry field required")
+        # CQL geometry literals use the native layer CRS, not srsName.
+        if params.get("native_crs") is None or not CRS.from_user_input(params["native_crs"]).equals(
+            CRS.from_user_input(cfg.crs)
+        ):
+            raise ValueError("WFS_FILTER_CRS_INVALID: CQL bbox must use declared native CRS")
+        if bbox is None:
+            raise ValueError("WFS_EXTENT_REQUIRED: INTERSECTS requires a bounding box")
+        x, y, X, Y = bbox
+        spatial = f"INTERSECTS({field},POLYGON(({x} {y},{X} {y},{X} {Y},{x} {Y},{x} {y})))"
+        query["CQL_FILTER"] = f"({spatial}) AND ({cql})" if cql else spatial
+    else:
+        if bbox is not None:
+            query["bbox"] = ",".join(str(c) for c in bbox) + f",{cfg.crs}"
+        if cql:
+            query["CQL_FILTER"] = cql
     retry = RetrySpec.from_params(params)
 
     def request(values):
-        payload = _get_geojson_with_retry(
-            cfg.url + ("&" if "?" in cfg.url else "?") + urlencode(values), 120, retry
-        )
+        url = cfg.url + ("&" if "?" in cfg.url else "?") + urlencode(values)
+        if count_format == "wfs_hits_xml" and values.get("resultType") == "hits":
+            return get_json_with_retry(_get_wfs_hits, url, 120, retry, retry_event="wfs_hits_retry")
+        payload = _get_geojson_with_retry(url, 120, retry)
         if (
             isinstance(payload, dict)
             and payload.get("features")

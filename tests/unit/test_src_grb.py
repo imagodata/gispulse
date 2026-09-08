@@ -69,3 +69,48 @@ def test_exposes_both_carriageway_and_appurtenance(source: GrbSource) -> None:
 def test_aanhorigheid_targets_wga_layer(source: GrbSource) -> None:
     access = source.access_for("grb-aanhorigheid-vl")
     assert access.params["typename"] == "GRB:WGA"
+
+
+def test_extended_grb_entries_preserve_specific_attributes(source):
+    assert source.access_for("grb-wegopdeling-vl").params["typename"] == "GRB:WGO"
+    assert source.access_for("grb-kunstwerk-vl").params["typename"] == "GRB:KNW"
+    assert {"VERH", "METHODE", "STATUS", "WS_OIDN"} <= source.schema("grb-wegsegment-vl").keys()
+    access = source.access_for("grb-wegbaan-vl")
+    assert access.params["bbox_filter"] == "intersects"
+    assert access.params["count_format"] == "wfs_hits_xml"
+    access.params["pagination"]["page_size"] = 1
+    assert source.access_for("grb-wegbaan-vl").params["pagination"]["page_size"] == 2000
+
+
+def test_grb_dry_run_has_no_side_effects(tmp_path, monkeypatch):
+    from gispulse_src_grb.prepare import prepare_grb
+    from gispulse.adapters.ogc.wfs_fetcher import WfsFetcher
+
+    monkeypatch.setattr(WfsFetcher, "fetch", lambda *a, **k: pytest.fail("network in dry run"))
+    output = tmp_path / "new" / "grb"
+    report = prepare_grb(bbox=(100000, 190000, 101000, 191000), output=output)
+    assert report["status"] == "planned" and report["ready_for_costing"] is False
+    assert not output.parent.exists()
+
+
+def test_grb_failure_on_second_layer_never_publishes_prefix(tmp_path, monkeypatch):
+    from gispulse_src_grb.prepare import prepare_grb
+    from gispulse.adapters.ogc.wfs_fetcher import WfsFetcher
+    from types import SimpleNamespace
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    calls = []
+
+    def fetch(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 2:
+            raise ValueError("WFS_COUNT_INVALID")
+        return SimpleNamespace(
+            data=gpd.GeoDataFrame({"OIDN": [1]}, geometry=[box(0, 0, 1, 1)], crs=31370), metadata={}
+        )
+
+    monkeypatch.setattr(WfsFetcher, "fetch", fetch)
+    with pytest.raises(ValueError, match="COUNT_INVALID"):
+        prepare_grb(bbox=(0, 0, 2, 2), output=tmp_path / "bundle", write=True)
+    assert list(tmp_path.iterdir()) == []

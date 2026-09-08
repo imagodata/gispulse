@@ -1,6 +1,6 @@
 """GRB Flanders topographic source, with raw functional classifications.
 
-WBN describes carriageway footprints; WGA describes ancillary road structures,
+WBN describes the whole road corridor; WGA describes ancillary road structures,
 not sidewalk polygons. WGO road subdivision boundaries require upstream
 geometric reconstruction before use as areas. WFS dispatch belongs to core;
 client material mapping and all prices stay outside this plugin.
@@ -46,6 +46,12 @@ _FIELD_MAP = {
 
 
 def _wfs_access(typename: str) -> AccessSpec:
+    try:
+        from gispulse.adapters.ogc.counted_wfs import _get_wfs_hits  # noqa: F401
+    except ImportError as exc:
+        raise RuntimeError(
+            "GRB_COUNTED_WFS_REQUIRED: install core with XML hits and native INTERSECTS support"
+        ) from exc
     return AccessSpec(
         protocol=AccessProtocol.WFS,
         endpoint=GRB_WFS_ENDPOINT,
@@ -53,6 +59,23 @@ def _wfs_access(typename: str) -> AccessSpec:
             "typename": typename,
             "version": "2.0.0",
             "crs": _TARGET_CRS,
+            "native_crs": _TARGET_CRS,
+            "require_extent": True,
+            "bbox_filter": "intersects",
+            "geometry_field": "SHAPE",
+            "sortBy": "OIDN A",
+            "count_format": "wfs_hits_xml",
+            "pagination": {
+                "mode": "offset",
+                "offset_param": "startIndex",
+                "limit_param": "count",
+                "page_size": 2000,
+                "max_pages": 1000,
+                "max_features": 1_000_000,
+                "id_field": "OIDN",
+                "count_key": "count",
+                "count_query": {"resultType": "hits"},
+            },
         },
         format="application/json",
     )
@@ -60,9 +83,44 @@ def _wfs_access(typename: str) -> AccessSpec:
 
 _ENTRIES: dict[str, dict[str, Any]] = {
     "grb-wegbaan-vl": {
-        "label": "GRB wegbaan (chaussée) — Flandre",
+        "label": "GRB wegbaan (corridor routier) — Flandre",
         "typename": "GRB:WBN",
-        "kind": "carriageway",
+        "kind": "road_corridor",
+    },
+    "grb-wegopdeling-vl": {
+        "label": "GRB limites fonctionnelles — Flandre",
+        "typename": "GRB:WGO",
+        "kind": "functional_boundaries",
+        "raw_fields": ["TYPE", "LBLTYPE"],
+    },
+    "grb-wegsegment-vl": {
+        "label": "GRB axes de voirie — Flandre",
+        "typename": "GRB:Wegsegment",
+        "kind": "road_axes",
+        "raw_fields": [
+            "WS_OIDN",
+            "WS_UIDN",
+            "MORF",
+            "LBLMORF",
+            "VERH",
+            "LBLVERH",
+            "STATUS",
+            "LBLSTATUS",
+            "METHODE",
+            "LBLMETHODE",
+        ],
+    },
+    "grb-wegknoop-vl": {
+        "label": "GRB nœuds de voirie — Flandre",
+        "typename": "GRB:Wegknoop",
+        "kind": "road_nodes",
+        "raw_fields": ["WK_OIDN", "WK_UIDN", "TYPE", "LBLTYPE"],
+    },
+    "grb-kunstwerk-vl": {
+        "label": "GRB ouvrages — Flandre",
+        "typename": "GRB:KNW",
+        "kind": "structures",
+        "raw_fields": ["TYPE", "LBLTYPE", "VORM", "LBLVORM"],
     },
     "grb-aanhorigheid-vl": {
         "label": "GRB wegaanhorigheid (constructions annexes) — Flandre",
@@ -70,6 +128,15 @@ _ENTRIES: dict[str, dict[str, Any]] = {
         "kind": "appurtenance",
     },
 }
+
+
+def _raw_schema(spec: dict[str, Any]) -> dict[str, str]:
+    columns = {"OIDN": "int", "UIDN": "int", "VERSIE": "int", "VERSDATUM": "date"}
+    for field in spec["raw_fields"]:
+        columns[field] = "str" if field.startswith("LBL") or field.endswith("UIDN") else "int"
+    columns["geometry"] = f"geometry[{_TARGET_CRS}]"
+    return columns
+
 
 _COMMON_METADATA = {
     "license": "Gratis Open Data Licentie Vlaanderen",
@@ -89,7 +156,7 @@ def _copy_params(params: dict[str, Any]) -> dict[str, Any]:
 
 
 class GrbSource(DeclarativeSource):
-    """GRB Flanders WFS layers (carriageway + appurtenances)."""
+    """GRB Flanders road corridors, internal boundaries, axes and structures."""
 
     name = "grb"
     domain = SourceDomain.BASE
@@ -102,6 +169,10 @@ class GrbSource(DeclarativeSource):
     def _entry_ref(self, entry_id: str) -> SourceEntryRef:
         spec = _ENTRIES[entry_id]
         access = _wfs_access(spec["typename"])
+        metadata = dict(_COMMON_METADATA)
+        if "raw_fields" in spec:
+            metadata.pop("canonical_field_map")
+            metadata["schema_columns"] = tuple(_raw_schema(spec))
         return SourceEntryRef(
             id=entry_id,
             name=spec["label"],
@@ -111,7 +182,10 @@ class GrbSource(DeclarativeSource):
             payload=self.payload,
             jurisdiction=self.jurisdiction,
             metadata={
-                **_COMMON_METADATA,
+                **metadata,
+                "raw_fields_preserved": True,
+                "extent_crs": _TARGET_CRS,
+                "counted_pagination": True,
                 "typename": spec["typename"],
                 "kind": spec["kind"],
                 "endpoint": GRB_WFS_ENDPOINT,
@@ -126,7 +200,8 @@ class GrbSource(DeclarativeSource):
 
     def schema(self, entry_id: str) -> dict[str, str]:
         self._entry(entry_id)  # validates the id
-        return dict(_SCHEMA)
+        spec = _ENTRIES[entry_id]
+        return _raw_schema(spec) if "raw_fields" in spec else dict(_SCHEMA)
 
     def revision(self, entry_id: str) -> str | None:
         self._entry(entry_id)  # validates the id
