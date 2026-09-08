@@ -45,6 +45,10 @@ _RESERVED_PARAMS = frozenset(
         "pagination",
         "require_extent",
         "retry",
+        "count_format",
+        "bbox_filter",
+        "geometry_field",
+        "native_crs",
     }
 )
 
