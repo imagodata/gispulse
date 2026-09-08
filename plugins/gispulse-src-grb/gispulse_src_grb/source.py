@@ -1,14 +1,12 @@
-"""GRB Flanders (Grootschalig Referentiebestand) DataSource.
+"""GRB Flanders topographic source, with raw functional classifications.
 
-GRB is the Flemish large-scale topographic reference. This plugin declares its
-public WFS layers used for civil-works surface classification: ``WBN`` (chaussée
-/ wegbaan) and ``WGA`` (accotements / wegaanhorigheid). GISPulse core owns the
-WFS dispatch; harmonisation (GRB type → gc_surface) stays OUTSIDE this plugin.
+WBN describes carriageway footprints; WGA describes ancillary road structures,
+not sidewalk polygons. WGO road subdivision boundaries require upstream
+geometric reconstruction before use as areas. WFS dispatch belongs to core;
+client material mapping and all prices stay outside this plugin.
 
-WFS native CRS is EPSG:31370 (Lambert 72) — no reprojection needed. Polygons
-carry a functional ``TYPE``/``LBLTYPE`` (carriageway zone, sidewalk…), the basis
-for the BOM cost tiers (sous revêtement / trottoir). Flanders only (PICC Wallonie
-has no WFS, UrbIS Brussels is a separate datastore).
+Output CRS is EPSG:31370. TYPE/LBLTYPE describe function, not paving material.
+PICC Wallonia and UrbIS Brussels are separate regional source plugins.
 """
 
 from __future__ import annotations
@@ -67,7 +65,7 @@ _ENTRIES: dict[str, dict[str, Any]] = {
         "kind": "carriageway",
     },
     "grb-aanhorigheid-vl": {
-        "label": "GRB wegaanhorigheid (accotements) — Flandre",
+        "label": "GRB wegaanhorigheid (constructions annexes) — Flandre",
         "typename": "GRB:WGA",
         "kind": "appurtenance",
     },

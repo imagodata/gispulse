@@ -20,7 +20,8 @@ No geodata committed. No changes to consumer canonical configuration or routing 
 ## Remaining milestones
 - [ ] Verify PICC NIVEAU semantics and matching of road axes to footprints against official source contracts.
 - [ ] Extend existing GRB source where needed; WGA is ancillary structures, not sidewalk polygons.
-- [ ] UrbIS source acquisition and level/axis/footprint contracts.
+- [x] UrbIS source acquisition (StreetSurfaces, StreetAxes, Bridges, Tunnels), counted WFS and live small-area validation.
+- [ ] Validate UrbIS level/axis/footprint reconciliation contract.
 - [ ] Prepare representative consumer artifacts and validate coverage/GC reconciliation in MILOU.
 - [ ] Full regional acquisition, consumer activation, then routing cache regeneration.
 

@@ -42,6 +42,9 @@ _RESERVED_PARAMS = frozenset(
         "crs",
         "max_features",
         "cql_filter",
+        "pagination",
+        "require_extent",
+        "retry",
     }
 )
 
@@ -113,11 +116,17 @@ class WfsFetcher:
         from gispulse.adapters.ogc.wfs_client import fetch_wfs
 
         cfg, params = _ogc_config_from_access(access, source_type="wfs")
-        gdf = fetch_wfs(
-            cfg,
-            bbox=_bbox_from_extent(extent),
-            cql_filter=params.get("cql_filter"),
-        )
+        report: dict[str, Any] = {}
+        if "pagination" in params:
+            from gispulse.adapters.ogc.counted_wfs import fetch_counted_wfs
+
+            gdf, report = fetch_counted_wfs(cfg, params, _bbox_from_extent(extent))
+        else:
+            gdf = fetch_wfs(
+                cfg,
+                bbox=_bbox_from_extent(extent),
+                cql_filter=params.get("cql_filter"),
+            )
         log.info(
             "wfs_fetch",
             endpoint=access.endpoint,
@@ -129,7 +138,7 @@ class WfsFetcher:
             mode=mode,
             data=gdf,
             crs=cfg.crs,
-            metadata={"layer": cfg.layer_name, "feature_count": len(gdf)},
+            metadata={"layer": cfg.layer_name, "feature_count": len(gdf), **report},
         )
 
 

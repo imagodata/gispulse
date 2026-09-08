@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gispulse-src-urbis"
+version = "0.1.0"
+description = "UrbIS Brussels road surfaces, axes and structures via counted WFS"
+requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+dependencies = ["gispulse>=2.3.0,<3.0.0"]
+
+[project.entry-points."gispulse.data_sources"]
+urbis = "gispulse_src_urbis:register"
+
+[tool.gispulse.plugin]
+kind = "source"
+protocol = ">=1.0,<2.0"
+domain = "base"
+jurisdiction = "BE"
+display_name = "UrbIS Brussels — roads and structures"
