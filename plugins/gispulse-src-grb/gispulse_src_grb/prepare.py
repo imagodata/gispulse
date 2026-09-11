@@ -13,6 +13,8 @@ from pathlib import Path
 
 from gispulse.adapters.ogc.wfs_fetcher import WfsFetcher
 from gispulse.adapters.rest.offset_pages import OffsetPagination
+from gispulse.capabilities.vector.classify_faces import validate_functional_faces
+from gispulse.capabilities.vector.classify_grb_faces import classify_grb_faces
 from gispulse.capabilities.vector.polygon_partition import partition_polygons
 from gispulse.core.io.geoparquet import write_geoparquet
 from gispulse_src_grb.source import GrbSource
@@ -25,6 +27,12 @@ _ENTRIES = (
     "grb-kunstwerk-vl",
 )
 
+# GeoJSON empties omit property schemas; the classification reads these codes.
+_CLASSIFIED_FIELDS = {
+    "grb-wegopdeling-vl": ("TYPE",),
+    "grb-wegsegment-vl": ("WS_OIDN", "VERH", "STATUS"),
+}
+
 
 def prepare_grb(
     *,
@@ -36,11 +44,17 @@ def prepare_grb(
     max_features: int = 1_000_000,
     area_tolerance_m2: float = 1e-6,
     length_tolerance_m: float = 1e-6,
+    boundary_tolerance_m: float = 1e-3,
+    axis_coverage_ratio_min: float = 0.8,
+    axis_min_extent_m: float = 5.0,
+    wcz_ratio_min: float = 0.4,
+    wrb_ratio_max: float = 0.5,
 ) -> dict:
-    """Publish raw layers plus unclassified candidate faces, never a costing layer.
+    """Publish raw layers, unclassified candidate faces and an evidence-based classification.
 
     Tolerances account for numerical residuals only; no snapping or simplification.
-    Limits apply per layer. The bbox is in the native EPSG:31370 CRS.
+    Limits apply per layer. The bbox is in the native EPSG:31370 CRS. The
+    classification thresholds are explicit and recorded in the report.
     """
     if (
         len(bbox) != 4
@@ -49,8 +63,16 @@ def prepare_grb(
         or bbox[1] >= bbox[3]
     ):
         raise ValueError("GRB_EXTENT_INVALID: ordered finite EPSG:31370 bbox required")
-    if any(not math.isfinite(v) or v < 0 for v in (area_tolerance_m2, length_tolerance_m)):
+    if any(
+        not math.isfinite(v) or v < 0
+        for v in (area_tolerance_m2, length_tolerance_m, boundary_tolerance_m, axis_min_extent_m)
+    ):
         raise ValueError("GRB_TOLERANCE_INVALID: nonnegative finite tolerances required")
+    if any(
+        not math.isfinite(v) or not 0.0 <= v <= 1.0
+        for v in (axis_coverage_ratio_min, wcz_ratio_min, wrb_ratio_max)
+    ):
+        raise ValueError("GRB_RATIO_INVALID: classification ratios required within [0, 1]")
     if output.exists():
         raise ValueError("GRB_OUTPUT_EXISTS: choose a fresh output directory")
     source = GrbSource()
@@ -72,6 +94,11 @@ def prepare_grb(
         "max_features": max_features,
         "area_tolerance_m2": area_tolerance_m2,
         "length_tolerance_m": length_tolerance_m,
+        "boundary_tolerance_m": boundary_tolerance_m,
+        "axis_coverage_ratio_min": axis_coverage_ratio_min,
+        "axis_min_extent_m": axis_min_extent_m,
+        "wcz_ratio_min": wcz_ratio_min,
+        "wrb_ratio_max": wrb_ratio_max,
         "ready_for_costing": False,
     }
     if not write:
@@ -85,7 +112,7 @@ def prepare_grb(
             frames[entry] = result.data
             # GeoJSON empties omit property schemas; restore typed empty source IDs for partitioning.
             if result.data.empty:
-                for column in ("OIDN", "UIDN"):
+                for column in ("OIDN", "UIDN", *_CLASSIFIED_FIELDS.get(entry, ())):
                     result.data[column] = []
             filename = entry + ".geoparquet"
             write_geoparquet(result.data, str(staging / filename), compression="zstd")
@@ -108,10 +135,42 @@ def prepare_grb(
             area_tolerance_m2=area_tolerance_m2,
             length_tolerance_m=length_tolerance_m,
         )
+        # candidate_faces and diagnostics never depended on Wegsegment before
+        # classification existed, and still do not: publish them first so a
+        # Wegsegment data defect (below) degrades the bundle instead of
+        # losing hours of paginated WFS acquisition outright.
         write_geoparquet(faces, str(staging / "candidate_faces.geoparquet"), compression="zstd")
         write_geoparquet(
             diagnostics, str(staging / "partition_diagnostics.geoparquet"), compression="zstd"
         )
+        try:
+            classified, classification = classify_grb_faces(
+                faces,
+                frames["grb-wegopdeling-vl"],
+                frames["grb-wegsegment-vl"],
+                axis_coverage_ratio_min=axis_coverage_ratio_min,
+                axis_min_extent_m=axis_min_extent_m,
+                wcz_ratio_min=wcz_ratio_min,
+                wrb_ratio_max=wrb_ratio_max,
+                boundary_tolerance_m=boundary_tolerance_m,
+                length_tolerance_m=length_tolerance_m,
+            )
+            # Self-check only: validate_functional_faces raising here would be a
+            # classification bug, never caught. Its own ready_for_costing column
+            # is NOT what gets published below — this chantier's mandate keeps
+            # that flag false until axis/structure reconciliation is complete,
+            # and a per-face True in the published file would invite a
+            # downstream reader to skip straight to costing on this alone.
+            validate_functional_faces(classified)
+            write_geoparquet(
+                classified, str(staging / "classified_faces.geoparquet"), compression="zstd"
+            )
+            classification_report = classification
+        except ValueError as exc:
+            # A single bad Wegsegment record (duplicate/blank ID, invalid
+            # geometry, missing required field) must not erase raw layers and
+            # candidate_faces that acquisition already paid for.
+            classification_report = {"status": "failed", "error": str(exc)}
         hashes = {}
         for file in sorted(staging.glob("*.geoparquet")):
             with file.open("rb") as stream:
@@ -123,6 +182,7 @@ def prepare_grb(
             fetched_at=datetime.now(UTC).isoformat(),
             candidate_faces=len(faces),
             topology=diagnostics.status.value_counts().sort_index().to_dict(),
+            classification=classification_report,
         )
         (staging / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         if output.exists():
@@ -144,6 +204,11 @@ def main() -> int:
     parser.add_argument("--max-features", type=int, default=1_000_000)
     parser.add_argument("--area-tolerance-m2", type=float, default=1e-6)
     parser.add_argument("--length-tolerance-m", type=float, default=1e-6)
+    parser.add_argument("--boundary-tolerance-m", type=float, default=1e-3)
+    parser.add_argument("--axis-coverage-ratio-min", type=float, default=0.8)
+    parser.add_argument("--axis-min-extent-m", type=float, default=5.0)
+    parser.add_argument("--wcz-ratio-min", type=float, default=0.4)
+    parser.add_argument("--wrb-ratio-max", type=float, default=0.5)
     args = parser.parse_args()
     try:
         report = prepare_grb(
@@ -155,6 +220,11 @@ def main() -> int:
             max_features=args.max_features,
             area_tolerance_m2=args.area_tolerance_m2,
             length_tolerance_m=args.length_tolerance_m,
+            boundary_tolerance_m=args.boundary_tolerance_m,
+            axis_coverage_ratio_min=args.axis_coverage_ratio_min,
+            axis_min_extent_m=args.axis_min_extent_m,
+            wcz_ratio_min=args.wcz_ratio_min,
+            wrb_ratio_max=args.wrb_ratio_max,
         )
     except Exception as exc:
         print(
