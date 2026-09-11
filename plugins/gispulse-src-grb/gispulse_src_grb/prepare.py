@@ -30,7 +30,7 @@ _ENTRIES = (
 # GeoJSON empties omit property schemas; the classification reads these codes.
 _CLASSIFIED_FIELDS = {
     "grb-wegopdeling-vl": ("TYPE",),
-    "grb-wegsegment-vl": ("WS_OIDN", "VERH", "STATUS"),
+    "grb-wegsegment-vl": ("WS_OIDN", "VERH", "STATUS", "MORF"),
 }
 
 
@@ -47,6 +47,7 @@ def prepare_grb(
     boundary_tolerance_m: float = 1e-3,
     axis_coverage_ratio_min: float = 0.8,
     axis_min_extent_m: float = 5.0,
+    unsplit_max_width_m: float = 12.0,
 ) -> dict:
     """Publish raw layers, unclassified candidate faces and an evidence-based classification.
 
@@ -61,9 +62,18 @@ def prepare_grb(
         or bbox[1] >= bbox[3]
     ):
         raise ValueError("GRB_EXTENT_INVALID: ordered finite EPSG:31370 bbox required")
-    if any(
-        not math.isfinite(v) or v < 0
-        for v in (area_tolerance_m2, length_tolerance_m, boundary_tolerance_m, axis_min_extent_m)
+    if (
+        any(
+            not math.isfinite(v) or v < 0
+            for v in (
+                area_tolerance_m2,
+                length_tolerance_m,
+                boundary_tolerance_m,
+                axis_min_extent_m,
+            )
+        )
+        or not math.isfinite(unsplit_max_width_m)
+        or unsplit_max_width_m <= 0
     ):
         raise ValueError("GRB_TOLERANCE_INVALID: nonnegative finite tolerances required")
     if not math.isfinite(axis_coverage_ratio_min) or not 0.0 <= axis_coverage_ratio_min <= 1.0:
@@ -92,6 +102,7 @@ def prepare_grb(
         "boundary_tolerance_m": boundary_tolerance_m,
         "axis_coverage_ratio_min": axis_coverage_ratio_min,
         "axis_min_extent_m": axis_min_extent_m,
+        "unsplit_max_width_m": unsplit_max_width_m,
         "ready_for_costing": False,
     }
     if not write:
@@ -143,6 +154,7 @@ def prepare_grb(
                 frames["grb-wegsegment-vl"],
                 axis_coverage_ratio_min=axis_coverage_ratio_min,
                 axis_min_extent_m=axis_min_extent_m,
+                unsplit_max_width_m=unsplit_max_width_m,
                 boundary_tolerance_m=boundary_tolerance_m,
                 length_tolerance_m=length_tolerance_m,
             )
@@ -205,6 +217,7 @@ def main() -> int:
     parser.add_argument("--boundary-tolerance-m", type=float, default=1e-3)
     parser.add_argument("--axis-coverage-ratio-min", type=float, default=0.8)
     parser.add_argument("--axis-min-extent-m", type=float, default=5.0)
+    parser.add_argument("--unsplit-max-width-m", type=float, default=12.0)
     args = parser.parse_args()
     try:
         report = prepare_grb(
@@ -219,6 +232,7 @@ def main() -> int:
             boundary_tolerance_m=args.boundary_tolerance_m,
             axis_coverage_ratio_min=args.axis_coverage_ratio_min,
             axis_min_extent_m=args.axis_min_extent_m,
+            unsplit_max_width_m=args.unsplit_max_width_m,
         )
     except Exception as exc:
         print(

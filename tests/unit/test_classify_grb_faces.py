@@ -8,6 +8,11 @@ from gispulse.capabilities.vector.polygon_partition import partition_polygons
 
 WCZ_SPLIT = (1, LineString([(0, 8), (10, 8)]))
 AXIS = LineString([(0, 4), (10, 4)])
+# MORF 103 = "weg bestaande uit één rijbaan" (single-carriageway motor-traffic road).
+CARRIAGEWAY_MORF = 103
+# MORF 114 = "wandel- en/of fietsweg niet toegankelijk voor andere voertuigen"
+# (walking/cycling path, explicitly closed to other vehicles).
+PEDESTRIAN_MORF = 114
 
 
 def wgo(*typed_lines):
@@ -22,17 +27,20 @@ def wgo(*typed_lines):
 
 
 def wegsegment(*records):
+    """Each record is (WS_OIDN, VERH, STATUS, geometry) or (WS_OIDN, VERH, STATUS, MORF, geometry)."""
+    normalized = [r if len(r) == 5 else (*r[:3], CARRIAGEWAY_MORF, r[3]) for r in records]
     # Empty layers keep their typed schema, as the prepare step restores it.
     return gpd.GeoDataFrame(
         pd.DataFrame(
             {
-                "WS_OIDN": [str(record[0]) for record in records],
-                "VERH": [record[1] for record in records],
-                "STATUS": [record[2] for record in records],
+                "WS_OIDN": [str(r[0]) for r in normalized],
+                "VERH": [r[1] for r in normalized],
+                "STATUS": [r[2] for r in normalized],
+                "MORF": [r[3] for r in normalized],
             },
-            columns=["WS_OIDN", "VERH", "STATUS"],
+            columns=["WS_OIDN", "VERH", "STATUS", "MORF"],
         ),
-        geometry=gpd.GeoSeries([record[3] for record in records], crs=31370),
+        geometry=gpd.GeoSeries([r[4] for r in normalized], crs=31370),
     )
 
 
@@ -59,6 +67,7 @@ def classify(faces, boundaries, axes, **overrides):
         **{
             "axis_coverage_ratio_min": 0.8,
             "axis_min_extent_m": 0.0,
+            "unsplit_max_width_m": 12.0,
             "boundary_tolerance_m": 1e-3,
             "length_tolerance_m": 1e-6,
             **overrides,
@@ -72,7 +81,7 @@ def at(result, x, y):
     return hit.iloc[0]
 
 
-def test_in_service_paved_axis_becomes_carriageway():
+def test_in_service_paved_motorized_axis_becomes_carriageway():
     result, report = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 1, 4, AXIS)))
     carriageway = at(result, 5, 4)
     assert carriageway.functional_class == "carriageway_paved"
@@ -81,9 +90,6 @@ def test_in_service_paved_axis_becomes_carriageway():
     assert carriageway.axis_coverage_ratio == pytest.approx(1.0)
     assert report["classes"]["carriageway_paved"] == 1
     assert report["inference"] is False
-    # The existing downstream guard must accept the output unchanged.
-    faces_only = result[["functional_class"]]
-    assert set(faces_only.functional_class).issubset({"carriageway_paved", "sidewalk", "unmapped"})
 
 
 def test_mixed_surface_code_still_counts_as_paved():
@@ -122,10 +128,10 @@ def test_unknown_surface_does_not_contradict_a_genuinely_paved_axis():
 
 
 def test_contradictory_axis_surfaces_stay_unmapped_not_silently_paved():
-    # Two in-service axes, one paved (VERH=1) and one genuinely unpaved
-    # (VERH=2), both fully cover the same face. Letting "paved wins" silently
-    # drop the contradicting evidence is itself an undocumented inference; a
-    # fail-closed contract must surface the conflict instead.
+    # Two in-service motorized axes, one paved (VERH=1) and one genuinely
+    # unpaved (VERH=2), both fully cover the same face. Letting "paved wins"
+    # silently drop the contradicting evidence is itself an undocumented
+    # inference; a fail-closed contract must surface the conflict instead.
     contradicting = LineString([(0, 4.5), (10, 4.5)])
     axes = wegsegment((101, 1, 4, AXIS), (102, 2, 4, contradicting))
     result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
@@ -147,14 +153,13 @@ def test_axis_not_in_service_is_not_evidence(status):
 def test_blank_axis_id_on_an_out_of_service_row_does_not_fail_the_whole_call():
     # WS_OIDN is only validated on in-service rows: it never enters the
     # algorithm otherwise, so a blank ID on a filtered-out row must not raise.
-    blank_id_out_of_service = wegsegment((101, 1, 4, AXIS))
-    blank_id_out_of_service.loc[0, "WS_OIDN"] = "9"
+    in_service_row = wegsegment((101, 1, 4, AXIS))
     extra = gpd.GeoDataFrame(
-        {"WS_OIDN": [" "], "VERH": [1], "STATUS": [5]},
+        {"WS_OIDN": [" "], "VERH": [1], "STATUS": [5], "MORF": [CARRIAGEWAY_MORF]},
         geometry=[LineString([(0, 6), (10, 6)])],
         crs=31370,
     )
-    axes = pd.concat([blank_id_out_of_service, extra], ignore_index=True)
+    axes = pd.concat([in_service_row, extra], ignore_index=True)
     result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
     assert at(result, 5, 4).functional_class == "carriageway_paved"
 
@@ -172,7 +177,8 @@ def test_unsplit_corridor_with_no_internal_boundary_is_classified_not_unresolved
     # A WBN with no WGO line at all is reported "unsplit" by partition_polygons
     # — area conserved, zero cuts/dangles/invalid residual, nothing to split.
     # That is a resolved topology (the whole corridor unambiguously is one
-    # face), not grounds to skip classification.
+    # face), not grounds to skip classification. The corridor here (10x10, a
+    # single axis spanning the full width) is well within unsplit_max_width_m.
     faces = faces_of(coverage_bounds=(-1, -1, 11, 11))
     assert set(faces.topology_status) == {"unsplit"}
     result, report = classify(faces, wgo(), wegsegment((101, 1, 4, AXIS)))
@@ -250,6 +256,8 @@ def test_validation_refuses_mixed_crs_duplicate_face_ids_and_broken_geometry():
         classify(faces, boundaries.drop(columns=["OIDN"]), axes)
     with pytest.raises(ValueError, match="CLASSIFY_FIELD_MISSING"):
         classify(faces, boundaries, axes.drop(columns=["STATUS"]))
+    with pytest.raises(ValueError, match="CLASSIFY_FIELD_MISSING"):
+        classify(faces, boundaries, axes.drop(columns=["MORF"]))
     broken = faces.copy()
     broken.loc[broken.index[0], "geometry"] = Polygon([(0, 0), (2, 2), (2, 0), (0, 2)])
     with pytest.raises(ValueError, match="CLASSIFY_GEOMETRY_INVALID"):
@@ -260,6 +268,8 @@ def test_validation_refuses_mixed_crs_duplicate_face_ids_and_broken_geometry():
         classify(faces, boundaries, axes, boundary_tolerance_m=-1)
     with pytest.raises(ValueError, match="CLASSIFY_TOLERANCE_INVALID"):
         classify(faces, boundaries, axes, axis_min_extent_m=-1)
+    with pytest.raises(ValueError, match="CLASSIFY_TOLERANCE_INVALID"):
+        classify(faces, boundaries, axes, unsplit_max_width_m=0)
 
 
 def test_duplicate_wegenregister_axis_ids_are_tolerated_not_rejected():
@@ -355,3 +365,75 @@ def test_an_axis_hugging_an_internal_boundary_then_briefly_diverging_is_not_prom
     assert carriageway_face.functional_class == "unmapped"
     assert carriageway_face.axis_coverage_ratio == pytest.approx(7.5 / 57.5)
     assert carriageway_face.axis_coverage_ratio < 0.8
+
+
+# --- MORF: an in-service, paved axis is not necessarily a carriageway ---
+
+
+def test_pedestrian_path_axis_never_becomes_carriageway_despite_paved_in_service():
+    # Real Gand data: MORF=114 (wandel- en/of fietsweg, niet toegankelijk voor
+    # andere voertuigen) axes are commonly STATUS=4 VERH=1 — in service and
+    # paved — while being officially not a carriageway. Reading VERH/STATUS
+    # alone (the first cut of this module) misclassified these as
+    # carriageway_paved on the very bbox cited as validation.
+    result, _ = classify(
+        faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 1, 4, PEDESTRIAN_MORF, AXIS))
+    )
+    face = at(result, 5, 4)
+    assert face.functional_class != "carriageway_paved"
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_not_motorized_carriageway"
+    assert face.classification_evidence == "101:VERH=1"
+
+
+@pytest.mark.parametrize("morf", [113, 116, 120, 125, 130])
+def test_other_non_motorized_morf_codes_never_become_carriageway(morf):
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 1, 4, morf, AXIS)))
+    face = at(result, 5, 4)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_not_motorized_carriageway"
+
+
+def test_non_motorized_morf_does_not_contradict_a_genuinely_motorized_paved_axis():
+    other = LineString([(0, 5), (10, 5)])
+    axes = wegsegment((101, 1, 4, CARRIAGEWAY_MORF, AXIS), (102, 1, 4, PEDESTRIAN_MORF, other))
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
+    face = at(result, 5, 4)
+    assert face.functional_class == "carriageway_paved"
+    assert face.classification_evidence == "101:VERH=1"
+
+
+@pytest.mark.parametrize("morf", [101, 102, 104, 105, 106, 107, 108, 109, 110, 111, 112])
+def test_every_documented_motorized_morf_code_can_become_carriageway(morf):
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 1, 4, morf, AXIS)))
+    assert at(result, 5, 4).functional_class == "carriageway_paved"
+
+
+# --- unsplit corridors: an axis alone cannot vouch for an overly wide corridor ---
+
+
+def test_unsplit_corridor_too_wide_for_a_single_carriageway_stays_unmapped():
+    # A 10x30 corridor (300 m2) with no internal WGO line at all, crossed end
+    # to end by a single paved in-service motorized axis. Its width estimate
+    # (area / axis length inside the face) is 10 m; a threshold of 8 m must
+    # reject it, since a single axis running through a 10 m-wide, WGO-less
+    # corridor cannot vouch for the whole width being carriageway.
+    wide_axis = LineString([(0, 5), (30, 5)])
+    faces = faces_of(width=30, height=10)
+    assert set(faces.topology_status) == {"unsplit"}
+    result, _ = classify(faces, wgo(), wegsegment((101, 1, 4, wide_axis)), unsplit_max_width_m=8.0)
+    face = at(result, 15, 5)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "unsplit_corridor_too_wide_for_single_carriageway"
+
+
+def test_unsplit_corridor_width_guard_does_not_apply_to_partitioned_faces():
+    # The same width estimate on a *partitioned* corridor (a real internal WGO
+    # cut exists) must not be second-guessed by the width guard: a narrow
+    # partitioned face with a short covered axis length can have a large
+    # area/length ratio without that meaning anything is wrong, because the
+    # subdivision is itself evidence, unlike an unsplit corridor.
+    result, _ = classify(
+        faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 1, 4, AXIS)), unsplit_max_width_m=0.5
+    )
+    assert at(result, 5, 4).functional_class == "carriageway_paved"

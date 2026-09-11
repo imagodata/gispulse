@@ -154,8 +154,9 @@ def test_grb_bundle_publishes_a_separate_evidence_based_classification(tmp_path,
 
     from gispulse_src_grb.prepare import prepare_grb
 
+    # MORF=103: "weg bestaande uit één rijbaan" — a documented motor-traffic code.
     wegsegment = gpd.GeoDataFrame(
-        {"OIDN": [1], "WS_OIDN": ["9"], "VERH": [1], "STATUS": [4]},
+        {"OIDN": [1], "WS_OIDN": ["9"], "VERH": [1], "STATUS": [4], "MORF": [103]},
         geometry=[LineString([(0, 4), (10, 4)])],
         crs=31370,
     )
@@ -191,6 +192,30 @@ def test_grb_bundle_publishes_a_separate_evidence_based_classification(tmp_path,
     assert "ready_for_costing" not in classified.columns
     # The candidate contract stays deliberately unclassified.
     assert "functional_class" not in gpd.read_parquet(output / "candidate_faces.geoparquet")
+
+
+def test_grb_bundle_never_labels_a_pedestrian_path_as_carriageway(tmp_path, monkeypatch):
+    """End-to-end regression for the real Gand false positive: MORF=114 (walking/
+    cycling path, closed to other vehicles) STATUS=4 VERH=1 must not become
+    carriageway_paved just because it is a paved, in-service axis."""
+    import geopandas as gpd
+    from shapely.geometry import LineString
+
+    from gispulse_src_grb.prepare import prepare_grb
+
+    pedestrian_path = gpd.GeoDataFrame(
+        {"OIDN": [1], "WS_OIDN": ["9"], "VERH": [1], "STATUS": [4], "MORF": [114]},
+        geometry=[LineString([(0, 4), (10, 4)])],
+        crs=31370,
+    )
+    _grb_wfs_stub(monkeypatch, wegsegment=pedestrian_path)
+    output = tmp_path / "bundle"
+    report = prepare_grb(bbox=(-1, -1, 11, 11), output=output, write=True)
+
+    assert report["classification"]["classes"]["carriageway_paved"] == 0
+    assert report["classification"]["reasons"].get("axis_not_motorized_carriageway", 0) >= 1
+    classified = gpd.read_parquet(output / "classified_faces.geoparquet")
+    assert "carriageway_paved" not in set(classified.functional_class)
 
 
 def test_grb_bundle_survives_a_broken_wegsegment_layer_and_degrades_classification(
