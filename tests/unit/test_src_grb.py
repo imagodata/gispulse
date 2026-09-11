@@ -114,3 +114,104 @@ def test_grb_failure_on_second_layer_never_publishes_prefix(tmp_path, monkeypatc
     with pytest.raises(ValueError, match="COUNT_INVALID"):
         prepare_grb(bbox=(0, 0, 2, 2), output=tmp_path / "bundle", write=True)
     assert list(tmp_path.iterdir()) == []
+
+
+def _grb_wfs_stub(monkeypatch, *, wegsegment):
+    """Patch WfsFetcher.fetch to serve a small synthetic GRB bundle.
+
+    ``wegsegment`` is injected as given so a test can hand over a broken frame
+    (missing column, duplicate/blank ID, invalid geometry) without touching
+    WBN/WGO, which stay valid throughout.
+    """
+    from types import SimpleNamespace
+
+    import geopandas as gpd
+    from shapely.geometry import LineString, box
+
+    from gispulse.adapters.ogc.wfs_fetcher import WfsFetcher
+
+    layers = {
+        "GRB:WBN": gpd.GeoDataFrame({"OIDN": [1]}, geometry=[box(0, 0, 10, 10)], crs=31370),
+        "GRB:WGO": gpd.GeoDataFrame(
+            {"OIDN": [1], "TYPE": [1]}, geometry=[LineString([(0, 8), (10, 8)])], crs=31370
+        ),
+        "GRB:Wegsegment": wegsegment,
+    }
+    other = gpd.GeoDataFrame({"OIDN": [1]}, geometry=[box(0, 0, 1, 1)], crs=31370)
+
+    def fetch(self, access, extent):
+        data = layers.get(access.params["typename"], other)
+        return SimpleNamespace(data=data.copy(), metadata={})
+
+    monkeypatch.setattr(WfsFetcher, "fetch", fetch)
+
+
+def test_grb_bundle_publishes_a_separate_evidence_based_classification(tmp_path, monkeypatch):
+    import json
+
+    import geopandas as gpd
+    from shapely.geometry import LineString
+
+    from gispulse_src_grb.prepare import prepare_grb
+
+    wegsegment = gpd.GeoDataFrame(
+        {"OIDN": [1], "WS_OIDN": ["9"], "VERH": [1], "STATUS": [4]},
+        geometry=[LineString([(0, 4), (10, 4)])],
+        crs=31370,
+    )
+    _grb_wfs_stub(monkeypatch, wegsegment=wegsegment)
+    output = tmp_path / "bundle"
+    report = prepare_grb(bbox=(-1, -1, 11, 11), output=output, write=True)
+
+    assert report["classification"]["classes"] == {
+        "carriageway_paved": 1,
+        "sidewalk": 1,
+        "unmapped": 0,
+    }
+    assert report["classification"]["inference"] is False
+    # The chantier's mandate keeps this false until axis/structure
+    # reconciliation is complete; a per-face flag must not contradict it.
+    assert report["ready_for_costing"] is False
+    assert (
+        json.loads((output / "report.json").read_text())["classification"]["thresholds"][
+            "wcz_ratio_min"
+        ]
+        == 0.4
+    )
+    classified = gpd.read_parquet(output / "classified_faces.geoparquet")
+    assert set(classified.functional_class) == {"carriageway_paved", "sidewalk"}
+    assert "in_service_paved_axis" in set(classified.classification_reason)
+    # No per-face ready_for_costing leaks into the published file: only
+    # validate_functional_faces' own return value carries that column, and it
+    # is used here purely as an internal self-check, never written out.
+    assert "ready_for_costing" not in classified.columns
+    # The candidate contract stays deliberately unclassified.
+    assert "functional_class" not in gpd.read_parquet(output / "candidate_faces.geoparquet")
+
+
+def test_grb_bundle_survives_a_broken_wegsegment_layer_and_degrades_classification(
+    tmp_path, monkeypatch
+):
+    """A Wegsegment defect must not erase acquisition the raw layers already paid for."""
+    import geopandas as gpd
+    from shapely.geometry import LineString
+
+    from gispulse_src_grb.prepare import prepare_grb
+
+    # Missing VERH entirely: classify_grb_faces raises GRB_CLASSIFY_FIELD_MISSING.
+    broken = gpd.GeoDataFrame(
+        {"OIDN": [1], "WS_OIDN": ["9"], "STATUS": [4]},
+        geometry=[LineString([(0, 4), (10, 4)])],
+        crs=31370,
+    )
+    _grb_wfs_stub(monkeypatch, wegsegment=broken)
+    output = tmp_path / "bundle"
+    report = prepare_grb(bbox=(-1, -1, 11, 11), output=output, write=True)
+
+    assert report["status"] == "prepared_candidates"
+    assert report["classification"]["status"] == "failed"
+    assert "GRB_CLASSIFY_FIELD_MISSING" in report["classification"]["error"]
+    assert (output / "candidate_faces.geoparquet").exists()
+    assert (output / "partition_diagnostics.geoparquet").exists()
+    assert (output / "grb-wegsegment-vl.geoparquet").exists()
+    assert not (output / "classified_faces.geoparquet").exists()
