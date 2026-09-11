@@ -44,9 +44,9 @@ PYTHONPATH=src:plugins/gispulse-src-grb uv run python -m gispulse_src_grb.prepar
 Controls: `--page-size` (2000), `--max-pages` (1000), `--max-features` (1000000),
 `--area-tolerance-m2` and `--length-tolerance-m` (both 1e-6). The last two are
 numerical diagnostic tolerances, not survey accuracy or snapping distances.
-`--boundary-tolerance-m`, `--axis-coverage-ratio-min`, `--axis-min-extent-m`,
-`--wcz-ratio-min` and `--wrb-ratio-max` drive the classification below.
-Processing is in memory; choose bounded study areas and a halo around the target.
+`--boundary-tolerance-m`, `--axis-coverage-ratio-min` and `--axis-min-extent-m`
+drive the classification below. Processing is in memory; choose bounded study
+areas and a halo around the target.
 
 All raw GeoParquet layers, `candidate_faces.geoparquet`,
 `classified_faces.geoparquet`, `partition_diagnostics.geoparquet` and
@@ -91,69 +91,53 @@ classification failure (for example a broken Wegsegment record) degrades to a
 `classification: {"status": "failed", "error": ...}` report section rather
 than losing the raw layers and `candidate_faces.geoparquet` already acquired.
 
-Classification runs in two passes over each corridor (the union of its
-`partitioned` and `unsplit` faces — both keep area conservation with no
-topology anomaly; `unsplit` simply has nothing to subdivide, which is not
-"unresolved"). A face whose own `topology_status` is neither gives `unmapped`,
-reason `unresolved_topology:<status>`, without consulting axes or boundaries.
-
-**Pass 1 — axis evidence.** For a resolved face, every Wegsegment axis with
-`STATUS=4` (in service) whose length inside the corridor is at least
-`--axis-min-extent-m` *and* whose share of that length falls inside this face
-is at least `--axis-coverage-ratio-min` becomes a candidate.
+For each resolved face (the union of a corridor's `partitioned` and `unsplit`
+faces — both keep area conservation with no topology anomaly; `unsplit`
+simply has nothing to subdivide, which is not "unresolved"), every Wegsegment
+axis with `STATUS=4` (in service) whose length inside the corridor is at
+least `--axis-min-extent-m` *and* whose share of that length falls inside
+this face is at least `--axis-coverage-ratio-min` becomes a candidate.
 
 - All candidates paved (`VERH` 1 or 12): `carriageway_paved`, reason
   `in_service_paved_axis`, evidence citing every retained `WS_OIDN:VERH`.
-- All candidates not paved: `unmapped`, reason `axis_surface_not_paved`.
-- A mix of both: `unmapped`, reason `contradictory_axis_surface` — an
-  in-service axis disagreeing with itself on `VERH` is a data conflict, not
-  something this step resolves by picking a winner.
-- No candidate at all: undecided, carried into pass 2.
-
-**Pass 2 — boundary evidence, anchored to a proven carriageway.** WGO `TYPE`
-qualifies the *boundary line itself*, not the area it delimits (see the
-official semantics above): a Wcz line borders both the slow-user zone and the
-carriageway beside it, so a face's own Wcz perimeter share alone never proves
-which side it is on — it is only evidence once anchored to a face pass 1
-already proved `carriageway_paved` in the *same* corridor. A face that does
-not share a boundary with such a face (longer than `--boundary-tolerance-m`)
-stays `unmapped`, reason `no_carriageway_anchor_in_corridor` — including every
-face in a corridor with no proven carriageway at all. For an anchored face:
-
-- Wcz share below `--wcz-ratio-min`: `unmapped`, reason
-  `woz_only_not_sidewalk` if the Woz share reaches that same threshold,
-  otherwise `no_dominant_wcz_boundary`. Woz is the unpaved shoulder and is
-  reported but never mapped to `sidewalk`.
-- Wrb share above `--wrb-ratio-max`, or at least the Wcz share: `unmapped`,
-  reason `wrb_boundary_dominant`.
-- Otherwise: `sidewalk`, reason `dominant_wcz_boundary`, evidence citing the
-  touching WGO `OIDN`s.
+- All candidates unpaved (`VERH` 2): `unmapped`, reason
+  `axis_surface_not_paved`.
+- A mix of paved and unpaved: `unmapped`, reason `contradictory_axis_surface`
+  — an in-service axis disagreeing with itself on `VERH` is a data conflict,
+  not something this step resolves by picking a winner.
+- Candidates present but all `VERH` unknown/not-applicable (-8/-9): `unmapped`,
+  reason `axis_surface_unknown` — an unknown code is insufficient evidence,
+  never a contradiction of a genuinely paved or unpaved axis on the same face.
+- No usable candidate at all: `unmapped`, reason `no_in_service_axis_evidence`.
+  A face whose `topology_status` is not `partitioned`/`unsplit` gives
+  `unmapped` first, reason `unresolved_topology:<status>`, without consulting
+  axes at all.
 
 Defaults: `--axis-coverage-ratio-min 0.8`, `--axis-min-extent-m 5.0`,
-`--wcz-ratio-min 0.4`, `--wrb-ratio-max 0.5`, `--boundary-tolerance-m 0.001`.
-The axis ratio's denominator is the axis length inside the *corridor*, not its
-total length, because a Wegsegment normally runs across several corridors —
-but that ratio alone does not stop a short in-service paved stub (a driveway
-or side-street graze at a junction) from scoring 1.0 purely because it never
-leaves the one face it grazes. `--axis-min-extent-m` is the absolute floor
-that catches that case: 5 m is twice the official minimum Wrb (paved
-carriageway) width of 2.5 m, enough to distinguish an axis that actually runs
-through the corridor from one that merely touches it. Numerator and
-denominator both exclude, identically, any run collinear with *any* boundary
-in the corridor (its outer edge and every internal WGO cut) — not just the
-target face's own boundary — so an axis that hugs an internal boundary before
-turning to genuinely cross into a face is not penalised for the hugging
-stretch, while an axis lying entirely on a shared boundary never becomes a
-candidate for any face (extent 0), regardless of how low
-`--axis-coverage-ratio-min` is set. A rectangular sidewalk has only one of its
-two long sides on the Wcz, so its perimeter share tops out near 0.5; requiring
-0.4 means most of that side must be an actual Wcz. One millimetre is below
-GRB survey accuracy and above GEOS noding residuals: it compares distances and
-never moves a coordinate, and the same tolerance also gates the minimum shared
-length pass 2 requires between a face and its carriageway anchor.
+`--boundary-tolerance-m 0.001`. The axis ratio's denominator is the axis
+length inside the *corridor*, not its total length, because a Wegsegment
+normally runs across several corridors — but that ratio alone does not stop a
+short in-service paved stub (a driveway or side-street graze at a junction)
+from scoring 1.0 purely because it never leaves the one face it grazes.
+`--axis-min-extent-m` is the absolute floor that catches that case: 5 m is
+twice the official minimum Wrb (paved carriageway) width of 2.5 m, enough to
+distinguish an axis that actually runs through the corridor from one that
+merely touches it. The numerator (an axis's length inside one face) excludes
+runs collinear with that face's own boundary — internal or outer — so an axis
+lying on a shared boundary proves membership of neither adjacent face; the
+denominator (the same axis's length inside the whole corridor) excludes only
+the corridor's *outer* boundary. This asymmetry is deliberate: a fully
+symmetric exclusion was tried and rejected after adversarial review (see
+below) because it shrinks the denominator by the same collinear stretch the
+numerator drops, letting an axis that mostly hugs an internal cut before a
+short genuine crossing reach ratio 1.0 for the face it diverges into. The
+asymmetric version instead understates that axis's evidence — a false
+negative, never a promotion.
 
 Each face carries `functional_class`, `classification_reason`,
-`classification_evidence` and the four measured ratios; `report.json` gains a
+`classification_evidence` and four measured ratios (`axis_coverage_ratio` plus
+`wcz_boundary_ratio`/`wrb_boundary_ratio`/`woz_boundary_ratio` — the share of
+the face's own perimeter carried by each WGO type); `report.json` gains a
 `classification` section with counts, areas and ratios per class and per
 reason, plus the thresholds used. `validate_functional_faces` runs on the
 result as an internal self-check before the file is written, but its own
@@ -162,14 +146,48 @@ chantier's mandate keeps that flag false until axis/structure reconciliation
 is complete, and a per-face `True` in the published file would invite a
 downstream reader to skip straight to costing on this step alone.
 
-Limits. Wcz bounds the *slow user* zone, which covers pedestrians and cyclists
-alike: a `sidewalk` face may be a cycle track. Capture follows the Wcz > Wrb >
-Woz priority, so a missing type is not evidence that the zone is absent; a
-corridor with no proven carriageway anywhere stays entirely `unmapped` rather
-than guessing a side from geometry alone. The step does not reconcile axes
-with KNW structures and does not certify a road crossing, so
-`ready_for_costing` stays false at the bundle level regardless of any per-face
-evidence.
+### Why there is no `sidewalk` class yet
+
+Two designs for deriving `sidewalk` from WGO boundary composition were built
+and rejected by adversarial review, both for the same underlying reason: WGO
+`TYPE` qualifies the *boundary line itself* (see the official semantics
+above), not the area it delimits, and a Wcz line borders **two** faces — the
+slow-user zone on one side, but also, just as validly, the carriageway
+beside it, or even one portion of the *same* carriageway split from another
+by a Wcz line at a raised pedestrian crossing. Nothing in WGO or Wegsegment
+tells these apart:
+
+1. A face's own Wcz perimeter share, used directly, is invertible: a
+   carriageway flanked by two Wcz lines can carry a *higher* Wcz share than a
+   genuine sidewalk beside it.
+2. Requiring the Wcz-dominant face to additionally be adjacent to a face pass
+   1 already proved `carriageway_paved` does not fix this: adjacency is
+   symmetric, so a carriageway split in two by a transversal Wcz line — one
+   side covered by a Wegsegment axis, the other not, which is a realistic gap
+   given axes commonly end at junctions — is adjacent to itself, and the
+   uncovered half gets misread as `sidewalk`.
+
+Both mechanisms are exercised as regression tests in
+`tests/unit/test_classify_grb_faces.py` and kept unmapped:
+`test_a_wcz_line_can_split_the_same_carriageway_without_being_misread_as_sidewalk`
+and
+`test_the_true_carriageway_flanked_by_two_wcz_lines_is_never_promoted_to_sidewalk`.
+This module therefore only ever produces `carriageway_paved` or `unmapped`;
+`sidewalk` is not currently reachable, even though
+`validate_functional_faces` still accepts it as a legal value for whichever
+future upstream evidence source makes it derivable without this ambiguity
+(the Wetteren POC's `fnc`/`mtc` split, PICC/UrbIS reconciliation, or a wider
+GRB attribute not yet reviewed here). `wcz_boundary_ratio`,
+`wrb_boundary_ratio` and `woz_boundary_ratio` are still measured and reported
+on every resolved face — diagnostic only, never decisive — so a future
+attempt, or a human reviewer, has the raw signal without this module
+asserting a conclusion from it.
+
+Limits. Capture follows the Wcz > Wrb > Woz priority, so a missing WGO type is
+not evidence that the corresponding zone is absent. The step does not
+reconcile axes with KNW structures and does not certify a road crossing, so
+`ready_for_costing` stays false at the bundle level regardless of any
+per-face evidence.
 
 ## KNW structure reconciliation — contract verified, not yet implemented
 
@@ -202,18 +220,26 @@ All five counts agreed before/after and all IDs were unique. Reconstruction:
 not a regional classification or crossing certificate.
 
 Classification re-run live on 2026-09-11 against the same bbox and the same
-five counts: 121 candidate faces classified into 36 `carriageway_paved`
-(38.0% of reconstructed area), 53 `sidewalk` (37.1%) and 32 `unmapped`
-(24.8%) — reasons `unresolved_topology:unresolved_lines` (17, the 3
-`unresolved_lines` corridors), `no_dominant_wcz_boundary` (11) and
-`woz_only_not_sidewalk` (4). Every ratio column stayed within `[0, 1]`; every
-`NaN` axis-coverage row was exactly the 17 unresolved-topology faces; every
-`sidewalk` face carried a non-empty WGO-`OIDN` evidence string; no
-`classified_faces.geoparquet` row carried a `ready_for_costing` column. Zero
-faces landed on `contradictory_axis_surface`, `wrb_boundary_dominant` or
-`no_carriageway_anchor_in_corridor` on this bbox — those paths exist for
-regional data this local sample did not happen to contain, and stay covered
-only by the unit tests' synthetic geometries. This is still a local
+five counts, after two rounds of adversarial review (the first round found the
+axis-graze false positive and the unsplit-corridor exclusion; the second round
+found that neither `sidewalk` design held up — see "Why there is no `sidewalk`
+class yet" above — and that a symmetric numerator/denominator fix introduced a
+worse regression than the asymmetry it "fixed"): 121 candidate faces
+classified into 36 `carriageway_paved` (38.0% of reconstructed area) and 85
+`unmapped` (62.0%) — reasons `no_in_service_axis_evidence` (68),
+`unresolved_topology:unresolved_lines` (17). 62 of those 68 unmapped faces
+still measure a nonzero `wcz_boundary_ratio` (reported, never decisive) —
+plausible sidewalks this module deliberately declines to assert. Every ratio
+column stayed within `[0, 1]`; every `NaN` axis-coverage row was exactly the
+17 unresolved-topology faces; no `classified_faces.geoparquet` row carried a
+`ready_for_costing` column. Zero faces landed on `contradictory_axis_surface`
+or `axis_surface_unknown` on this bbox — those paths exist for regional data
+this local sample did not happen to contain, and stay covered only by the
+unit tests' synthetic geometries. Coverage dropped sharply from an earlier,
+incorrect cut (which had reached 89/121 faces including a `sidewalk` class)
+to this one's 36/121 — the trade made deliberately, fail-closed, after that
+earlier cut's `sidewalk` mechanism was shown twice to be invertible on
+realistic synthetic geometry. This is still a local
 transport/topology/classification validation, not a regional classification
 or crossing certificate.
 

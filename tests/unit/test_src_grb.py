@@ -165,8 +165,12 @@ def test_grb_bundle_publishes_a_separate_evidence_based_classification(tmp_path,
 
     assert report["classification"]["classes"] == {
         "carriageway_paved": 1,
-        "sidewalk": 1,
-        "unmapped": 0,
+        "sidewalk": 0,
+        "unmapped": 1,
+    }
+    assert report["classification"]["reasons"] == {
+        "in_service_paved_axis": 1,
+        "no_in_service_axis_evidence": 1,
     }
     assert report["classification"]["inference"] is False
     # The chantier's mandate keeps this false until axis/structure
@@ -174,12 +178,12 @@ def test_grb_bundle_publishes_a_separate_evidence_based_classification(tmp_path,
     assert report["ready_for_costing"] is False
     assert (
         json.loads((output / "report.json").read_text())["classification"]["thresholds"][
-            "wcz_ratio_min"
+            "axis_coverage_ratio_min"
         ]
-        == 0.4
+        == 0.8
     )
     classified = gpd.read_parquet(output / "classified_faces.geoparquet")
-    assert set(classified.functional_class) == {"carriageway_paved", "sidewalk"}
+    assert set(classified.functional_class) == {"carriageway_paved", "unmapped"}
     assert "in_service_paved_axis" in set(classified.classification_reason)
     # No per-face ready_for_costing leaks into the published file: only
     # validate_functional_faces' own return value carries that column, and it
@@ -215,3 +219,41 @@ def test_grb_bundle_survives_a_broken_wegsegment_layer_and_degrades_classificati
     assert (output / "partition_diagnostics.geoparquet").exists()
     assert (output / "grb-wegsegment-vl.geoparquet").exists()
     assert not (output / "classified_faces.geoparquet").exists()
+
+
+def test_a_genuine_classifier_bug_is_never_relabelled_as_a_data_defect(tmp_path, monkeypatch):
+    """validate_functional_faces raising on a classifier's own output must propagate, not degrade.
+
+    Only classify_grb_faces' own GRB_CLASSIFY_* data-validation errors may
+    degrade the bundle to classification: {"status": "failed"}. A bug in the
+    classifier itself — here simulated by monkeypatching it to emit a class
+    validate_functional_faces does not accept — is a different failure mode
+    entirely and must surface as a crash, not a data-defect report.
+    """
+    import geopandas as gpd
+    from shapely.geometry import LineString
+
+    import gispulse_src_grb.prepare as prepare_module
+
+    wegsegment = gpd.GeoDataFrame(
+        {"OIDN": [1], "WS_OIDN": ["9"], "VERH": [1], "STATUS": [4]},
+        geometry=[LineString([(0, 4), (10, 4)])],
+        crs=31370,
+    )
+    _grb_wfs_stub(monkeypatch, wegsegment=wegsegment)
+
+    def buggy_classify(faces, *_args, **_kwargs):
+        broken = faces.copy()
+        broken["functional_class"] = "kerb_stone"  # not in classify_faces._ALLOWED
+        broken["classification_reason"] = "buggy"
+        broken["classification_evidence"] = ""
+        broken["axis_coverage_ratio"] = 0.0
+        broken["wcz_boundary_ratio"] = 0.0
+        broken["wrb_boundary_ratio"] = 0.0
+        broken["woz_boundary_ratio"] = 0.0
+        return broken, {"classes": {}, "reasons": {}, "inference": False}
+
+    monkeypatch.setattr(prepare_module, "classify_grb_faces", buggy_classify)
+    output = tmp_path / "bundle"
+    with pytest.raises(ValueError, match="GRB_FUNCTION_CLASS_UNKNOWN"):
+        prepare_module.prepare_grb(bbox=(-1, -1, 11, 11), output=output, write=True)
