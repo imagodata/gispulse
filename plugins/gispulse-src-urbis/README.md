@@ -61,3 +61,36 @@ transformed to EPSG:31370, returned 28 surfaces in 14 pages and 10 axes in 5 pag
 with page size 2; bridge/tunnel counts were zero in that small bbox. Separate
 one-feature service probes confirmed nonempty Bridges and Tunnels on a larger
 bbox. No regional coverage or client crossing decisions are certified by this test.
+
+## Level/axis/footprint reconciliation contract, verified 2026-09-11
+
+Source: the official product specifications ("UrbIS – Réseaux de transport" and
+"UrbIS – Occupation du sol", Paradigm.brussels, ISO 19131, 2024-01-01/2024-04-01).
+
+`lvl` (WFS `LVL`) is confirmed relative on every layer that carries it, in the
+producer's own words: on `StreetAxes` "par rapport à un axe qui lui est sécant",
+on `StreetNodes` "par rapport à un autre nœud", on `Railways` "par rapport à une
+autre qui lui est sécante", and on `StreetSurfaces`/`Bridges`/`Tunnels` "par
+rapport à un autre objet [de type] surfacique". None of these specs give `lvl`
+an absolute ground/bridge/tunnel meaning (unlike PICC `VOIRIE_SURFACE.NIVEAU` —
+see the PICC plugin README); this plugin's refusal to convert `LVL` into an
+absolute determination is the correct reading, confirmed against the source.
+
+`StreetSurfaces.TYPE` is exhaustively enumerated in the spec: `S` road segment,
+`SW` sidewalk ("surface généralement surélevée par rapport à la voirie, ... le
+cheminement des piétons"), `I` intersection of surfaces (not axes), `B` bridge,
+`C`/`SC` transit-reserved, `G` gallery, `K` parking, `M` median/roundabout
+divider, `MS`/`RS` metro/rail station access, `MT`/`RT` metro/rail tunnel, `A`/
+`AC` access ramps, `IC`/`IL` tram/level crossings, `P` place. No value maps to
+"footpath material" or "carriageway material" — only function, as the existing
+text already states.
+
+No segment-level foreign key exists between `StreetAxes` and `StreetSurfaces` in
+the official model. `StreetSurfaces.streetId` ("Identifiant unique du nom de
+rue") groups surfaces by **street name**, not by individual axis segment; it is
+not comparable to `StreetAxes.INSPIRE_ID`/`STARTSN_ID`/`ENDSN_ID`. A
+StreetAxes-to-StreetSurfaces reconciliation therefore has no official identifier
+to join on and must stay geometric and level-aware (nearest covering axis,
+filtered by matching relative `lvl` within the local neighbourhood) — this
+plugin does not perform that match, and any consumer building one must document
+it as a geometric approximation, not a sourced identity.
