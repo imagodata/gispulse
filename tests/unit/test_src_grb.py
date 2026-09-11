@@ -116,26 +116,34 @@ def test_grb_failure_on_second_layer_never_publishes_prefix(tmp_path, monkeypatc
     assert list(tmp_path.iterdir()) == []
 
 
-def _grb_wfs_stub(monkeypatch, *, wegsegment):
+def _grb_wfs_stub(monkeypatch, *, wegsegment, knw=None):
     """Patch WfsFetcher.fetch to serve a small synthetic GRB bundle.
 
     ``wegsegment`` is injected as given so a test can hand over a broken frame
     (missing column, duplicate/blank ID, invalid geometry) without touching
-    WBN/WGO, which stay valid throughout.
+    WBN/WGO, which stay valid throughout. ``knw`` defaults to an empty-but-
+    correctly-schemed frame so structure reconciliation succeeds (reports
+    "none" everywhere) rather than degrading on a missing TYPE column.
     """
     from types import SimpleNamespace
 
     import geopandas as gpd
+    import pandas as pd
     from shapely.geometry import LineString, box
 
     from gispulse.adapters.ogc.wfs_fetcher import WfsFetcher
 
+    if knw is None:
+        knw = gpd.GeoDataFrame(
+            pd.DataFrame({"OIDN": [], "TYPE": []}), geometry=gpd.GeoSeries([], crs=31370)
+        )
     layers = {
         "GRB:WBN": gpd.GeoDataFrame({"OIDN": [1]}, geometry=[box(0, 0, 10, 10)], crs=31370),
         "GRB:WGO": gpd.GeoDataFrame(
             {"OIDN": [1], "TYPE": [1]}, geometry=[LineString([(0, 8), (10, 8)])], crs=31370
         ),
         "GRB:Wegsegment": wegsegment,
+        "GRB:KNW": knw,
     }
     other = gpd.GeoDataFrame({"OIDN": [1]}, geometry=[box(0, 0, 1, 1)], crs=31370)
 
@@ -192,6 +200,37 @@ def test_grb_bundle_publishes_a_separate_evidence_based_classification(tmp_path,
     assert "ready_for_costing" not in classified.columns
     # The candidate contract stays deliberately unclassified.
     assert "functional_class" not in gpd.read_parquet(output / "candidate_faces.geoparquet")
+    # No KNW structures in this stub: reconciliation runs and flags nothing.
+    assert set(classified.structure_proximity) == {"none"}
+    assert report["classification"]["structure_reconciliation"]["flagged_faces"] == 0
+
+
+def test_grb_bundle_flags_faces_whose_corridor_touches_a_bridge(tmp_path, monkeypatch):
+    import geopandas as gpd
+    from shapely.geometry import LineString, box
+
+    from gispulse_src_grb.prepare import prepare_grb
+
+    wegsegment = gpd.GeoDataFrame(
+        {"OIDN": [1], "WS_OIDN": ["9"], "VERH": [1], "STATUS": [4], "MORF": [103]},
+        geometry=[LineString([(0, 4), (10, 4)])],
+        crs=31370,
+    )
+    # Touches the WBN box(0,0,10,10) exactly at its x=10 edge, as real bridges do.
+    bridge = gpd.GeoDataFrame(
+        {"OIDN": [501], "TYPE": [1]}, geometry=[box(10, 0, 12, 10)], crs=31370
+    )
+    _grb_wfs_stub(monkeypatch, wegsegment=wegsegment, knw=bridge)
+    output = tmp_path / "bundle"
+    report = prepare_grb(bbox=(-1, -1, 11, 11), output=output, write=True)
+
+    reconciliation = report["classification"]["structure_reconciliation"]
+    assert reconciliation["flagged_corridors"] == 1
+    assert reconciliation["proximity_counts"].get("bridge", 0) >= 1
+    classified = gpd.read_parquet(output / "classified_faces.geoparquet")
+    assert set(classified.structure_proximity) == {"bridge"}
+    # functional_class is untouched by reconciliation: still classifier-owned.
+    assert "carriageway_paved" in set(classified.functional_class)
 
 
 def test_grb_bundle_never_labels_a_pedestrian_path_as_carriageway(tmp_path, monkeypatch):
