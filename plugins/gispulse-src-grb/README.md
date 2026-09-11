@@ -171,6 +171,27 @@ with KNW structures and does not certify a road crossing, so
 `ready_for_costing` stays false at the bundle level regardless of any per-face
 evidence.
 
+## KNW structure reconciliation — contract verified, not yet implemented
+
+Official semantics (objectenhandboek, `kunstwerk-knw`): KNW geometry is a
+polygon. `TYPE` has 15 documented codes; only two describe a road structure —
+1 = overbrugging (bridge), 12 = tunnelmond (tunnel entrance). The other 13
+(hydraulic structures, monuments, pylons, chimneys, silos, wind turbines,
+breakwaters, palisades, …) cover unrelated infrastructure the layer also
+carries. `VORM`: 1 = enkelvoudig (single structure), 2 = samengesteld
+(several grouped installations).
+
+The official worked example is explicit about the WBN relationship: "the road
+(WBN) is interrupted at a bridge; the bridge is measured at ground level; the
+waterway underneath passes without interruption." A KNW bridge or tunnel
+entrance is therefore evidence of a **corridor discontinuity**, not a
+same-level road crossing — a candidate face near one should not be assumed
+drillable at grade without checking it. This is not yet implemented: no
+capability here reads KNW, and `classify_grb_faces` does not consult it.
+Building the reconciliation would need at minimum: identifying WBN corridors
+whose boundary sits near a KNW polygon typed 1 or 12, and flagging faces
+inside such a corridor as level-ambiguous rather than assuming ground level.
+
 ## Validation
 
 2026-09-08, the Gand bbox above, page size 5: 52 WBN (11 pages), 139 WGO
