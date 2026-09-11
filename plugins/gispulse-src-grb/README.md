@@ -96,32 +96,46 @@ faces — both keep area conservation with no topology anomaly; `unsplit`
 simply has nothing to subdivide, which is not "unresolved"), every Wegsegment
 axis with `STATUS=4` (in service) whose length inside the corridor is at
 least `--axis-min-extent-m` *and* whose share of that length falls inside
-this face is at least `--axis-coverage-ratio-min` becomes a candidate.
+this face is at least `--axis-coverage-ratio-min` becomes a candidate. Among
+candidates, only those whose `MORF` is a documented motor-traffic code (101
+through 112: motorway, dual/single carriageway, roundabout, special traffic
+situation, traffic square, on/off-ramps, parallel/service road, parking/
+service entrance) count as **motorized** — see "MORF: an in-service, paved
+axis is not necessarily a carriageway" below.
 
-- All candidates paved (`VERH` 1 or 12): `carriageway_paved`, reason
-  `in_service_paved_axis`, evidence citing every retained `WS_OIDN:VERH`.
-- All candidates unpaved (`VERH` 2): `unmapped`, reason
+- Motorized candidates split between paved and unpaved: `unmapped`, reason
+  `contradictory_axis_surface` — an in-service axis disagreeing with itself
+  on `VERH` is a data conflict, not something this step resolves by picking
+  a winner.
+- Motorized candidates all paved (`VERH` 1 or 12): `carriageway_paved`,
+  reason `in_service_paved_axis`, evidence citing every retained
+  `WS_OIDN:VERH` — unless the face's `topology_status` is `unsplit` and its
+  area divided by the longest paved axis's covered length exceeds
+  `--unsplit-max-width-m`, in which case the axis alone cannot vouch for the
+  full width of a corridor with no internal WGO line, and the face stays
+  `unmapped`, reason `unsplit_corridor_too_wide_for_single_carriageway`.
+- Motorized candidates all unpaved (`VERH` 2): `unmapped`, reason
   `axis_surface_not_paved`.
-- A mix of paved and unpaved: `unmapped`, reason `contradictory_axis_surface`
-  — an in-service axis disagreeing with itself on `VERH` is a data conflict,
-  not something this step resolves by picking a winner.
-- Candidates present but all `VERH` unknown/not-applicable (-8/-9): `unmapped`,
+- Motorized candidates all `VERH` unknown/not-applicable (-8/-9): `unmapped`,
   reason `axis_surface_unknown` — an unknown code is insufficient evidence,
   never a contradiction of a genuinely paved or unpaved axis on the same face.
+- Candidates present but none motorized: `unmapped`, reason
+  `axis_not_motorized_carriageway`.
 - No usable candidate at all: `unmapped`, reason `no_in_service_axis_evidence`.
   A face whose `topology_status` is not `partitioned`/`unsplit` gives
   `unmapped` first, reason `unresolved_topology:<status>`, without consulting
   axes at all.
 
 Defaults: `--axis-coverage-ratio-min 0.8`, `--axis-min-extent-m 5.0`,
-`--boundary-tolerance-m 0.001`. The axis ratio's denominator is the axis
-length inside the *corridor*, not its total length, because a Wegsegment
-normally runs across several corridors — but that ratio alone does not stop a
-short in-service paved stub (a driveway or side-street graze at a junction)
-from scoring 1.0 purely because it never leaves the one face it grazes.
-`--axis-min-extent-m` is the absolute floor that catches that case: 5 m is
-twice the official minimum Wrb (paved carriageway) width of 2.5 m, enough to
-distinguish an axis that actually runs through the corridor from one that
+`--unsplit-max-width-m 12.0`, `--boundary-tolerance-m 0.001`. The axis ratio's
+denominator is the axis length inside the *corridor*, not its total length,
+because a Wegsegment normally runs across several corridors — but that ratio
+alone does not stop a short in-service paved stub (a driveway or side-street
+graze at a junction) from scoring 1.0 purely because it never leaves the one
+face it grazes. `--axis-min-extent-m` is the absolute floor that catches that
+case: 5 m is twice the official minimum Wrb (paved carriageway) width of
+2.5 m, enough to distinguish an axis that actually runs through the corridor
+from one that
 merely touches it. The numerator (an axis's length inside one face) excludes
 runs collinear with that face's own boundary — internal or outer — so an axis
 lying on a shared boundary proves membership of neither adjacent face; the
@@ -145,6 +159,48 @@ result as an internal self-check before the file is written, but its own
 chantier's mandate keeps that flag false until axis/structure reconciliation
 is complete, and a per-face `True` in the published file would invite a
 downstream reader to skip straight to costing on this step alone.
+
+### MORF: an in-service, paved axis is not necessarily a carriageway
+
+`VERH`/`STATUS` alone are not sufficient evidence: Wegsegment's `MORF`
+(morfologische wegklasse) classifies what the axis physically *is*,
+independently of surface and service state, and several of its documented
+codes are officially not a carriageway even when `STATUS=4` and `VERH=1` —
+`voetgangerszone` (113, pedestrian zone), `wandel- en/of fietsweg niet
+toegankelijk voor andere voertuigen` (114, walking/cycling path, explicitly
+closed to other vehicles), `tramweg, niet toegankelijk voor andere
+voertuigen` (116, tram-only), `dienstweg` (120, an unpaved-by-default service
+track), `aardeweg` (125, an earthen track, unpaved by definition) and `veer`
+(130, a ferry crossing — not a road at all).
+
+A first cut of this module read only `VERH`/`STATUS` and, on real data from
+the documented Gand bbox, labelled 14 `voetgangerszone`/`wandel- of
+fietsweg` faces `carriageway_paved` (adversarial review found up to 15,
+depending on face boundaries) — the exact failure mode this whole chantier
+exists to remove, just moved from PICC/GRB material inference to a Wegsegment
+attribute nobody had read yet, even though it was already part of the
+acquired bundle. `MORF` is therefore required evidence: only axes whose
+`MORF` is 101–112 (motorway, dual/single carriageway, roundabout, special
+traffic situation, traffic square, on/off-ramps, parallel/service road,
+parking/service entrance — the documented motor-traffic and junction codes)
+count toward `carriageway_paved`; any other or unknown `MORF` gives
+`unmapped`, reason `axis_not_motorized_carriageway`, unless a motorized
+candidate is also present on the same face. Regression tests cover every
+excluded code (`test_other_non_motorized_morf_codes_never_become_carriageway`)
+and every included one
+(`test_every_documented_motorized_morf_code_can_become_carriageway`).
+
+A related gap the same review found: an `unsplit` face (no internal WGO line
+at all) has `corridor == face`, so the axis-coverage ratio is 1.0 by
+construction the moment any qualifying axis reaches it — `--axis-coverage-
+ratio-min` has no effect there, only `--axis-min-extent-m` does. A single
+motorized paved axis running through a wide, WGO-less corridor does not by
+itself prove the *entire* width is carriageway. `--unsplit-max-width-m`
+guards this: for an `unsplit` face only, the corridor's area divided by the
+longest paved axis's covered length must not exceed it (default 12 m), or
+the face stays `unmapped`, reason
+`unsplit_corridor_too_wide_for_single_carriageway`. This guard does not apply
+to `partitioned` faces, where the subdivision itself is evidence.
 
 ### Why there is no `sidewalk` class yet
 
@@ -220,28 +276,34 @@ All five counts agreed before/after and all IDs were unique. Reconstruction:
 not a regional classification or crossing certificate.
 
 Classification re-run live on 2026-09-11 against the same bbox and the same
-five counts, after two rounds of adversarial review (the first round found the
-axis-graze false positive and the unsplit-corridor exclusion; the second round
-found that neither `sidewalk` design held up — see "Why there is no `sidewalk`
-class yet" above — and that a symmetric numerator/denominator fix introduced a
-worse regression than the asymmetry it "fixed"): 121 candidate faces
-classified into 36 `carriageway_paved` (38.0% of reconstructed area) and 85
-`unmapped` (62.0%) — reasons `no_in_service_axis_evidence` (68),
-`unresolved_topology:unresolved_lines` (17). 62 of those 68 unmapped faces
-still measure a nonzero `wcz_boundary_ratio` (reported, never decisive) —
-plausible sidewalks this module deliberately declines to assert. Every ratio
-column stayed within `[0, 1]`; every `NaN` axis-coverage row was exactly the
-17 unresolved-topology faces; no `classified_faces.geoparquet` row carried a
-`ready_for_costing` column. Zero faces landed on `contradictory_axis_surface`
-or `axis_surface_unknown` on this bbox — those paths exist for regional data
-this local sample did not happen to contain, and stay covered only by the
-unit tests' synthetic geometries. Coverage dropped sharply from an earlier,
-incorrect cut (which had reached 89/121 faces including a `sidewalk` class)
-to this one's 36/121 — the trade made deliberately, fail-closed, after that
-earlier cut's `sidewalk` mechanism was shown twice to be invertible on
-realistic synthetic geometry. This is still a local
-transport/topology/classification validation, not a regional classification
-or crossing certificate.
+five counts, after **three** rounds of adversarial review: round 1 found the
+axis-graze false positive and the unsplit-corridor exclusion; round 2 found
+that neither `sidewalk` design held up (see "Why there is no `sidewalk` class
+yet" above) and that a symmetric numerator/denominator fix introduced a worse
+regression than the asymmetry it "fixed"; round 3, re-reviewing the module
+with `sidewalk` already removed, found that reading only `VERH`/`STATUS`
+(ignoring the already-acquired `MORF`) labelled real Gand
+`voetgangerszone`/`wandel- of fietsweg` faces `carriageway_paved` — see "MORF"
+above. Final result: 121 candidate faces classified into 22
+`carriageway_paved` (24.9% of reconstructed area) and 99 `unmapped` (75.1%) —
+reasons `no_in_service_axis_evidence` (68), `axis_not_motorized_carriageway`
+(14), `unresolved_topology:unresolved_lines` (17). Every ratio column stayed
+within `[0, 1]`; every `NaN` axis-coverage row was exactly the 17
+unresolved-topology faces; no `classified_faces.geoparquet` row carried a
+`ready_for_costing` column. Zero faces landed on `contradictory_axis_surface`,
+`axis_surface_unknown` or `unsplit_corridor_too_wide_for_single_carriageway`
+on this bbox — those paths exist for regional data this local sample did not
+happen to contain, and stay covered only by the unit tests' synthetic
+geometries.
+
+Coverage on this bbox: 36/121 faces with the pre-MORF-filter cut, 89/121 with
+the pre-round-2 cut that included a broken `sidewalk` mechanism, 22/121 now.
+Each drop was made deliberately, fail-closed, in response to a specific
+adversarially-proven false positive — not a regression to be reverted. This
+is still a local transport/topology/classification validation, not a
+regional classification or crossing certificate; a regional run should expect
+a comparably conservative `carriageway_paved` share until axis/structure
+reconciliation (KNW) and a real evidence source for `sidewalk` exist.
 
 Schema distinction verified against DescribeFeatureType: GRB `UIDN` is numeric;
 Wegenregister references `WS_UIDN` and `WK_UIDN` are strings (for example `4_3`).
