@@ -280,26 +280,54 @@ promoted by any of these):
   states they cannot carry vehicles — worth revisiting if either appears with
   meaningful frequency in regional data.
 
-## KNW structure reconciliation — contract verified, not yet implemented
+## KNW structure reconciliation
 
 Official semantics (objectenhandboek, `kunstwerk-knw`): KNW geometry is a
 polygon. `TYPE` has 15 documented codes; only two describe a road structure —
 1 = overbrugging (bridge), 12 = tunnelmond (tunnel entrance). The other 13
-(hydraulic structures, monuments, pylons, chimneys, silos, wind turbines,
-breakwaters, palisades, …) cover unrelated infrastructure the layer also
-carries. `VORM`: 1 = enkelvoudig (single structure), 2 = samengesteld
-(several grouped installations).
+(hydraulic structures, monuments, pylons, pillars, chimneys, silos, wind
+turbines, breakwaters, palisades, …) cover unrelated infrastructure the layer
+also carries and are excluded. `VORM`: 1 = enkelvoudig (single structure),
+2 = samengesteld (several grouped installations, not used to decide anything
+here).
 
 The official worked example is explicit about the WBN relationship: "the road
 (WBN) is interrupted at a bridge; the bridge is measured at ground level; the
 waterway underneath passes without interruption." A KNW bridge or tunnel
 entrance is therefore evidence of a **corridor discontinuity**, not a
-same-level road crossing — a candidate face near one should not be assumed
-drillable at grade without checking it. This is not yet implemented: no
-capability here reads KNW, and `classify_grb_faces` does not consult it.
-Building the reconciliation would need at minimum: identifying WBN corridors
-whose boundary sits near a KNW polygon typed 1 or 12, and flagging faces
-inside such a corridor as level-ambiguous rather than assuming ground level.
+same-level road crossing. Verified on real Gand data: every bridge polygon in
+the validated bbox touches its adjacent WBN corridor at distance exactly 0
+(the at-grade corridor's boundary meets the structure's boundary where the
+road ends), while the far more numerous `pijler` (pillar, `TYPE=5` — fences,
+street furniture) features also commonly touch WBN without being a bridge or
+tunnel at all — confirming `TYPE` alone, not mere proximity, is the right
+filter.
+
+`reconcile_knw_structures` (`src/gispulse/capabilities/vector/reconcile_knw_structures.py`)
+implements this: it adds a `structure_proximity` column
+(`bridge`/`tunnel`/`bridge,tunnel`/`none`) to the classified faces, wired into
+`prepare_grb` after classification succeeds. Because nothing in WBN/KNW
+identifies which face *within* a touched corridor sits at the actual join
+versus mid-corridor, every face in a touched corridor is flagged, not just
+the ones nearest the structure — narrowing that down without further
+explicit evidence would be exactly the kind of geometric inference this
+chantier's classification work has twice had to retract. This is
+**diagnostic only**: it never changes `functional_class` or the bundle-level
+`ready_for_costing`, which stay exactly as `classify_grb_faces` and the
+overall bundle already state. A KNW data defect degrades to
+`structure_reconciliation: {"status": "failed", ...}` in the report — the
+classified faces are still published, just without the
+`structure_proximity` column, matching the pre-reconciliation contract.
+
+Validated live on the Gand bbox: of 3 KNW polygons typed `bridge` in that
+extent, all 3 touch a distinct WBN corridor; 17 of the 121 candidate faces
+sit in one of those 3 corridors and are flagged `bridge` (104 stay `none`).
+**2 of the 22 `carriageway_paved` faces are among the flagged 17** — proof
+this reconciliation catches a real case: a face this module's own evidence
+says is a paved, in-service carriageway, sitting in a corridor that leads
+directly into a bridge, and therefore not to be assumed drillable at grade
+without a separate check. No KNW polygon in this bbox is typed `tunnel`
+(12), so that path is exercised only by the unit tests' synthetic geometry.
 
 ## Validation
 

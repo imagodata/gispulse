@@ -16,6 +16,7 @@ from gispulse.adapters.rest.offset_pages import OffsetPagination
 from gispulse.capabilities.vector.classify_faces import validate_functional_faces
 from gispulse.capabilities.vector.classify_grb_faces import classify_grb_faces
 from gispulse.capabilities.vector.polygon_partition import partition_polygons
+from gispulse.capabilities.vector.reconcile_knw_structures import reconcile_knw_structures
 from gispulse.core.io.geoparquet import write_geoparquet
 from gispulse_src_grb.source import GrbSource
 
@@ -31,6 +32,7 @@ _ENTRIES = (
 _CLASSIFIED_FIELDS = {
     "grb-wegopdeling-vl": ("TYPE",),
     "grb-wegsegment-vl": ("WS_OIDN", "VERH", "STATUS", "MORF"),
+    "grb-kunstwerk-vl": ("TYPE",),
 }
 
 
@@ -177,10 +179,29 @@ def prepare_grb(
             # and a per-face True in the published file would invite a
             # downstream reader to skip straight to costing on this alone.
             validate_functional_faces(classified)
+            try:
+                reconciled, reconciliation_report = reconcile_knw_structures(
+                    classified,
+                    frames["grb-wegbaan-vl"],
+                    frames["grb-kunstwerk-vl"],
+                    boundary_tolerance_m=boundary_tolerance_m,
+                )
+            except ValueError as exc:
+                # A KNW data defect must not withhold the classification the
+                # bundle already produced: publish it unreconciled (no
+                # structure_proximity column, matching the pre-reconciliation
+                # contract) rather than lose it.
+                if not str(exc).startswith("GRB_RECONCILE_"):
+                    raise
+                reconciled = classified
+                reconciliation_report = {"status": "failed", "error": str(exc)}
             write_geoparquet(
-                classified, str(staging / "classified_faces.geoparquet"), compression="zstd"
+                reconciled, str(staging / "classified_faces.geoparquet"), compression="zstd"
             )
-            classification_report = classification
+            classification_report = {
+                **classification,
+                "structure_reconciliation": reconciliation_report,
+            }
         hashes = {}
         for file in sorted(staging.glob("*.geoparquet")):
             with file.open("rb") as stream:
