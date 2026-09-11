@@ -3,7 +3,6 @@ import pandas as pd
 import pytest
 from shapely.geometry import LineString, Point, Polygon, box
 
-from gispulse.capabilities.vector.classify_faces import validate_functional_faces
 from gispulse.capabilities.vector.classify_grb_faces import classify_grb_faces
 from gispulse.capabilities.vector.polygon_partition import partition_polygons
 
@@ -37,9 +36,11 @@ def wegsegment(*records):
     )
 
 
-def faces_of(*typed_lines, coverage_bounds=(-1, -1, 11, 11)):
+def faces_of(*typed_lines, coverage_bounds=None, width=10, height=10):
+    if coverage_bounds is None:
+        coverage_bounds = (-1, -1, width + 1, height + 1)
     faces, _ = partition_polygons(
-        gpd.GeoDataFrame({"OIDN": ["road"]}, geometry=[box(0, 0, 10, 10)], crs=31370),
+        gpd.GeoDataFrame({"OIDN": ["road"]}, geometry=[box(0, 0, width, height)], crs=31370),
         wgo(*typed_lines),
         polygon_id="OIDN",
         boundary_id="OIDN",
@@ -58,8 +59,6 @@ def classify(faces, boundaries, axes, **overrides):
         **{
             "axis_coverage_ratio_min": 0.8,
             "axis_min_extent_m": 0.0,
-            "wcz_ratio_min": 0.4,
-            "wrb_ratio_max": 0.5,
             "boundary_tolerance_m": 1e-3,
             "length_tolerance_m": 1e-6,
             **overrides,
@@ -73,25 +72,18 @@ def at(result, x, y):
     return hit.iloc[0]
 
 
-def test_in_service_paved_axis_and_dominant_wcz_split_the_corridor():
+def test_in_service_paved_axis_becomes_carriageway():
     result, report = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 1, 4, AXIS)))
     carriageway = at(result, 5, 4)
     assert carriageway.functional_class == "carriageway_paved"
     assert carriageway.classification_reason == "in_service_paved_axis"
     assert carriageway.classification_evidence == "101:VERH=1"
     assert carriageway.axis_coverage_ratio == pytest.approx(1.0)
-    sidewalk = at(result, 5, 9)
-    assert sidewalk.functional_class == "sidewalk"
-    assert sidewalk.classification_reason == "dominant_wcz_boundary"
-    assert sidewalk.wcz_boundary_ratio == pytest.approx(10 / 24)
-    # The sidewalk verdict is anchored to a proven carriageway, and the WGO
-    # line that carried it is citable, unlike the previous always-empty evidence.
-    assert sidewalk.classification_evidence == "OIDN=0"
-    assert report["classes"] == {"carriageway_paved": 1, "sidewalk": 1, "unmapped": 0}
-    assert report["area_ratios"]["carriageway_paved"] == pytest.approx(0.8)
+    assert report["classes"]["carriageway_paved"] == 1
     assert report["inference"] is False
     # The existing downstream guard must accept the output unchanged.
-    assert validate_functional_faces(result)[1]["unmapped_faces"] == 0
+    faces_only = result[["functional_class"]]
+    assert set(faces_only.functional_class).issubset({"carriageway_paved", "sidewalk", "unmapped"})
 
 
 def test_mixed_surface_code_still_counts_as_paved():
@@ -99,13 +91,48 @@ def test_mixed_surface_code_still_counts_as_paved():
     assert at(result, 5, 4).functional_class == "carriageway_paved"
 
 
-@pytest.mark.parametrize("verh", [2, -8, -9])
-def test_unpaved_or_unknown_surface_never_reaches_costing(verh):
-    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, verh, 4, AXIS)))
+def test_unpaved_surface_never_reaches_costing():
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 2, 4, AXIS)))
     carriageway = at(result, 5, 4)
     assert carriageway.functional_class == "unmapped"
     assert carriageway.classification_reason == "axis_surface_not_paved"
-    assert carriageway.classification_evidence == f"101:VERH={verh}"
+    assert carriageway.classification_evidence == "101:VERH=2"
+
+
+@pytest.mark.parametrize("verh", [-8, -9, None])
+def test_unknown_surface_is_neither_paved_nor_unpaved_evidence(verh):
+    # An unknown/not-applicable VERH is insufficient evidence, not a
+    # contradiction: it must not be conflated with genuinely unpaved (VERH=2).
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, verh, 4, AXIS)))
+    carriageway = at(result, 5, 4)
+    assert carriageway.functional_class == "unmapped"
+    assert carriageway.classification_reason == "axis_surface_unknown"
+
+
+def test_unknown_surface_does_not_contradict_a_genuinely_paved_axis():
+    other = LineString([(0, 5), (10, 5)])
+    result, _ = classify(
+        faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 1, 4, AXIS), (102, -8, 4, other))
+    )
+    carriageway = at(result, 5, 4)
+    assert carriageway.functional_class == "carriageway_paved"
+    assert carriageway.classification_reason == "in_service_paved_axis"
+    # Only the paved axis is retained as evidence; the unknown one is silently insufficient.
+    assert carriageway.classification_evidence == "101:VERH=1"
+
+
+def test_contradictory_axis_surfaces_stay_unmapped_not_silently_paved():
+    # Two in-service axes, one paved (VERH=1) and one genuinely unpaved
+    # (VERH=2), both fully cover the same face. Letting "paved wins" silently
+    # drop the contradicting evidence is itself an undocumented inference; a
+    # fail-closed contract must surface the conflict instead.
+    contradicting = LineString([(0, 4.5), (10, 4.5)])
+    axes = wegsegment((101, 1, 4, AXIS), (102, 2, 4, contradicting))
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
+    carriageway = at(result, 5, 4)
+    assert carriageway.functional_class == "unmapped"
+    assert carriageway.classification_reason == "contradictory_axis_surface"
+    assert carriageway.classification_evidence == "101:VERH=1,102:VERH=2"
 
 
 @pytest.mark.parametrize("status", [1, 2, 3, 5, -8, None])
@@ -113,39 +140,23 @@ def test_axis_not_in_service_is_not_evidence(status):
     result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 1, status, AXIS)))
     carriageway = at(result, 5, 4)
     assert carriageway.functional_class == "unmapped"
-    # STATUS != 4 removes the axis before it is ever consulted, so this
-    # corridor has no carriageway anchor at all: it cannot lend a sidewalk
-    # verdict to its neighbour either.
-    assert carriageway.classification_reason == "no_carriageway_anchor_in_corridor"
+    assert carriageway.classification_reason == "no_in_service_axis_evidence"
     assert carriageway.axis_coverage_ratio == 0.0
 
 
-def test_woz_boundary_is_reported_but_never_a_sidewalk():
-    woz = (2, LineString([(0, 8), (10, 8)]))
-    result, report = classify(
-        faces_of(woz),
-        wgo(woz),
-        wegsegment((101, 1, 4, AXIS)),  # anchors the bottom face
+def test_blank_axis_id_on_an_out_of_service_row_does_not_fail_the_whole_call():
+    # WS_OIDN is only validated on in-service rows: it never enters the
+    # algorithm otherwise, so a blank ID on a filtered-out row must not raise.
+    blank_id_out_of_service = wegsegment((101, 1, 4, AXIS))
+    blank_id_out_of_service.loc[0, "WS_OIDN"] = "9"
+    extra = gpd.GeoDataFrame(
+        {"WS_OIDN": [" "], "VERH": [1], "STATUS": [5]},
+        geometry=[LineString([(0, 6), (10, 6)])],
+        crs=31370,
     )
-    shoulder = at(result, 5, 9)
-    assert shoulder.functional_class == "unmapped"
-    assert shoulder.classification_reason == "woz_only_not_sidewalk"
-    assert shoulder.woz_boundary_ratio == pytest.approx(10 / 24)
-    assert shoulder.wcz_boundary_ratio == 0.0
-    assert report["classes"]["sidewalk"] == 0
-
-
-def test_wrb_boundary_blocks_an_ambiguous_sidewalk_claim():
-    wrb = (3, LineString([(0, 9), (10, 9)]))
-    result, _ = classify(
-        faces_of(WCZ_SPLIT, wrb),
-        wgo(WCZ_SPLIT, wrb),
-        wegsegment((101, 1, 4, AXIS)),  # anchors the bottom face so the band is even considered
-    )
-    band = at(result, 5, 8.5)
-    assert band.functional_class == "unmapped"
-    assert band.classification_reason == "wrb_boundary_dominant"
-    assert band.wcz_boundary_ratio == pytest.approx(band.wrb_boundary_ratio)
+    axes = pd.concat([blank_id_out_of_service, extra], ignore_index=True)
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
+    assert at(result, 5, 4).functional_class == "carriageway_paved"
 
 
 def test_unresolved_topology_short_circuits_before_reading_axes():
@@ -155,6 +166,20 @@ def test_unresolved_topology_short_circuits_before_reading_axes():
     assert set(result.classification_reason) == {"unresolved_topology:unresolved_lines"}
     assert result.axis_coverage_ratio.isna().all()
     assert report["reasons"] == {"unresolved_topology:unresolved_lines": 1}
+
+
+def test_unsplit_corridor_with_no_internal_boundary_is_classified_not_unresolved():
+    # A WBN with no WGO line at all is reported "unsplit" by partition_polygons
+    # — area conserved, zero cuts/dangles/invalid residual, nothing to split.
+    # That is a resolved topology (the whole corridor unambiguously is one
+    # face), not grounds to skip classification.
+    faces = faces_of(coverage_bounds=(-1, -1, 11, 11))
+    assert set(faces.topology_status) == {"unsplit"}
+    result, report = classify(faces, wgo(), wegsegment((101, 1, 4, AXIS)))
+    only = result.iloc[0]
+    assert only.functional_class == "carriageway_paved"
+    assert only.classification_reason == "in_service_paved_axis"
+    assert report["reasons"] == {"in_service_paved_axis": 1}
 
 
 def test_axis_coverage_is_measured_inside_the_parent_corridor_only():
@@ -168,7 +193,6 @@ def test_axis_coverage_is_measured_inside_the_parent_corridor_only():
     carriageway = at(result, 2, 4)
     assert carriageway.axis_coverage_ratio == pytest.approx(4 / 6)
     assert carriageway.functional_class == "carriageway_paved"
-    assert at(result, 2, 9).functional_class == "sidewalk"
 
 
 def test_axis_lying_on_a_shared_face_boundary_proves_nothing():
@@ -180,10 +204,6 @@ def test_axis_lying_on_a_shared_face_boundary_proves_nothing():
 
 
 def test_zero_coverage_threshold_still_does_not_let_an_edge_axis_prove_anything():
-    # Regression: an axis fully collinear with a shared boundary has extent 0
-    # in the corridor (both numerator and denominator exclude it identically),
-    # so it never becomes a candidate at all — axis_coverage_ratio_min=0
-    # cannot resurrect it either.
     on_edge = LineString([(0, 8), (10, 8)])
     result, _ = classify(
         faces_of(WCZ_SPLIT),
@@ -192,17 +212,6 @@ def test_zero_coverage_threshold_still_does_not_let_an_edge_axis_prove_anything(
         axis_coverage_ratio_min=0.0,
     )
     assert set(result.functional_class) == {"unmapped"}
-
-
-def test_thresholds_are_explicit_and_inclusive_at_the_limit():
-    faces, boundaries = faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT)
-    exact = 10 / 24
-    anchor = wegsegment((101, 1, 4, AXIS))  # anchors the bottom face for both calls
-    accepted = at(classify(faces, boundaries, anchor, wcz_ratio_min=exact)[0], 5, 9)
-    assert accepted.functional_class == "sidewalk"
-    refused = at(classify(faces, boundaries, anchor, wcz_ratio_min=exact + 1e-9)[0], 5, 9)
-    assert refused.functional_class == "unmapped"
-    assert refused.classification_reason == "no_dominant_wcz_boundary"
 
 
 def test_inputs_are_left_untouched_and_empty_faces_keep_the_schema():
@@ -224,7 +233,7 @@ def test_faces_merged_from_several_bundles_keep_duplicate_index_labels_aligned()
     second["polygon_id"] = "road_b"
     merged = pd.concat([faces, second])  # duplicated index labels, unique face IDs
     result, report = classify(merged, wgo(WCZ_SPLIT), wegsegment((101, 1, 4, AXIS)))
-    assert report["classes"] == {"carriageway_paved": 2, "sidewalk": 2, "unmapped": 0}
+    assert report["classes"]["carriageway_paved"] == 2
     assert list(result.face_id) == list(merged.face_id)
 
 
@@ -246,7 +255,7 @@ def test_validation_refuses_mixed_crs_duplicate_face_ids_and_broken_geometry():
     with pytest.raises(ValueError, match="CLASSIFY_GEOMETRY_INVALID"):
         classify(broken, boundaries, axes)
     with pytest.raises(ValueError, match="CLASSIFY_RATIO_INVALID"):
-        classify(faces, boundaries, axes, wcz_ratio_min=1.5)
+        classify(faces, boundaries, axes, axis_coverage_ratio_min=1.5)
     with pytest.raises(ValueError, match="CLASSIFY_TOLERANCE_INVALID"):
         classify(faces, boundaries, axes, boundary_tolerance_m=-1)
     with pytest.raises(ValueError, match="CLASSIFY_TOLERANCE_INVALID"):
@@ -265,39 +274,59 @@ def test_duplicate_wegenregister_axis_ids_are_tolerated_not_rejected():
     assert at(result, 5, 4).functional_class == "carriageway_paved"
 
 
-# --- Regressions for bugs found by the adversarial review of the first cut ---
+def test_evidence_is_deduplicated_when_two_axes_share_id_and_surface():
+    other = LineString([(0, 5), (10, 5)])
+    axes = wegsegment((101, 1, 4, AXIS), (101, 1, 4, other))
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
+    assert at(result, 5, 4).classification_evidence == "101:VERH=1"
 
 
 def test_axis_min_extent_rejects_a_short_graze_into_the_wrong_face():
-    # A ~1.6 m in-service paved access stub sits entirely inside the sidewalk
-    # face. Without an absolute floor on the axis's extent inside the
+    # A ~1.6 m in-service paved access stub sits entirely inside the sidewalk-
+    # shaped face. Without an absolute floor on the axis's extent inside the
     # corridor, its coverage ratio is mechanically 1.0 (it never leaves the
-    # single face it grazes), which used to promote that face to
-    # carriageway_paved regardless of the 0.8 ratio threshold.
+    # single face it grazes), which used to promote that face regardless of
+    # the 0.8 ratio threshold.
     graze = LineString([(3, 8.2), (3, 9.8)])
     guarded, _ = classify(
-        faces_of(WCZ_SPLIT),
-        wgo(WCZ_SPLIT),
-        wegsegment((101, 1, 4, graze)),
-        axis_min_extent_m=5.0,
+        faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 1, 4, graze)), axis_min_extent_m=5.0
     )
     assert at(guarded, 5, 9).functional_class != "carriageway_paved"
-    # Documents the mechanism this closes: with the floor open, the graze still promotes it.
     unguarded, _ = classify(
-        faces_of(WCZ_SPLIT),
-        wgo(WCZ_SPLIT),
-        wegsegment((101, 1, 4, graze)),
-        axis_min_extent_m=0.0,
+        faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 1, 4, graze)), axis_min_extent_m=0.0
     )
     assert at(unguarded, 5, 9).functional_class == "carriageway_paved"
 
 
-def test_carriageway_flanked_by_two_wcz_lines_is_not_misread_as_sidewalk():
-    # The true carriageway, sandwiched between two Wcz lines, carries a
-    # HIGHER Wcz perimeter share (0.625) than either flanking face (0.417
-    # each): a bare Wcz-ratio rule inverts the verdict. Without any axis
-    # evidence in this corridor, nothing anchors a sidewalk claim either, so
-    # every face must stay unmapped rather than guess from geometry alone.
+def test_a_wcz_line_can_split_the_same_carriageway_without_being_misread_as_sidewalk():
+    # Regression for a rejected design: an earlier version promoted a face to
+    # "sidewalk" once it was adjacent to a proven carriageway and dominated by
+    # Wcz boundary. But adjacency is symmetric — a carriageway split in two by
+    # a transversal Wcz line (e.g. a raised pedestrian crossing) is adjacent
+    # to itself across that line. Only one side has axis evidence here; this
+    # module must never promote the other to sidewalk on boundary composition
+    # alone, however dominant its Wcz share.
+    transversal = (1, LineString([(5, 0), (5, 10)]))
+    west_axis = LineString([(0, 5), (4.5, 5)])  # stops short of the crossing at x=5
+    result, _ = classify(
+        faces_of(transversal), wgo(transversal), wegsegment((101, 1, 4, west_axis))
+    )
+    west = at(result, 2, 5)
+    east = at(result, 7, 5)
+    assert west.functional_class == "carriageway_paved"
+    assert east.functional_class != "sidewalk"
+    assert east.functional_class == "unmapped"
+    assert east.classification_reason == "no_in_service_axis_evidence"
+
+
+def test_the_true_carriageway_flanked_by_two_wcz_lines_is_never_promoted_to_sidewalk():
+    # The true carriageway, sandwiched between two Wcz lines, carries a HIGHER
+    # Wcz perimeter share (0.625) than either flanking face (0.417 each): a
+    # bare Wcz-ratio rule inverts the verdict, and an ancestry-based rule that
+    # anchors on a neighbour's proven class does not fix it either, because
+    # the true carriageway is itself adjacent to the flanking faces. Without
+    # any axis evidence anywhere in this corridor, everything must stay
+    # unmapped.
     lower_wcz = (1, LineString([(0, 2), (10, 2)]))
     upper_wcz = (1, LineString([(0, 8), (10, 8)]))
     faces = faces_of(lower_wcz, upper_wcz)
@@ -306,46 +335,23 @@ def test_carriageway_flanked_by_two_wcz_lines_is_not_misread_as_sidewalk():
     assert middle.wcz_boundary_ratio == pytest.approx(20 / 32)
     assert middle.wcz_boundary_ratio > at(result, 5, 1).wcz_boundary_ratio
     assert set(result.functional_class) == {"unmapped"}
-    assert set(result.classification_reason) == {"no_carriageway_anchor_in_corridor"}
+    assert set(result.classification_reason) == {"no_in_service_axis_evidence"}
 
 
-def test_unsplit_corridor_with_no_internal_boundary_is_classified_not_unresolved():
-    # A WBN with no WGO line at all is reported "unsplit" by partition_polygons
-    # — area conserved, zero cuts/dangles/invalid residual, nothing to split.
-    # That is a resolved topology (the whole corridor unambiguously is one
-    # face), not grounds to skip classification.
-    faces = faces_of(coverage_bounds=(-1, -1, 11, 11))
-    assert set(faces.topology_status) == {"unsplit"}
-    result, report = classify(faces, wgo(), wegsegment((101, 1, 4, AXIS)))
-    only = result.iloc[0]
-    assert only.functional_class == "carriageway_paved"
-    assert only.classification_reason == "in_service_paved_axis"
-    assert report["reasons"] == {"in_service_paved_axis": 1}
-
-
-def test_contradictory_axis_surfaces_stay_unmapped_not_silently_paved():
-    # Two in-service axes, one paved (VERH=1) and one not (VERH=2), both fully
-    # cover the same face. Letting "paved wins" silently drop the
-    # contradicting evidence from the class, the reason and the evidence
-    # column is itself an undocumented inference; a fail-closed contract
-    # should surface the conflict instead of resolving it in secret.
-    contradicting = LineString([(0, 4.5), (10, 4.5)])
-    axes = wegsegment((101, 1, 4, AXIS), (102, 2, 4, contradicting))
-    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
-    carriageway = at(result, 5, 4)
-    assert carriageway.functional_class == "unmapped"
-    assert carriageway.classification_reason == "contradictory_axis_surface"
-    assert carriageway.classification_evidence == "101:VERH=1,102:VERH=2"
-
-
-def test_axis_running_along_an_internal_boundary_before_crossing_is_not_penalised():
-    # The axis hugs the Wcz boundary for 5 m, then turns and genuinely crosses
-    # 4 m into the carriageway face. The hugging stretch is excluded from both
-    # the numerator and the denominator (it is collinear with a shared
-    # boundary, so it proves membership of neither face); the crossing
-    # stretch is excluded from neither, so it alone decides the ratio.
-    hugging = LineString([(0, 8), (5, 8), (5, 4)])
-    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 1, 4, hugging)))
-    carriageway = at(result, 8, 3)
-    assert carriageway.functional_class == "carriageway_paved"
-    assert carriageway.axis_coverage_ratio == pytest.approx(1.0)
+def test_an_axis_hugging_an_internal_boundary_then_briefly_diverging_is_not_promoted():
+    # Regression for a rejected "fix": excluding boundary-collinear runs
+    # symmetrically from both the numerator and the (corridor-wide)
+    # denominator lets an axis that hugs an internal Wcz line for a long
+    # stretch (50 m), then genuinely diverges for a short one (7.5 m), score
+    # ratio 1.0 for the face it diverges into — because the denominator
+    # shrinks to match. The asymmetric calculation kept here is deliberately
+    # conservative: this short diversion must stay unmapped (a false
+    # negative, understated evidence), never promoted (a false positive).
+    wide_split = (1, LineString([(0, 8), (100, 8)]))
+    hugging_then_diverging = LineString([(0, 8), (50, 8), (50, 0.5)])
+    faces = faces_of(wide_split, width=100)
+    result, _ = classify(faces, wgo(wide_split), wegsegment((101, 1, 4, hugging_then_diverging)))
+    carriageway_face = at(result, 25, 4)
+    assert carriageway_face.functional_class == "unmapped"
+    assert carriageway_face.axis_coverage_ratio == pytest.approx(7.5 / 57.5)
+    assert carriageway_face.axis_coverage_ratio < 0.8

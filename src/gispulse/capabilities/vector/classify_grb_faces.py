@@ -1,26 +1,36 @@
 """Classify reconstructed GRB road faces from explicit upstream attributes.
 
-Only documented source codes decide a class: Wegsegment ``STATUS``/``VERH`` for
-the carriageway, WGO ``TYPE`` for the internal functional boundaries. Geometry
-alone never identifies a side, so a face without explicit evidence stays
-``unmapped`` with a named reason. Tolerances compare numbers; no geometry is
-snapped, buffered or repaired, and inputs are never mutated.
+Only documented source codes decide a class: Wegsegment ``STATUS``/``VERH``
+for the carriageway. Geometry alone never identifies a side, so a face
+without explicit axis evidence stays ``unmapped`` with a named reason.
+Tolerances compare numbers; no geometry is snapped, buffered or repaired, and
+inputs are never mutated.
 
 Official semantics (Digitaal Vlaanderen, objectenhandboek GRB):
 
-- WGO is a **line** layer. ``TYPE`` qualifies the boundary itself, not the area
-  it delimits: 1 = Wcz, edge of the slow-user circulation zone, always
-  physically separated; 2 = Woz, edge of the unpaved outer part of the road, a
-  soft shoulder and never a sidewalk; 3 = Wrb, edge of the flat paved part
-  reserved for motor traffic. Capture follows the Wcz > Wrb > Woz priority, so
-  a missing type is not evidence that the corresponding zone is absent.
-  Crucially, a Wcz line borders *two* faces (the slow-user zone and the
-  carriageway beside it), so a face's own Wcz share never identifies which of
-  the two it is: only adjacency to a face already proven ``carriageway_paved``
-  by axis evidence turns a dominant Wcz share into a ``sidewalk`` verdict.
+- WGO is a **line** layer. ``TYPE`` qualifies the boundary itself, not the
+  area it delimits: 1 = Wcz, edge of the slow-user circulation zone, always
+  physically separated; 2 = Woz, edge of the unpaved outer part of the road,
+  a soft shoulder; 3 = Wrb, edge of the flat paved part reserved for motor
+  traffic. Capture follows the Wcz > Wrb > Woz priority, so a missing type is
+  not evidence that the corresponding zone is absent. Two attempts at
+  deriving a ``sidewalk`` verdict from a face's own WGO boundary composition
+  — first from its raw Wcz perimeter share, then from that share plus
+  adjacency to a face already proven ``carriageway_paved`` in the same
+  corridor — were each found, by adversarial review, to be invertible: a Wcz
+  line can separate two portions of the *same* carriageway (for instance
+  either side of a raised pedestrian crossing) just as it can separate a
+  carriageway from the sidewalk beside it, and nothing in WGO/Wegsegment
+  alone tells the two apart. This module therefore does **not** produce
+  ``sidewalk``: WGO boundary shares (``wcz_boundary_ratio`` etc.) are still
+  measured and reported per face for diagnosis, but a face without axis
+  evidence stays ``unmapped`` regardless of how much Wcz borders it.
 - Wegsegment ``VERH``: 1 paved, 2 unpaved, 12 mixed, -8 unknown, -9 not
-  applicable. ``STATUS``: 1 permit requested, 2 permit granted, 3 under
-  construction, 4 in service, 5 out of service, -8 unknown.
+  applicable. An axis with an unknown/not-applicable code is neither paved
+  nor unpaved evidence — it is simply insufficient, and never contradicts a
+  genuinely paved or unpaved axis covering the same face.
+  ``STATUS``: 1 permit requested, 2 permit granted, 3 under construction,
+  4 in service, 5 out of service, -8 unknown.
 
 https://www.vlaanderen.be/digitaal-vlaanderen/onze-diensten-en-platformen/basiskaart-vlaanderen-grb/objectenhandboek-basiskaart-vlaanderen-grb/wegopdeling-wgo
 """
@@ -38,6 +48,7 @@ from shapely.ops import unary_union
 _WCZ, _WOZ, _WRB = 1, 2, 3  # WGO TYPE
 _IN_SERVICE = 4  # Wegsegment STATUS
 _PAVED = frozenset({1, 12})  # Wegsegment VERH: paved, and mixed paved/unbound
+_UNPAVED = frozenset({2})  # Wegsegment VERH: unpaved. -8/-9/other are unknown, not unpaved.
 # partition_polygons reports "unsplit" when area is conserved, no cut/dangle/
 # invalid residual exceeds tolerance, and there was simply nothing to split —
 # a WBN corridor with no internal WGO line is entirely and unambiguously one
@@ -62,18 +73,27 @@ def _code(value) -> int | None:
     return int(number) if math.isfinite(number) and number == int(number) else None
 
 
-def _length_inside(line, region, excluded_boundary) -> float:
-    """Length of ``line`` inside ``region``, excluding runs collinear with ``excluded_boundary``.
+def _interior_length(line, polygon) -> float:
+    """Length of ``line`` inside ``polygon``, excluding runs collinear with its boundary.
 
-    ``excluded_boundary`` is the same geometry for both the numerator (one
-    face) and the denominator (the whole corridor) of the axis coverage
-    ratio, so a run an axis spends collinear with *any* corridor boundary —
-    outer or shared between two faces — is dropped from both consistently.
-    Dropping it only from the numerator would deflate the ratio of the face
-    the axis briefly hugs on its way to a genuine, unambiguous crossing.
+    A stretch lying on the boundary belongs to both adjacent faces, so it
+    proves membership of neither.
+
+    Deliberate asymmetry, kept after adversarial review: the denominator
+    (measured against the whole corridor) excludes only the corridor's
+    *outer* boundary, while the numerator (measured against one face) also
+    excludes that face's *internal* boundaries with its neighbours. An axis
+    that runs mostly collinear with an internal cut before a short genuine
+    crossing therefore reports a lower ratio for the face it crosses into —
+    a false negative (understated evidence), never a promotion. A fully
+    symmetric exclusion was tried and rejected: it shrinks the denominator by
+    the same collinear stretch, letting a short graze past an
+    ``axis_min_extent_m`` floor measured against that same shrunk value and
+    reach ratio 1.0 — a false positive, which this module treats as the
+    strictly worse failure mode.
     """
-    inside = line.intersection(region)
-    return 0.0 if inside.is_empty else inside.difference(excluded_boundary).length
+    inside = line.intersection(polygon)
+    return 0.0 if inside.is_empty else inside.difference(polygon.boundary).length
 
 
 def _segments(geometry):
@@ -85,37 +105,34 @@ def _segments(geometry):
                 yield segment
 
 
-def _boundary_shares(face, tagged: dict[int, tuple[STRtree, list]], tolerance: float):
-    """Share of the face perimeter carried by each WGO type, and the touching IDs.
+def _boundary_ratios(face, trees: dict[int, STRtree], tolerance: float) -> dict[int, float]:
+    """Share of the face perimeter carried by each WGO type — diagnosis only.
 
     Faces come from a noded polygonization, so a boundary segment originates
     whole from one source line: comparing its midpoint distance is enough and
-    keeps the tolerance a numerical comparison rather than a snap.
+    keeps the tolerance a numerical comparison rather than a snap. These
+    ratios are reported for every resolved face but never decide a class: see
+    the module docstring for why a bare WGO-boundary composition cannot tell
+    a sidewalk from a carriageway split by an internal Wcz line.
     """
     segments = list(_segments(face.boundary))
-    ratios = dict.fromkeys(tagged, 0.0)
-    touching_ids: dict[int, list[str]] = {code: [] for code in tagged}
+    ratios = dict.fromkeys(trees, 0.0)
     perimeter = sum(segment.length for segment in segments)
     if perimeter <= 0:
-        return ratios, touching_ids
+        return ratios
     midpoints = [segment.interpolate(0.5, normalized=True) for segment in segments]
-    for type_code, (tree, ids) in tagged.items():
-        if not ids:
-            continue
-        segment_hits, line_hits = tree.query(midpoints, predicate="dwithin", distance=tolerance)
-        ratios[type_code] = (
-            sum(segments[i].length for i in sorted(set(segment_hits.tolist()))) / perimeter
-        )
-        touching_ids[type_code] = sorted({ids[i] for i in sorted(set(line_hits.tolist()))})
-    return ratios, touching_ids
+    for type_code, tree in trees.items():
+        hits = set(tree.query(midpoints, predicate="dwithin", distance=tolerance)[0].tolist())
+        ratios[type_code] = sum(segments[index].length for index in hits) / perimeter
+    return ratios
 
 
-def _format_evidence(matches) -> str:
-    """Pair each retained axis with its own VERH, e.g. ``101:VERH=1,102:VERH=12``."""
-    return ",".join(
-        f"{axis_id}:VERH={'unknown' if verh is None else verh}"
-        for _, axis_id, verh in sorted(matches, key=lambda match: match[1])
+def _format_evidence(matches, surface_field: str) -> str:
+    """Pair each retained axis with its own surface code, deduplicated and sorted."""
+    pairs = sorted(
+        {(axis_id, "unknown" if code is None else str(code)) for _, axis_id, code in matches}
     )
+    return ",".join(f"{axis_id}:{surface_field}={code}" for axis_id, code in pairs)
 
 
 def classify_grb_faces(
@@ -125,8 +142,6 @@ def classify_grb_faces(
     *,
     axis_coverage_ratio_min: float,
     axis_min_extent_m: float,
-    wcz_ratio_min: float,
-    wrb_ratio_max: float,
     boundary_tolerance_m: float,
     length_tolerance_m: float,
     face_id: str = "face_id",
@@ -138,27 +153,31 @@ def classify_grb_faces(
     axis_surface_field: str = "VERH",
     axis_status_field: str = "STATUS",
 ) -> tuple[gpd.GeoDataFrame, dict]:
-    """Label candidate faces from upstream GRB evidence, defaulting to ``unmapped``.
+    """Label candidate faces from upstream GRB axis evidence, defaulting to ``unmapped``.
 
     ``faces`` must be a complete ``partition_polygons`` output: the parent
     corridor is rebuilt as the union of its resolved (``partitioned`` or
-    ``unsplit``) faces, and classification runs in two passes over it.
+    ``unsplit``) faces. For each resolved face, every Wegsegment axis with
+    ``STATUS=4`` (in service) whose length inside the corridor is at least
+    ``axis_min_extent_m`` and whose share of that length falls inside this
+    face is at least ``axis_coverage_ratio_min`` becomes a candidate:
 
-    1. A face with an in-service (``STATUS=4``) axis whose length inside the
-       corridor is at least ``axis_min_extent_m`` and whose share of that
-       length falls inside this face is at least ``axis_coverage_ratio_min``
-       becomes ``carriageway_paved`` when every such axis is paved (``VERH``
-       1 or 12), stays ``unmapped`` when every one is not, and stays
-       ``unmapped`` with a distinct reason when they disagree.
-    2. A face pass 1 left undecided is a ``sidewalk`` candidate only if it
-       shares a boundary with a face pass 1 anchored as ``carriageway_paved``
-       in the *same* corridor: a face's own Wcz share never proves which side
-       of a Wcz line it is on (a Wcz line borders both the slow-user zone and
-       the carriageway beside it), only proximity to a proven carriageway
-       does. Faces in a corridor with no such anchor stay ``unmapped``.
+    - all candidates paved (``VERH`` 1 or 12): ``carriageway_paved``;
+    - all candidates unpaved (``VERH`` 2): ``unmapped``, reason
+      ``axis_surface_not_paved``;
+    - a mix of paved and unpaved candidates: ``unmapped``, reason
+      ``contradictory_axis_surface`` — an in-service axis disagreeing with
+      itself on ``VERH`` is a data conflict, not resolved by picking a side;
+    - candidates present but all of unknown/not-applicable ``VERH``:
+      ``unmapped``, reason ``axis_surface_unknown``;
+    - no usable candidate at all: ``unmapped``, reason
+      ``no_in_service_axis_evidence``.
 
-    Every threshold is an explicit argument, and each face carries the reason
-    and the ratios behind its class.
+    This module does not produce ``sidewalk`` (see the module docstring).
+    Every face still carries ``wcz_boundary_ratio``/``wrb_boundary_ratio``/
+    ``woz_boundary_ratio`` — the share of its own perimeter carried by each
+    WGO type — as diagnostic-only measurements, and every threshold is an
+    explicit argument.
     """
     if (
         faces.crs is None
@@ -168,11 +187,8 @@ def classify_grb_faces(
         or any(a.unit_conversion_factor != 1 for a in faces.crs.axis_info[:2])
     ):
         raise ValueError("GRB_CLASSIFY_CRS_INVALID: identical projected metre CRS required")
-    if any(
-        not math.isfinite(v) or not 0.0 <= v <= 1.0
-        for v in (axis_coverage_ratio_min, wcz_ratio_min, wrb_ratio_max)
-    ):
-        raise ValueError("GRB_CLASSIFY_RATIO_INVALID: coverage ratios required within [0, 1]")
+    if not math.isfinite(axis_coverage_ratio_min) or not 0.0 <= axis_coverage_ratio_min <= 1.0:
+        raise ValueError("GRB_CLASSIFY_RATIO_INVALID: coverage ratio required within [0, 1]")
     if any(
         not math.isfinite(v) or v < 0
         for v in (boundary_tolerance_m, length_tolerance_m, axis_min_extent_m)
@@ -190,113 +206,54 @@ def classify_grb_faces(
             raise ValueError(
                 "GRB_CLASSIFY_GEOMETRY_INVALID: repair source geometries explicitly before classifying"
             )
-    # face_id must be unique (it identifies the output row); polygon_id groups
-    # faces into corridors and repeats by design. axis_id (WS_OIDN) is a
-    # Wegenregister reference, not a GRB OIDN, and is not required to be
-    # unique per geometric segment: it is used only for evidence and
-    # deterministic ordering, never as a lookup key.
-    for frame, identity in ((faces, face_id),):
-        column = frame[identity]
-        if (
-            column.isna().any()
-            or (column.astype(str).str.strip() == "").any()
-            or column.astype(str).duplicated().any()
-        ):
-            raise ValueError("GRB_CLASSIFY_ID_INVALID: unique nonempty face IDs required")
-    for frame, identity in ((faces, polygon_id), (axes, axis_id)):
-        column = frame[identity]
-        if column.isna().any() or (column.astype(str).str.strip() == "").any():
-            raise ValueError("GRB_CLASSIFY_ID_INVALID: nonempty IDs required")
+    # face_id identifies the output row and must be unique; polygon_id groups
+    # faces into corridors and repeats by design.
+    column = faces[face_id]
+    if (
+        column.isna().any()
+        or (column.astype(str).str.strip() == "").any()
+        or column.astype(str).duplicated().any()
+    ):
+        raise ValueError("GRB_CLASSIFY_ID_INVALID: unique nonempty face IDs required")
+    if faces[polygon_id].isna().any() or (faces[polygon_id].astype(str).str.strip() == "").any():
+        raise ValueError("GRB_CLASSIFY_ID_INVALID: nonempty polygon IDs required")
 
     # Positional numpy masks throughout: an empty list would select columns, and a
     # caller may legitimately hand over a frame with duplicated index labels.
     in_service = axes[(axes[axis_status_field].map(_code) == _IN_SERVICE).to_numpy()]
+    # axis_id (WS_OIDN, a Wegenregister reference, not a GRB OIDN) is validated
+    # only on in-service rows: it is never a lookup key, only evidence text and
+    # deterministic ordering, and an out-of-service row's blank/duplicate ID
+    # never reaches the algorithm — it must not fail the whole call.
+    axis_id_column = in_service[axis_id]
+    if axis_id_column.isna().any() or (axis_id_column.astype(str).str.strip() == "").any():
+        raise ValueError("GRB_CLASSIFY_ID_INVALID: nonempty in-service axis IDs required")
     axis_geometries = in_service.geometry.to_list()
     axis_tree = STRtree(axis_geometries)
-    axis_ids = [str(v) for v in in_service[axis_id]]
+    axis_ids = [str(v) for v in axis_id_column]
     axis_surfaces = [_code(v) for v in in_service[axis_surface_field]]
 
-    boundary_ids_all = [str(v) for v in boundaries[boundary_id]]
     boundary_codes = boundaries[boundary_type_field].map(_code)
-    tagged_boundaries: dict[int, tuple[STRtree, list]] = {}
-    for type_code in (_WCZ, _WRB, _WOZ):
-        mask = (boundary_codes == type_code).to_numpy()
-        tagged_boundaries[type_code] = (
-            STRtree(boundaries.geometry[mask].to_list()),
-            [boundary_ids_all[i] for i, hit in enumerate(mask) if hit],
-        )
+    boundary_trees = {
+        type_code: STRtree(boundaries.geometry[(boundary_codes == type_code).to_numpy()].to_list())
+        for type_code in (_WCZ, _WRB, _WOZ)
+    }
 
     geometries = faces.geometry.to_list()
     statuses = [str(v) for v in faces[status_field]]
     parents = [str(v) for v in faces[polygon_id]]
-
     grouped: dict[str, list] = {}
     for position, status in enumerate(statuses):
         if status in _RESOLVED_STATUSES:
             grouped.setdefault(parents[position], []).append(geometries[position])
-    corridors = {
-        key: (unary_union(parts), unary_union([part.boundary for part in parts]))
-        for key, parts in grouped.items()
-    }
-
-    # Pass 1: axis evidence only. A resolved face this pass cannot settle (no
-    # in-service axis covers enough of it) is left as None, to be judged in
-    # pass 2 against faces this pass anchored as carriageway_paved in the same
-    # corridor.
-    pass1: list[dict | None] = [None] * len(geometries)
-    for position, status in enumerate(statuses):
-        if status not in _RESOLVED_STATUSES:
-            continue
-        face = geometries[position]
-        corridor, corridor_boundary = corridors[parents[position]]
-        candidates = []
-        for index in axis_tree.query(face, predicate="intersects"):
-            line = axis_geometries[int(index)]
-            extent = _length_inside(line, corridor, corridor_boundary)
-            if extent <= length_tolerance_m or extent < axis_min_extent_m:
-                continue
-            share = _length_inside(line, face, corridor_boundary) / extent
-            candidates.append((share, axis_ids[int(index)], axis_surfaces[int(index)]))
-        matches = [c for c in candidates if c[0] >= axis_coverage_ratio_min]
-        if not matches:
-            continue
-        paved = [m for m in matches if m[2] in _PAVED]
-        unpaved = [m for m in matches if m[2] not in _PAVED]
-        if paved and unpaved:
-            pass1[position] = {
-                "functional_class": "unmapped",
-                "classification_reason": "contradictory_axis_surface",
-                "classification_evidence": _format_evidence(paved + unpaved),
-                "axis_coverage_ratio": max(m[0] for m in matches),
-            }
-        elif paved:
-            pass1[position] = {
-                "functional_class": "carriageway_paved",
-                "classification_reason": "in_service_paved_axis",
-                "classification_evidence": _format_evidence(paved),
-                "axis_coverage_ratio": max(m[0] for m in paved),
-            }
-        else:
-            pass1[position] = {
-                "functional_class": "unmapped",
-                "classification_reason": "axis_surface_not_paved",
-                "classification_evidence": _format_evidence(unpaved),
-                "axis_coverage_ratio": max(m[0] for m in unpaved),
-            }
-
-    anchors: dict[str, list] = {}
-    for position, verdict in enumerate(pass1):
-        if verdict and verdict["functional_class"] == "carriageway_paved":
-            anchors.setdefault(parents[position], []).append(geometries[position])
-    anchor_boundary = {
-        key: unary_union([g.boundary for g in geoms]) for key, geoms in anchors.items()
-    }
+    corridors = {key: unary_union(parts) for key, parts in grouped.items()}
 
     records = []
     for position, status in enumerate(statuses):
+        face = geometries[position]
         if status not in _RESOLVED_STATUSES:
             # Area conservation alone never certifies a subdivision, so unresolved
-            # topology stops here: neither axes nor boundaries are consulted.
+            # topology stops here: axes and boundaries are not consulted.
             records.append(
                 {
                     "functional_class": "unmapped",
@@ -306,45 +263,63 @@ def classify_grb_faces(
                 }
             )
             continue
-        face = geometries[position]
-        ratios, touching = _boundary_shares(face, tagged_boundaries, boundary_tolerance_m)
-        if pass1[position] is not None:
-            record = dict(pass1[position])
-            record.update(
-                wcz_boundary_ratio=ratios[_WCZ],
-                wrb_boundary_ratio=ratios[_WRB],
-                woz_boundary_ratio=ratios[_WOZ],
-            )
-            records.append(record)
-            continue
-        anchor = anchor_boundary.get(parents[position])
-        anchored = (
-            anchor is not None
-            and face.boundary.intersects(anchor)
-            and face.boundary.intersection(anchor).length > boundary_tolerance_m
-        )
-        evidence = ""
-        if not anchored:
-            functional_class, reason = "unmapped", "no_carriageway_anchor_in_corridor"
-        elif ratios[_WCZ] < wcz_ratio_min:
-            # Woz is an unpaved shoulder, never a sidewalk; it is reported, never mapped.
+        corridor = corridors[parents[position]]
+        # candidates: every axis with a nonzero, unambiguous share (share <= 0
+        # means the axis proves nothing at all — see _interior_length — and is
+        # excluded here regardless of the threshold below). matches: the subset
+        # that actually clears axis_coverage_ratio_min and can decide a class.
+        # Reporting is kept over the wider `candidates` set even when no match
+        # was retained, so a face just short of the threshold still shows its
+        # measured evidence instead of a misleading 0.0.
+        candidates = []
+        for index in axis_tree.query(face, predicate="intersects"):
+            line = axis_geometries[int(index)]
+            extent = _interior_length(line, corridor)
+            if extent <= length_tolerance_m or extent < axis_min_extent_m:
+                continue
+            share = _interior_length(line, face) / extent
+            if share <= 0:
+                continue
+            candidates.append((share, axis_ids[int(index)], axis_surfaces[int(index)]))
+        matches = [c for c in candidates if c[0] >= axis_coverage_ratio_min]
+        paved = [c for c in matches if c[2] in _PAVED]
+        unpaved = [c for c in matches if c[2] in _UNPAVED]
+        unknown_matches = [c for c in matches if c[2] not in _PAVED and c[2] not in _UNPAVED]
+        ratios = _boundary_ratios(face, boundary_trees, boundary_tolerance_m)
+        if paved and unpaved:
             functional_class = "unmapped"
-            reason = (
-                "woz_only_not_sidewalk"
-                if ratios[_WOZ] >= wcz_ratio_min
-                else "no_dominant_wcz_boundary"
-            )
-        elif ratios[_WRB] > wrb_ratio_max or ratios[_WRB] >= ratios[_WCZ]:
-            functional_class, reason = "unmapped", "wrb_boundary_dominant"
+            reason = "contradictory_axis_surface"
+            evidence = _format_evidence(paved + unpaved, axis_surface_field)
+            axis_coverage_ratio = max(c[0] for c in paved + unpaved)
+        elif paved:
+            functional_class = "carriageway_paved"
+            reason = "in_service_paved_axis"
+            evidence = _format_evidence(paved, axis_surface_field)
+            axis_coverage_ratio = max(c[0] for c in paved)
+        elif unpaved:
+            functional_class = "unmapped"
+            reason = "axis_surface_not_paved"
+            evidence = _format_evidence(unpaved, axis_surface_field)
+            axis_coverage_ratio = max(c[0] for c in unpaved)
+        elif unknown_matches:
+            functional_class = "unmapped"
+            reason = "axis_surface_unknown"
+            evidence = _format_evidence(unknown_matches, axis_surface_field)
+            axis_coverage_ratio = max(c[0] for c in unknown_matches)
         else:
-            functional_class, reason = "sidewalk", "dominant_wcz_boundary"
-            evidence = ",".join(f"{boundary_id}={oidn}" for oidn in touching[_WCZ])
+            # No candidate cleared axis_coverage_ratio_min (candidates may still
+            # be non-empty): report the strongest measured evidence anyway, for
+            # diagnosis, without ever letting it decide the class.
+            functional_class = "unmapped"
+            reason = "no_in_service_axis_evidence"
+            evidence = ""
+            axis_coverage_ratio = max((c[0] for c in candidates), default=0.0)
         records.append(
             {
                 "functional_class": functional_class,
                 "classification_reason": reason,
                 "classification_evidence": evidence,
-                "axis_coverage_ratio": 0.0,
+                "axis_coverage_ratio": axis_coverage_ratio,
                 "wcz_boundary_ratio": ratios[_WCZ],
                 "wrb_boundary_ratio": ratios[_WRB],
                 "woz_boundary_ratio": ratios[_WOZ],
@@ -382,8 +357,6 @@ def classify_grb_faces(
         "thresholds": {
             "axis_coverage_ratio_min": float(axis_coverage_ratio_min),
             "axis_min_extent_m": float(axis_min_extent_m),
-            "wcz_ratio_min": float(wcz_ratio_min),
-            "wrb_ratio_max": float(wrb_ratio_max),
             "boundary_tolerance_m": float(boundary_tolerance_m),
             "length_tolerance_m": float(length_tolerance_m),
         },

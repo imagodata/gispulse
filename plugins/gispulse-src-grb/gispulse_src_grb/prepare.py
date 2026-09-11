@@ -47,8 +47,6 @@ def prepare_grb(
     boundary_tolerance_m: float = 1e-3,
     axis_coverage_ratio_min: float = 0.8,
     axis_min_extent_m: float = 5.0,
-    wcz_ratio_min: float = 0.4,
-    wrb_ratio_max: float = 0.5,
 ) -> dict:
     """Publish raw layers, unclassified candidate faces and an evidence-based classification.
 
@@ -68,11 +66,8 @@ def prepare_grb(
         for v in (area_tolerance_m2, length_tolerance_m, boundary_tolerance_m, axis_min_extent_m)
     ):
         raise ValueError("GRB_TOLERANCE_INVALID: nonnegative finite tolerances required")
-    if any(
-        not math.isfinite(v) or not 0.0 <= v <= 1.0
-        for v in (axis_coverage_ratio_min, wcz_ratio_min, wrb_ratio_max)
-    ):
-        raise ValueError("GRB_RATIO_INVALID: classification ratios required within [0, 1]")
+    if not math.isfinite(axis_coverage_ratio_min) or not 0.0 <= axis_coverage_ratio_min <= 1.0:
+        raise ValueError("GRB_RATIO_INVALID: classification ratio required within [0, 1]")
     if output.exists():
         raise ValueError("GRB_OUTPUT_EXISTS: choose a fresh output directory")
     source = GrbSource()
@@ -97,8 +92,6 @@ def prepare_grb(
         "boundary_tolerance_m": boundary_tolerance_m,
         "axis_coverage_ratio_min": axis_coverage_ratio_min,
         "axis_min_extent_m": axis_min_extent_m,
-        "wcz_ratio_min": wcz_ratio_min,
-        "wrb_ratio_max": wrb_ratio_max,
         "ready_for_costing": False,
     }
     if not write:
@@ -150,13 +143,23 @@ def prepare_grb(
                 frames["grb-wegsegment-vl"],
                 axis_coverage_ratio_min=axis_coverage_ratio_min,
                 axis_min_extent_m=axis_min_extent_m,
-                wcz_ratio_min=wcz_ratio_min,
-                wrb_ratio_max=wrb_ratio_max,
                 boundary_tolerance_m=boundary_tolerance_m,
                 length_tolerance_m=length_tolerance_m,
             )
-            # Self-check only: validate_functional_faces raising here would be a
-            # classification bug, never caught. Its own ready_for_costing column
+        except ValueError as exc:
+            # A single bad Wegsegment record (duplicate/blank ID, invalid
+            # geometry, missing required field) must not erase raw layers and
+            # candidate_faces that acquisition already paid for. Only the
+            # classifier's own GRB_CLASSIFY_* data-validation errors degrade
+            # like this: anything else (in particular validate_functional_faces
+            # below, or an I/O failure) is a real bug or a real infrastructure
+            # failure and must not be silently relabelled as a data defect.
+            if not str(exc).startswith("GRB_CLASSIFY_"):
+                raise
+            classification_report = {"status": "failed", "error": str(exc)}
+        else:
+            # Self-check, deliberately outside the except above: a mismatch here
+            # is a classifier bug, never caught. Its own ready_for_costing column
             # is NOT what gets published below — this chantier's mandate keeps
             # that flag false until axis/structure reconciliation is complete,
             # and a per-face True in the published file would invite a
@@ -166,11 +169,6 @@ def prepare_grb(
                 classified, str(staging / "classified_faces.geoparquet"), compression="zstd"
             )
             classification_report = classification
-        except ValueError as exc:
-            # A single bad Wegsegment record (duplicate/blank ID, invalid
-            # geometry, missing required field) must not erase raw layers and
-            # candidate_faces that acquisition already paid for.
-            classification_report = {"status": "failed", "error": str(exc)}
         hashes = {}
         for file in sorted(staging.glob("*.geoparquet")):
             with file.open("rb") as stream:
@@ -207,8 +205,6 @@ def main() -> int:
     parser.add_argument("--boundary-tolerance-m", type=float, default=1e-3)
     parser.add_argument("--axis-coverage-ratio-min", type=float, default=0.8)
     parser.add_argument("--axis-min-extent-m", type=float, default=5.0)
-    parser.add_argument("--wcz-ratio-min", type=float, default=0.4)
-    parser.add_argument("--wrb-ratio-max", type=float, default=0.5)
     args = parser.parse_args()
     try:
         report = prepare_grb(
@@ -223,8 +219,6 @@ def main() -> int:
             boundary_tolerance_m=args.boundary_tolerance_m,
             axis_coverage_ratio_min=args.axis_coverage_ratio_min,
             axis_min_extent_m=args.axis_min_extent_m,
-            wcz_ratio_min=args.wcz_ratio_min,
-            wrb_ratio_max=args.wrb_ratio_max,
         )
     except Exception as exc:
         print(
