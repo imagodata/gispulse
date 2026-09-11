@@ -245,6 +245,41 @@ reconcile axes with KNW structures and does not certify a road crossing, so
 `ready_for_costing` stays false at the bundle level regardless of any
 per-face evidence.
 
+### Known limitations, not yet addressed
+
+Flagged by the third adversarial review, deliberately left open (all are
+diagnostic/auditability gaps, not correctness bugs — no face is wrongly
+promoted by any of these):
+
+- `axis_coverage_ratio`/`classification_evidence` report `0.0`/empty for an
+  axis rejected by the `axis_min_extent_m` floor, rather than its measured
+  ratio, because that floor is applied before an axis enters `candidates` at
+  all. A candidate rejected only by `axis_coverage_ratio_min` *is* reported
+  (the fallback branch uses the full `candidates` list); one rejected by the
+  extent floor is not.
+- A contradictory unpaved axis below `axis_coverage_ratio_min` is silently
+  absent from `contradictory_axis_surface`'s evidence: only axes in `matches`
+  (i.e. already above threshold) are considered for the paved/unpaved
+  conflict check.
+- `_interior_length`'s boundary exclusion is an exact (unbuffered) geometry
+  difference: an axis a millimetre inside a boundary, rather than exactly on
+  it, is not excluded at all, unlike the diagnostic `_boundary_ratios`
+  (`dwithin` with `boundary_tolerance_m`). No axis in the validated Gand
+  bundle triggers this; it is a documented gap, not yet observed in the wild.
+- `axis_min_extent_m` measures length inside the corridor, not depth of
+  penetration or angle: an axis entering at a shallow angle from the outer
+  boundary and staying within a narrow band can clear the floor while never
+  genuinely crossing into a wider carriageway.
+- `VERH=12` ("mixed") is treated as paved on the strength of the module's own
+  documentation; it has not been independently cross-checked against the
+  official codelist the way 1/2/-8/-9 have been (confirmed live via
+  `LBLVERH`).
+- `MORF=120` (dienstweg) and `125` (aardeweg) are excluded from the
+  motor-traffic set by this module's own conservative reading ("not
+  unambiguously a public carriageway"), not because the official handbook
+  states they cannot carry vehicles — worth revisiting if either appears with
+  meaningful frequency in regional data.
+
 ## KNW structure reconciliation — contract verified, not yet implemented
 
 Official semantics (objectenhandboek, `kunstwerk-knw`): KNW geometry is a
