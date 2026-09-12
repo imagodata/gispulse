@@ -1,6 +1,6 @@
 ---
 title: Available Capabilities
-description: Full reference of the 118 GISPulse capabilities — vector, attributes, validation, classification, spatial statistics, topology, temporal, 3D pointcloud, raster, network, and PostGIS SQL.
+description: Full reference of the 144 GISPulse capabilities — vector, attributes, validation, classification, spatial statistics, topology, temporal, 3D pointcloud, raster, network, routing, and PostGIS SQL.
 ---
 
 # Available Capabilities
