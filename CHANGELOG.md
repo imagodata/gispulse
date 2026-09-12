@@ -7,6 +7,179 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-09-12
+
+### Added
+
+- **DPE queries scoped by `id_rnb` (#475).** `DpeSource.access_for` accepts an
+  `id_rnb` parameter that builds an `id_rnb:(A OR B)` Lucene filter, fetching
+  the diagnostics of specific RNB buildings instead of a whole commune's
+  table — a commune-wide fetch (up to 100k rows / 600s on a big city) becomes
+  a handful of rows. `id_rnb` takes precedence over `code_insee`, then
+  `code_departement`; ids are validated (alphanumeric) to keep the query
+  string injection-free.
+- **`network_redundancy` capability.** Per-site redundancy audit: for every
+  input point, counts the mutually disjoint routes (capped at `k`, default
+  2) through a line network to a set of facility points — 0 = unreachable,
+  1 = single point of failure, `k` = protected. `ref_layers` lists
+  `[network, facilities]`; same Suurballe engine as `disjoint_paths`
+  (`mode="node"`/`"edge"`), with per-component facility grouping and
+  co-located-site memoization. Pro tier.
+- **`reseau_expansion_resilience` pipeline template.** First template
+  composing the newly ported network capabilities end-to-end: connected
+  components → bridge tagging (structural SPOFs) → per-site redundancy
+  audit against source facilities → SPOF filter → greedy marginal-cost
+  expansion order from the facilities.
+- **`calibrate_detour_bands` capability.** Closes the routing loop: feed it
+  routed observations (typically the output of `route_pairs` with
+  `provider="osrm"`) and it recalibrates the detour ("tortuosity") factors —
+  per band, the median routed/straight ratio of the observations falling in
+  the band. Band bounds are never recomputed; a band with no observation
+  keeps its current factor (`sample_count=0` makes it visible). The
+  `applied_factor` column feeds straight back into `route_pairs`'
+  `tortuosity_bands`. Pro tier.
+- **`sample_surface_along_lines` capability.** Linear referencing: splits
+  every line into its ordered sequence of homogeneous segments by the
+  surface class it crosses (polygon `ref_layer` + class column) — one row
+  per segment with `length_m`, `share` and the sub-line geometry. Uncovered
+  stretches get `fallback_class`; overlaps are resolved by layer order
+  (first wins) or an explicit `priority` list (last listed wins; an unlisted
+  class deliberately outranks listed ones so an unranked cover never loses
+  silently). Composes with `route_pairs` to classify routed traces. Pro
+  tier.
+- **Road-routing providers + `route_pairs` capability.** New
+  `gispulse.core.routing_providers` module — a `RoutingProvider` abstraction
+  (distance + trace between two points of a caller-chosen CRS) with three
+  implementations: `TortuosityProvider` (offline: straight-line × calibrated
+  detour factor per distance band), `OSRMProvider` (real road routing over
+  httpx — `/route` per pair and `/table` batch matrices, degenerate-drop
+  flooring back to the tortuosity bands when OSRM snaps both endpoints onto
+  the same road node, thread-safe drop telemetry), and
+  `CachedRoutingProvider` (pre-routed GeoParquet keyed by canonical
+  geometric pair keys, direction-independent, with read-side repair of
+  degenerate stored traces and provenance of baked tortuosity fallbacks).
+  Errors are machine-readable (`RoutingError` with `code` + `context`). The
+  `route_pairs` capability (Pro) bridges them into pipelines: one line per
+  point pair with `distance_m`, `straight_m` and `routing_source`;
+  `on_no_route="skip"` drops only the genuinely unroutable pairs while
+  infrastructure failures still raise.
+- **`disjoint_paths` capability.** K mutually disjoint paths of minimum
+  **total** cost between two points through a line network (Suurballe —
+  successive shortest paths with Johnson potentials on a split-node residual
+  graph). `mode="node"` (default) forbids sharing interior nodes,
+  `mode="edge"` only forbids sharing edges. Finding fewer than `k` paths is
+  reported through the `paths_found` column rather than raised: the shortfall
+  *is* the single-point-of-failure signal. Finds pairs that a naive
+  remove-first-path-then-retry scan provably misses. Pure Python,
+  deterministic, NaN/negative-weight fast-fail. Pro tier.
+- **`network_bridges` capability.** Tags every line whose removal disconnects
+  its component (bridge / cut-edge — the structural SPOFs of a network) with
+  a boolean `is_bridge` column. Iterative Tarjan over the endpoint graph with
+  per-edge identity, so parallel lines between the same two nodes are never
+  bridges; multi-part rows are flagged when any part is a bridge. A connected
+  network with no bridge is 2-edge-connected (survives any single line
+  failure). Dependency-free (no networkx). Pro tier.
+- **`network_greedy_expansion` capability.** Greedy multi-source Prim-style
+  network expansion with a per-node activation cost. Grows a tree/forest out
+  of a set of frontier (root) nodes, absorbing at each step the reachable node
+  of minimal marginal cost (edge weight + target activation cost). Unlike
+  `mst` (spans everything, no roots) and `steiner_tree` (connects a fixed
+  terminal set), it starts from multiple roots, has no mandatory targets, and
+  charges a one-off activation cost per node. Frontier via `ref_layer`; optional
+  per-node activation costs via a second `ref_layers` entry (`cost_col`). The
+  frontier and activation-cost layers are each reprojected onto the network's
+  working CRS on their own CRS gap — independently of whether the network
+  itself needed reprojection — so a frontier/cost layer supplied in a different
+  CRS from a projected network is aligned rather than mismatched (frontier
+  match failing, or cost silently dropped). Pure `heapq` implementation with a
+  deterministic tie-break and a NaN-cost fast-fail (`inf` allowed). Pro-tier,
+  works offline like its `network.py` siblings.
+- **`cluster_balanced_kmeans` capability.** Size-bounded K-Means: partitions
+  geometry centroids into clusters whose size stays within `[min_size,
+  max_size]`. Deterministic k-means++ / Lloyd followed by a split/merge
+  rebalance; `k` is chosen automatically from the size bounds. Unlike
+  `cluster_kmeans` it enforces per-cluster size bounds — and when the rebalance
+  cannot meet them (bounds infeasible for the point count, e.g.
+  `min_size == max_size` not dividing `n`, or a cluster of excess
+  co-located/duplicate points that cannot be split) it raises an explicit
+  `ValueError` listing the out-of-bounds clusters rather than returning an
+  out-of-contract result silently (the only tolerated remainder is a single
+  undersized cluster when `len(gdf) < min_size`). Pure numpy, seeded
+  (`random_state`), with a stable size-descending relabel.
+
+### Fixed
+
+- **`steiner_tree` on a graph with a terminal-less component.** The Mehlhorn
+  heuristic (networkx's default since 3.2) indexes every node of the graph
+  after a multi-source Dijkstra from the terminals, so a disconnected
+  component without any terminal — common in a raw OSM road network — raised
+  `KeyError`. The solve is now restricted to the terminals' connected
+  component (already computed for the connectivity guard); unchanged for a
+  fully connected network.
+
+## [2.3.0] - 2026-06-14
+
+### Added
+
+- **Manifest v3 orchestration suite (#440).** End-to-end pipeline runtime:
+  `PipelineRun` entity + lifecycle events on the EventHub (#442), run-completion
+  as a trigger source with scenario wiring (#445), run + validate manifest v3
+  pipelines over HTTP (#447), a step-kind registry with external subprocess
+  steps (#450), a run control surface — cancel / resume / partial execution
+  (#452), and non-capability steps + selectless models in manifest v3 (#454).
+- **Saved-map CRUD API (#405, #446).** Persist and reload maps — layers, styles,
+  view and filters — over the HTTP API.
+- **Consolidate-networks capabilities (`cn_*` family, #465).** Faithful
+  pure-shapely port of the QGIS *Consolidate Networks* plugin
+  (`github.com/sducournau/consolidate_networks`), bringing eight line-network
+  topology cleaners to every GISPulse surface without QGIS:
+  `cn_calculate_dbscan`, `cn_consolidate_with_dbscan`,
+  `cn_make_intersections_vertexes`, `cn_endpoints_trim_extend`,
+  `cn_endpoints_snapping`, `cn_hub_snapping`, `cn_snap_hubs_to_layer`,
+  `cn_snap_endpoints_to_layer`. All work in `crs_meters`, never mutate input,
+  support `explode_and_gather` / `entity_identification_fields`; the two
+  `*_to_layer` capabilities take a reference layer via `ref_layer` → `ref_gdf`.
+- **`measure_spatial_impact` capability (#436).** Clip + overlap measurement for
+  feature × parcel impact checks.
+- **H3 multi-metric aggregation (#457).** Several metrics in a single H3 pass.
+- **New open-data source plugins.** `src-dpe` (energy performance, #422),
+  `src-ocsge` (land cover, #423), `src-sitadel` (building permits, #424), public
+  OSM + GRB sources with in-zip member reading via `/vsizip` (#459), and OSM PBF
+  road-tag extraction + `materialize_pbf` local download (#463).
+- **Geo commons primitives (#438).** Reusable HTTP / WFS / GeoJSON building
+  blocks and generic geo models.
+- **`write_pmtiles_pyramid` (#435).** Multi-LOD layers in a single PMTiles
+  archive.
+- **Universal loader for non-geo tabular sources (#449).** CSV/tabular inputs
+  flow through the same loader path.
+- **PG-direct building blocks (#432).** `ST_Subdivide` materializer + batched
+  DuckDB → PostGIS loader.
+- **Source readiness probe engine (#431)** with extensible probe kinds, and a
+  **bounded vector tiler (#430)** — bbox-tiled parallel ingest to parquet.
+- **Manifest-gated PostGIS column shed (#429, dry-run by default)**, **opt-in
+  DuckDB resource limits (memory/temp/threads, #427)**, a **unified source CLI
+  (#421)**, **`stream_vector_to_parquet` (#420)**, **CSV encoding detection with
+  fallback (#426)**, and **BulkIngestRunner skip-if-staged resume (#433)** plus
+  dept scope-stamp / `bulk_access_for` / GeoJSON aliases (#419).
+
+### Fixed
+
+- **Security audit 2026-06-09 (#418).** SQL injection, HTTP-router auth, zip-slip
+  (7z), SSRF and DoS hardening, plus CSV/XLSX write and COG export gaps.
+- **CDC v2.3.0 hardening (#441).** `pg_notify` DELETE/PK handling, composite
+  primary keys, and documentation drift.
+- **Scheduled pipelines actually execute their `pipeline_config` (#439).**
+- **Manifest path fixes.** Selectless models run in declaration order (#458);
+  cancel, heartbeat and timeout elevation on the manifest path (#456).
+- **Storage:** make the Garage backend explicit (#462).
+
+### Changed
+
+- **CI / supply-chain (#400, #401, #444).** SHA-pinned GitHub Actions,
+  least-privilege DCO, and `pyjwt` / `urllib3` bumps.
+- **Python baseline raised to 3.12+.** Dropped Python 3.11 support and aligned
+  the plugin template and ruff target accordingly.
+
 ## [2.2.3]
 
 ### Added
@@ -770,6 +943,8 @@ Hotfix release that unblocks the v1.3.0 distribution: `pipx install gispulse` no
 - Structured logging with sanitized outputs
 - Input validation and type safety across portal node system
 
-[Unreleased]: https://github.com/imagodata/gispulse/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/imagodata/gispulse/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/imagodata/gispulse/compare/v2.3.0...v2.4.0
+[2.3.0]: https://github.com/imagodata/gispulse/compare/v1.0.0...v2.3.0
 [1.0.0]: https://github.com/imagodata/gispulse/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/imagodata/gispulse/releases/tag/v0.1.0

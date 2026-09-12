@@ -61,6 +61,19 @@ def _bind_geom(geom_wkt: str | None, srid: int) -> tuple[str | None, tuple]:
     return _GEOM_BIND, (geom_wkt, srid)
 
 
+def _quote_ident(name: str) -> str:
+    """Double-quote a (possibly schema-qualified) SQL identifier.
+
+    ``validate_layer_name`` is permissive (it accepts spaces, ``=``, parens,
+    ``UNION`` …) and is therefore only safe when the resulting identifier is
+    interpolated **between double quotes**. It forbids the ``"`` character, so
+    no escaping is required. Schema-qualified names (``schema.table``) are
+    split on ``.`` so each part is quoted independently:
+    ``"schema"."table"``.
+    """
+    return ".".join(f'"{part}"' for part in name.split("."))
+
+
 # ---------------------------------------------------------------------------
 # OperationExecutor
 # ---------------------------------------------------------------------------
@@ -197,9 +210,10 @@ class OperationExecutor:
         table = _validate_identifier(op.get("table", "") or "")
         if not table:
             return None
+        qtable = _quote_ident(table)
         geom, params = _bind_geom(geom_wkt, srid)
         rows = self._conn.execute(
-            f"SELECT id FROM {table} WHERE {predicate}({geom}, geom) LIMIT 1",
+            f"SELECT id FROM {qtable} WHERE {predicate}({geom}, geom) LIMIT 1",
             params,
         )
         return rows[0]["id"] if rows else None
@@ -209,11 +223,12 @@ class OperationExecutor:
         table = _validate_identifier(op.get("table", "") or "")
         if not table:
             return None
+        qtable = _quote_ident(table)
         geom, params = _bind_geom(geom_wkt, srid)
         point_expr = f"{point_wrapper}({geom})" if point_wrapper else geom
         rows = self._conn.execute(
             f"SELECT id, ST_Distance({point_expr}::geography, geom::geography) AS dist "
-            f"FROM {table} ORDER BY dist LIMIT 1",
+            f"FROM {qtable} ORDER BY dist LIMIT 1",
             params,
         )
         return rows[0]["id"] if rows else None
@@ -260,17 +275,20 @@ def _filter_phase(operations: list[dict], phase: str) -> list[dict]:
 def _validated_distant(op: dict) -> tuple[str, str, str, str]:
     """Validate distant_table / distant_field / table / distant_filter.
 
-    Returns a 4-tuple ``(distant_table, distant_field, table, where_clause)``.
+    Returns a 4-tuple ``(distant_table, distant_field, table, where_clause)``
+    where the three identifiers are already **double-quoted** (the validator
+    is permissive and only safe inside quotes). ``where_clause`` is an opaque
+    SQL predicate (``distant_filter``) and is intentionally left unquoted.
     Raises on identifier or expression validation failure.
     """
-    distant_table = _validate_identifier(op.get("distant_table", "") or "")
-    distant_field = _validate_identifier(op.get("distant_field", "") or "")
+    distant_table = _quote_ident(_validate_identifier(op.get("distant_table", "") or ""))
+    distant_field = _quote_ident(_validate_identifier(op.get("distant_field", "") or ""))
     distant_filter = op.get("distant_filter", "")
     if distant_filter:
         _validate_expression(distant_filter)
     table = op.get("table", "") or ""
     if table:
-        table = _validate_identifier(table)
+        table = _quote_ident(_validate_identifier(table))
     where = f"AND {distant_filter}" if distant_filter else ""
     return distant_table, distant_field, table, where
 
@@ -298,7 +316,7 @@ def _after_sum_st_contains(op, geom_wkt, srid):
     if geom is None:
         return None, ()
     dt, df, table, where = _validated_distant(op)
-    field = _validate_identifier(op.get("field", "value") or "value")
+    field = _quote_ident(_validate_identifier(op.get("field", "value") or "value"))
     return (
         f"UPDATE {dt} SET {df} = ("
         f"  SELECT COALESCE(SUM({table}.{field}), 0) FROM {table} "
@@ -326,7 +344,7 @@ def _after_sum_st_within(op, geom_wkt, srid):
     if geom is None:
         return None, ()
     dt, df, table, where = _validated_distant(op)
-    field = _validate_identifier(op.get("field", "value") or "value")
+    field = _quote_ident(_validate_identifier(op.get("field", "value") or "value"))
     return (
         f"UPDATE {dt} SET {df} = ("
         f"  SELECT COALESCE(SUM({table}.{field}), 0) FROM {table} "
@@ -354,7 +372,7 @@ def _after_sum_st_intersects(op, geom_wkt, srid):
     if geom is None:
         return None, ()
     dt, df, table, where = _validated_distant(op)
-    field = _validate_identifier(op.get("field", "value") or "value")
+    field = _quote_ident(_validate_identifier(op.get("field", "value") or "value"))
     return (
         f"UPDATE {dt} SET {df} = ("
         f"  SELECT COALESCE(SUM({table}.{field}), 0) FROM {table} "
@@ -369,7 +387,7 @@ def _after_string_agg_st_intersects(op, geom_wkt, srid):
     if geom is None:
         return None, ()
     dt, df, table, where = _validated_distant(op)
-    field = _validate_identifier(op.get("field", "name") or "name")
+    field = _quote_ident(_validate_identifier(op.get("field", "name") or "name"))
     return (
         f"UPDATE {dt} SET {df} = ("
         f"  SELECT STRING_AGG({table}.{field}::TEXT, ', ') FROM {table} "

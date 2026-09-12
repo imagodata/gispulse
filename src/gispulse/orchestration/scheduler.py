@@ -40,7 +40,11 @@ class ScheduledPipeline:
         id:              Unique identifier.
         name:            Human-readable schedule name.
         cron_expression: Standard cron expression (e.g. ``"0 */6 * * *"``).
-        pipeline_config: Dict describing the pipeline (rules, input, output).
+        pipeline_config: Dict describing the pipeline (v2 format with steps).
+        dataset_id:      UUID of the Dataset the pipeline reads as input.
+                         Optional — if None, the scheduled job runs on an empty
+                         GeoDataFrame and the runner raises an explicit error
+                         rather than silently producing no output.
         enabled:         Whether this schedule is active.
         last_run:        Timestamp of the last execution (None if never run).
         next_run:        Computed next execution time.
@@ -51,6 +55,7 @@ class ScheduledPipeline:
     name: str = ""
     cron_expression: str = "0 * * * *"
     pipeline_config: dict[str, Any] = field(default_factory=dict)
+    dataset_id: UUID | None = None
     enabled: bool = True
     last_run: datetime | None = None
     next_run: datetime | None = None
@@ -219,6 +224,7 @@ class PipelineScheduler:
         enabled: bool | None = None,
         pipeline_config: dict[str, Any] | None = None,
         name: str | None = None,
+        dataset_id: UUID | None = None,
     ) -> ScheduledPipeline | None:
         """Update an existing schedule.
 
@@ -244,6 +250,9 @@ class PipelineScheduler:
 
         if name is not None:
             schedule.name = name
+
+        if dataset_id is not None:
+            schedule.dataset_id = dataset_id
 
         # Persist
         if self._schedule_repo is not None:
@@ -326,9 +335,17 @@ class PipelineScheduler:
                     )
 
     async def _enqueue_pipeline(self, schedule: ScheduledPipeline) -> str:
-        """Create a Job from the schedule's pipeline_config and enqueue it."""
+        """Create a Job from the schedule's pipeline_config and enqueue it.
+
+        ``dataset_id`` is forwarded from the schedule so the worker can load
+        the right GeoDataFrame before handing it to the runner.  Without it
+        ``JobWorker._load_dataset`` returns an empty GeoDataFrame and the
+        runner raises an explicit error (rather than silently executing on
+        zero features).
+        """
         job = Job(
             name=f"scheduled:{schedule.name}",
+            dataset_id=schedule.dataset_id,
             parameters={
                 "schedule_id": str(schedule.id),
                 "pipeline_config": schedule.pipeline_config,

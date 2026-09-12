@@ -43,7 +43,16 @@ class ScheduleCreate(BaseModel):
     )
     pipeline_config: dict[str, Any] = Field(
         default_factory=dict,
-        description="Pipeline configuration (rules, input, output).",
+        description="Pipeline configuration (v2 format with steps).",
+    )
+    dataset_id: str | None = Field(
+        default=None,
+        description=(
+            "UUID of the Dataset to use as input for this pipeline. "
+            "Required when the pipeline_config steps need real geodata. "
+            "If omitted the scheduled job will fail with an explicit error "
+            "rather than silently running on an empty GeoDataFrame."
+        ),
     )
     enabled: bool = True
     created_by: str | None = None
@@ -55,6 +64,7 @@ class ScheduleUpdate(BaseModel):
     name: str | None = None
     cron_expression: str | None = None
     pipeline_config: dict[str, Any] | None = None
+    dataset_id: str | None = None
     enabled: bool | None = None
 
 
@@ -65,6 +75,7 @@ class ScheduleResponse(BaseModel):
     name: str
     cron_expression: str
     pipeline_config: dict[str, Any]
+    dataset_id: str | None = None
     enabled: bool
     last_run: datetime | None = None
     next_run: datetime | None = None
@@ -101,6 +112,7 @@ def _schedule_to_response(sp) -> ScheduleResponse:
         name=sp.name,
         cron_expression=sp.cron_expression,
         pipeline_config=sp.pipeline_config,
+        dataset_id=str(sp.dataset_id) if sp.dataset_id is not None else None,
         enabled=sp.enabled,
         last_run=sp.last_run,
         next_run=sp.next_run,
@@ -123,6 +135,8 @@ async def create_schedule(
     """Create a new scheduled pipeline (Pro tier)."""
     _require_pro()
 
+    from uuid import UUID as _UUID
+
     from gispulse.orchestration.scheduler import ScheduledPipeline, validate_cron_expression
 
     # Validate cron expression early for a clear 422 error
@@ -131,10 +145,22 @@ async def create_schedule(
     except (ValueError, ImportError) as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+    # Parse dataset_id string to UUID (Pydantic accepts str for flexibility)
+    parsed_dataset_id = None
+    if body.dataset_id is not None:
+        try:
+            parsed_dataset_id = _UUID(body.dataset_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=f"dataset_id is not a valid UUID: {body.dataset_id!r}",
+            )
+
     sp = ScheduledPipeline(
         name=body.name,
         cron_expression=body.cron_expression,
         pipeline_config=body.pipeline_config,
+        dataset_id=parsed_dataset_id,
         enabled=body.enabled,
         created_by=body.created_by,
     )
@@ -184,12 +210,24 @@ async def update_schedule(
         except (ValueError, ImportError) as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
+    patch_dataset_id = None
+    if body.dataset_id is not None:
+        from uuid import UUID as _UUID2
+        try:
+            patch_dataset_id = _UUID2(body.dataset_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=f"dataset_id is not a valid UUID: {body.dataset_id!r}",
+            )
+
     updated = await scheduler.update(
         schedule_id,
         cron_expression=body.cron_expression,
         enabled=body.enabled,
         pipeline_config=body.pipeline_config,
         name=body.name,
+        dataset_id=patch_dataset_id if body.dataset_id is not None else None,
     )
     if updated is None:
         raise HTTPException(status_code=404, detail=f"Schedule '{schedule_id}' not found")

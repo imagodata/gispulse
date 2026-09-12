@@ -79,11 +79,38 @@ class ScheduleConditions:
     timezone: str = "UTC"
 
 
+@dataclass
+class OnRunCompletedConditions:
+    """Conditions for an on_run_completed trigger (issue #440-c).
+
+    Fires when a ``run.completed`` or ``run.failed`` event is emitted and the
+    optional filters match.
+
+    Attributes:
+        status:   Which run terminal state triggers this: ``"completed"``
+                  (default), ``"failed"``, or ``"any"``.
+        source:   If set, only match runs whose ``PipelineRun.source`` equals
+                  this value (e.g. ``"job"`` or ``"scenario"``).
+        spec_ref: If set, only match runs whose ``PipelineRun.spec_ref``
+                  contains this string.
+        scope:    If set, only match runs whose ``PipelineRun.scope`` equals
+                  this value (e.g. a department code ``"63"``).
+        max_depth: Maximum trigger-chain depth for this trigger (default 5).
+                   A run enqueued *by* a trigger already carries depth+1.
+    """
+
+    status: str = "completed"   # "completed" | "failed" | "any"
+    source: str = ""            # "" = match all sources
+    spec_ref: str = ""          # "" = match all spec_refs (substring match)
+    scope: str = ""             # "" = match all scopes
+    max_depth: int = 5
+
+
 # Union type for all structured conditions
 TriggerConditions = (
     DMLConditions | ThresholdConditions | ValidationConditions |
     BusinessRuleConditions | TopologyConditions | SpatialConstraintConditions |
-    CompositeConditions | ScheduleConditions
+    CompositeConditions | ScheduleConditions | OnRunCompletedConditions
 )
 
 # Map TriggerType → conditions dataclass
@@ -96,6 +123,7 @@ _CONDITIONS_TYPE_MAP: dict[str, type] = {
     "spatial_constraint": SpatialConstraintConditions,
     "composite": CompositeConditions,
     "schedule": ScheduleConditions,
+    "on_run_completed": OnRunCompletedConditions,
 }
 
 

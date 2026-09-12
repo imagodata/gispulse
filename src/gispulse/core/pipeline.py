@@ -49,7 +49,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from gispulse.core.predicates import AnyPredicate, AttrPredicate, CompoundPredicate, GeomPredicate
 
@@ -80,16 +80,23 @@ class StepSpec:
         enabled:    Soft-disable a step without removing it.
         order:      Explicit ordering for linear pipelines (used when no DAG
                     edges are present).
+        kind:       Step execution kind.  ``"capability"`` (default) uses the
+                    registered GeoDataFrame→GeoDataFrame capability path.
+                    Any other value is dispatched to the step-kind registry
+                    (e.g. ``"external"`` for subprocess execution).
+                    This is an *additive* field: existing specs without it
+                    default to ``"capability"`` and are unaffected.
     """
 
     id: str = ""
-    type: Literal["capability", "filter", "spatial_op", "custom_sql"] = "capability"
+    type: str = "capability"  # "capability" | "filter" | "spatial_op" | "custom_sql" | <app-kind>
     capability: str | None = None
     params: dict[str, Any] = field(default_factory=dict)
     input: str | list[str] | None = None
     when: AnyPredicate | None = None
     enabled: bool = True
     order: int = 0
+    kind: str = "capability"
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +219,7 @@ def _parse_step(raw: dict[str, Any], index: int) -> StepSpec:
         when=when,
         enabled=raw.get("enabled", True),
         order=raw.get("order", index),
+        kind=raw.get("kind", "capability"),
     )
 
 
@@ -265,6 +273,38 @@ def _parse_v1(raw: list[dict[str, Any]]) -> PipelineSpec:
         name="",
         steps=steps,
     )
+
+
+def validate_step_kind_inputs(spec: PipelineSpec) -> list[str]:
+    """Compile-time check: a capability step must not depend on a non-capability step.
+
+    Non-capability step kinds (``kind != "capability"``) produce no GeoDataFrame.
+    A downstream capability step that lists such a step as ``input`` would receive
+    no data at runtime — this is caught at *compilation* time, not execution time.
+
+    Returns:
+        List of human-readable error strings (empty = valid).
+    """
+    errors: list[str] = []
+    # Build a map of step_id → kind
+    kind_by_id: dict[str, str] = {s.id: s.kind for s in spec.steps}
+
+    for step in spec.steps:
+        # Only capability steps consume GeoDataFrame inputs
+        if step.kind != "capability":
+            continue
+        if step.input is None:
+            continue
+        refs = step.input if isinstance(step.input, list) else [step.input]
+        for ref in refs:
+            upstream_kind = kind_by_id.get(ref)
+            if upstream_kind is not None and upstream_kind != "capability":
+                errors.append(
+                    f"step '{step.id}' (kind='capability') depends on step '{ref}' "
+                    f"(kind='{upstream_kind}') which produces no GeoDataFrame; "
+                    "a non-capability step cannot be used as a capability input"
+                )
+    return errors
 
 
 def load_pipeline(path: str | Path, *, validate: bool = True) -> PipelineSpec:
@@ -511,6 +551,8 @@ def pipeline_to_dict(spec: PipelineSpec) -> dict[str, Any]:
             step_d["enabled"] = False
         if s.order:
             step_d["order"] = s.order
+        if s.kind != "capability":
+            step_d["kind"] = s.kind
         steps.append(step_d)
 
     result: dict[str, Any] = {

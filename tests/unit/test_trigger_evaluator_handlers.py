@@ -164,7 +164,7 @@ class TestThresholdHandler:
             },
         )
         ev.evaluate(_make_record(), [trig])
-        assert "SUM(population)" in pg.calls[0][0]
+        assert 'SUM("population")' in pg.calls[0][0]
 
     def test_unsafe_table_silently_rejected(self):
         pg = FakePG(rows_queue=[])

@@ -736,3 +736,73 @@ def test_rate_limit_retry_uses_retry_after_header(
 
     assert calls == 2
     assert sleeps == [0.25]
+
+
+def test_upload_jsonl_to_s3_does_not_require_paid_license(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from io import BytesIO
+
+    from gispulse.adapters.rest import rest_table_fetcher
+    from gispulse.persistence import storage as storage_module
+    from gispulse.persistence import tier as tier_module
+
+    captured: dict[str, object] = {}
+
+    class FakeS3Storage:
+        def __init__(
+            self,
+            *,
+            endpoint_url: str,
+            bucket: str,
+            access_key: str,
+            secret_key: str,
+            region: str,
+        ) -> None:
+            captured["init"] = {
+                "endpoint_url": endpoint_url,
+                "bucket": bucket,
+                "access_key": access_key,
+                "secret_key": secret_key,
+                "region": region,
+            }
+
+        async def upload(self, key: str, body, content_type: str) -> str:
+            captured["upload"] = {
+                "key": key,
+                "body": body.read(),
+                "content_type": content_type,
+            }
+            return key
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        raise AssertionError("S3/Garage upload must not require a paid-tier check")
+
+    monkeypatch.setenv("GISPULSE_S3_ENDPOINT", "http://garage:3900")
+    monkeypatch.setenv("GISPULSE_S3_ACCESS_KEY", "garage-key")
+    monkeypatch.setenv("GISPULSE_S3_SECRET_KEY", "garage-secret")
+    monkeypatch.setenv("GISPULSE_S3_REGION", "garage")
+    monkeypatch.setenv("GISPULSE_TIER", "community")
+    monkeypatch.delenv("GISPULSE_LICENSE_KEY", raising=False)
+    monkeypatch.setattr(storage_module, "S3Storage", FakeS3Storage)
+    monkeypatch.setattr(tier_module, "check_tier", fail_if_called)
+
+    rest_table_fetcher._upload_jsonl_to_s3(
+        "s3://milou-artifacts/raw/georisques/radon.jsonl",
+        BytesIO(b'{"code_insee":"63113"}\n'),
+    )
+
+    assert captured == {
+        "init": {
+            "endpoint_url": "http://garage:3900",
+            "bucket": "milou-artifacts",
+            "access_key": "garage-key",
+            "secret_key": "garage-secret",
+            "region": "garage",
+        },
+        "upload": {
+            "key": "raw/georisques/radon.jsonl",
+            "body": b'{"code_insee":"63113"}\n',
+            "content_type": "application/x-ndjson",
+        },
+    }

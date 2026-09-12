@@ -36,6 +36,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import geopandas as gpd
+import pandas as pd
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from gispulse.core.assertions import AssertionFailure
@@ -50,6 +51,7 @@ from gispulse.core.manifest_v3 import (
 )
 from gispulse.core.pipeline import PipelineSpec, StepSpec
 from gispulse.core.logging import get_logger
+from gispulse.orchestration.event_sink import NoOpSink, RunEventSink
 from gispulse.orchestration.pipeline_executor import PipelineExecutor
 
 log = get_logger(__name__)
@@ -61,6 +63,7 @@ __all__ = [
     "Materializer",
     "ManifestRunResult",
     "run_manifest",
+    "validate_steps_filter_models",
 ]
 
 
@@ -82,12 +85,18 @@ class RefreshMode(str, Enum):
 
 @dataclass
 class MaterializedModel:
-    """A model after materialization."""
+    """A model after materialization.
+
+    ``result`` is a :class:`geopandas.GeoDataFrame` for geo sources and a
+    plain :class:`pandas.DataFrame` for tabular (non-geo) sources.
+    Downstream steps that require geometry must guard against the plain
+    DataFrame case or ensure their source carries geometry.
+    """
 
     name: str
     mode: MaterializationMode
     refresh: RefreshMode
-    result: gpd.GeoDataFrame
+    result: "gpd.GeoDataFrame | pd.DataFrame"
     #: Engine table name when ``mode == TABLE`` — ``None`` otherwise.
     table_ref: str | None = None
 
@@ -120,7 +129,7 @@ class Materializer:
     def materialize(
         self,
         name: str,
-        gdf: gpd.GeoDataFrame,
+        gdf: "gpd.GeoDataFrame | pd.DataFrame",
         mode: MaterializationMode,
         refresh: RefreshMode = RefreshMode.MANUAL,
     ) -> MaterializedModel:
@@ -162,7 +171,8 @@ class Materializer:
 # ---------------------------------------------------------------------------
 
 #: Signature of a source-loader. Defaults to ``engine.load_layer(uri, layer)``.
-SourceLoader = Callable[[SourceSpec], gpd.GeoDataFrame]
+#: May return a plain :class:`pandas.DataFrame` for tabular (non-geo) sources.
+SourceLoader = Callable[["SourceSpec"], "gpd.GeoDataFrame | pd.DataFrame"]
 
 
 @dataclass
@@ -184,7 +194,8 @@ def _inter_model_edges(manifest: ManifestV3) -> list[tuple[str, str]]:
     model_names = set(manifest.models)
     edges: list[tuple[str, str]] = []
     for name, model in manifest.models.items():
-        if model.select in model_names:
+        # select may be None for non-capability models
+        if model.select is not None and model.select in model_names:
             edges.append((model.select, name))
         for step in model.transform or []:
             if not isinstance(step, dict) or len(step) != 1:
@@ -216,6 +227,7 @@ def _build_sub_pipeline(
             StepSpec(
                 id=s.id,
                 type=s.type,
+                kind=s.kind,  # preserve non-capability kind (e.g. "external")
                 capability=s.capability,
                 params=dict(s.params),
                 input=inp,
@@ -227,14 +239,101 @@ def _build_sub_pipeline(
     return PipelineSpec(version=2, name=model.name, steps=sub_steps)
 
 
+def validate_steps_filter_models(
+    manifest: ManifestV3,
+    steps_filter: list[str],
+) -> None:
+    """Validate that steps_filter does not orphan a capability-upstream model.
+
+    Checks both ``select`` and ``with:`` (ref_layer) inter-model references.
+    For each model whose compiled step IDs overlap with ``steps_filter``, all
+    referenced upstream models (via ``select`` or ``with:`` transforms) must
+    either also be included in the filter OR have no capability steps.
+
+    If an included model references an excluded model that has capability steps,
+    a ``ValueError`` is raised with ``code=EXCLUDED_CAPABILITY_UPSTREAM``.
+
+    This function is called from two boundaries:
+    - ``run_manifest`` (runtime): raises ``ValueError``.
+    - ``manifests_router`` (HTTP): catches ``ValueError`` and returns 422.
+
+    Args:
+        manifest:     Parsed v3 manifest.
+        steps_filter: List of flat step IDs to include.
+
+    Raises:
+        ValueError: When an included model references an excluded model with
+            capability steps. Message contains ``code=EXCLUDED_CAPABILITY_UPSTREAM``.
+    """
+    if not steps_filter:
+        return  # no filter → no orphan possible
+
+    model_names = set(manifest.models)
+    filter_set = set(steps_filter)
+
+    # Compute per-model step IDs to determine inclusion
+    _model_step_ids: dict[str, set[str]] = {}
+    for _mn in model_names:
+        _sub = _build_sub_pipeline(manifest.models[_mn], manifest.sources, model_names)
+        _model_step_ids[_mn] = {s.id for s in _sub.steps}
+
+    included_models = {
+        _mn for _mn, _ids in _model_step_ids.items()
+        if _ids.intersection(filter_set)
+    }
+
+    for _mn in included_models:
+        _mdl = manifest.models[_mn]
+        # Build sub-spec to find all ref_layer references (with: compiled refs).
+        _sub_for_refs = _build_sub_pipeline(_mdl, manifest.sources, model_names)
+        _ref_layer_refs = {
+            s.params["ref_layer"]
+            for s in _sub_for_refs.steps
+            if isinstance(s.params.get("ref_layer"), str)
+            and s.params["ref_layer"] in model_names  # model refs only
+        }
+        # Combine: select ref + all with: refs
+        _all_upstream_refs: set[str] = set()
+        if _mdl.select is not None and _mdl.select in model_names:
+            _all_upstream_refs.add(_mdl.select)
+        _all_upstream_refs.update(_ref_layer_refs)
+
+        for _ref in _all_upstream_refs:
+            if _ref not in included_models:
+                _ref_sub = _build_sub_pipeline(
+                    manifest.models[_ref], manifest.sources, model_names
+                )
+                _ref_has_cap = any(s.kind == "capability" for s in _ref_sub.steps)
+                if _ref_has_cap:
+                    raise ValueError(
+                        f"steps_filter: included model '{_mn}' references excluded model "
+                        f"'{_ref}' (via select or with:) which has capability steps whose "
+                        f"in-memory GeoDataFrame output is required. Either include "
+                        f"'{_ref}' in the filter or exclude '{_mn}'. "
+                        f"code=EXCLUDED_CAPABILITY_UPSTREAM"
+                    )
+
+
 def run_manifest(
     manifest: ManifestV3,
     *,
     engine: Any | None = None,
     source_loader: SourceLoader | None = None,
     materializer: Materializer | None = None,
+    event_sink: RunEventSink | None = None,
+    run_id: str | None = None,
+    steps_filter: list[str] | None = None,
+    resume_markers: dict[str, str] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+    heartbeat: Callable[[], None] | None = None,
 ) -> ManifestRunResult:
     """Execute a v3 manifest end-to-end.
+
+    ``cancel_check``/``heartbeat`` are forwarded to every per-model
+    PipelineExecutor so long-running non-capability steps (external
+    subprocesses) can be cancelled mid-step and keep the worker's
+    stuck-recovery fed — without them a manifest job is only cancellable
+    between models.
 
     Walks the models in topological order and, for each one, resolves
     its ``select`` and any transform-level ``with:`` references into
@@ -264,21 +363,51 @@ def run_manifest(
     """
     validate_manifest(manifest)  # raises on cycles / unresolved refs
 
+    # Determine whether any model needs a source loader — specifically, a model
+    # whose ``select`` resolves to a *declared source* (not to another model).
+    # Models whose ``select`` points to another model never call source_loader
+    # directly; they call _resolve() which reads from the materializer cache.
+    # Models with select=None (non-capability) never call _resolve() at all.
+    #
+    # This guard prevents the misleading "requires engine or source_loader"
+    # error when the only non-None selects reference other models (including
+    # no-data models) rather than real data sources. The actionable error
+    # "produces no data output" surfaces later in the execution loop.
+    _declared_sources = set(manifest.sources)
+    _needs_loader = any(
+        m.select is not None and m.select in _declared_sources
+        for m in manifest.models.values()
+    )
+
     if source_loader is None:
-        if engine is None:
+        if engine is None and _needs_loader:
             raise RuntimeError(
                 "run_manifest requires either an engine (uses engine.load_layer) "
                 "or a source_loader callable"
             )
-
-        def source_loader(src: SourceSpec) -> gpd.GeoDataFrame:
-            return engine.load_layer(src.uri, layer=src.layer or "")
+        if engine is not None:
+            def source_loader(src: SourceSpec) -> gpd.GeoDataFrame:
+                return engine.load_layer(src.uri, layer=src.layer or "")
+        else:
+            # No engine, no loader — but _needs_loader is False so _resolve()
+            # will never be called for sources. Provide a sentinel that raises
+            # clearly if called anyway (defensive programming).
+            def source_loader(src: SourceSpec) -> gpd.GeoDataFrame:  # type: ignore[misc]
+                raise RuntimeError(
+                    f"run_manifest: no source_loader or engine provided, "
+                    f"but source '{src.name}' was requested — "
+                    "check the manifest's model dependencies"
+                )
 
     if materializer is None:
         materializer = Materializer(engine=engine)
 
     model_names = set(manifest.models)
-    order = topological_sort(list(model_names), _inter_model_edges(manifest))
+    # topological_sort is STABLE on input order for nodes sharing an
+    # in-degree of zero — feed it the DECLARATION order, never a set():
+    # edge-less (selectless) models must run in declaration order, the
+    # same contract the compile path (_topo_models) already honours.
+    order = topological_sort(list(manifest.models), _inter_model_edges(manifest))
     log.info(
         "manifest_run_start",
         manifest=manifest.name or "(unnamed)",
@@ -286,9 +415,36 @@ def run_manifest(
         order=order,
     )
 
-    source_cache: dict[str, gpd.GeoDataFrame] = {}
+    # --- Build an effective filter set (flat step IDs → per-model inclusion map) ---
+    # steps_filter contains flat PipelineSpec step IDs. These correspond
+    # directly to the sub-spec step IDs produced by _build_sub_pipeline
+    # (terminal step id = model name, intermediates = <model>__t<n>).
+    # Strategy:
+    #   1. Compute the flat step IDs for each model.
+    #   2. A model is INCLUDED if at least one of its step IDs is in the filter.
+    #   3. Models not included are SKIPPED: primary is materialised as passthrough
+    #      WITHOUT executing any steps (critical: no subprocess, no capability exec).
+    #   4. Validation delegated to validate_steps_filter_models: covers both
+    #      select refs AND with: (ref_layer) refs to excluded capability models.
+    _effective_filter: set[str] | None = None
+    _included_models: set[str] = set(model_names)  # default = all included
+    if steps_filter:
+        _effective_filter = set(steps_filter)
+        # Validate before computing inclusion — raises ValueError on orphan capability.
+        validate_steps_filter_models(manifest, steps_filter)
+        # Compute per-model step IDs to determine inclusion
+        _model_step_ids: dict[str, set[str]] = {}
+        for _mn in model_names:
+            _sub = _build_sub_pipeline(manifest.models[_mn], manifest.sources, model_names)
+            _model_step_ids[_mn] = {s.id for s in _sub.steps}
+        _included_models = {
+            _mn for _mn, _ids in _model_step_ids.items()
+            if _ids.intersection(_effective_filter)
+        }
 
-    def _resolve(ref: str) -> gpd.GeoDataFrame:
+    source_cache: "dict[str, gpd.GeoDataFrame | pd.DataFrame]" = {}
+
+    def _resolve(ref: str) -> "gpd.GeoDataFrame | pd.DataFrame":
         if ref in manifest.sources:
             if ref not in source_cache:
                 source_cache[ref] = source_loader(manifest.sources[ref])
@@ -301,24 +457,180 @@ def run_manifest(
             "source nor a previously materialized model"
         )
 
-    executor = PipelineExecutor(execution_context=None)
+    _sink = event_sink if event_sink is not None else NoOpSink()
     assertion_warnings: list = []
+    _resume_markers: dict[str, str] = resume_markers or {}
+    executed_order: list[str] = []  # models actually materialized (filter-aware)
+
+    # Track which models have no data output (external / non-capability models
+    # without select). Downstream capability models that try to _resolve() these
+    # get a clear error rather than a silent KeyError.
+    _no_data_models: set[str] = set()
 
     for model_name in order:
         model = manifest.models[model_name]
-        primary = _resolve(model.select)
+
+        # --- Non-capability model (select=None) — execute steps, no data output ---
+        # These are models whose every transform item is non-capability (kind !=
+        # "capability"). They launch external work (subprocess, dbt, …) but produce
+        # no GeoDataFrame.
+        # IMPORTANT: a non-capability model excluded by steps_filter must NOT
+        # run (no subprocess) and must NOT appear in executed_order — same
+        # contract as capability models. Check _included_models first.
+        if model.select is None:
+            if model_name not in _included_models:
+                # Excluded by steps_filter — skip entirely, no subprocess.
+                log.debug(
+                    "manifest_model_noncapability_skipped_by_filter",
+                    model=model_name,
+                    steps_filter=list(_effective_filter) if _effective_filter else [],
+                )
+                _no_data_models.add(model_name)
+                # Do NOT add to executed_order — the model was not run.
+                continue
+            log.debug(
+                "manifest_model_noncapability",
+                model=model_name,
+                mode=model.materialize,
+            )
+            sub_spec = _build_sub_pipeline(model, manifest.sources, model_names)
+            if _effective_filter is not None:
+                from gispulse.core.pipeline import PipelineSpec as _PS
+                filtered_steps = [s for s in sub_spec.steps if s.id in _effective_filter]
+                sub_spec = _PS(
+                    version=sub_spec.version,
+                    name=sub_spec.name,
+                    steps=filtered_steps,
+                    triggers=sub_spec.triggers,
+                    ref_layers=sub_spec.ref_layers,
+                )
+            model_step_ids_for_resume = {s.id for s in sub_spec.steps}
+            model_resume_markers = {
+                sid: marker
+                for sid, marker in _resume_markers.items()
+                if sid in model_step_ids_for_resume
+            }
+            # No primary data — pass an empty inputs dict. PipelineExecutor's
+            # _execute_linear/_execute_dag dispatch non-capability steps directly
+            # to the step-kind registry; they don't consume GeoDataFrame inputs.
+            model_executor = PipelineExecutor(
+                execution_context=None,
+                cancel_check=cancel_check,
+                heartbeat=heartbeat,
+                resume_markers=model_resume_markers if model_resume_markers else None,
+            )
+            # Provide a sentinel empty inputs dict; sub_spec only has non-capability
+            # steps so PipelineExecutor never tries to read from it as a GeoDataFrame.
+            model_executor.execute(
+                sub_spec, {}, None, event_sink=_sink, run_id=run_id  # type: ignore[arg-type]
+            )
+            _no_data_models.add(model_name)
+            executed_order.append(model_name)
+            # No assertions on non-capability models (no data to assert on).
+            continue
+
+        if model_name not in _included_models:
+            # --- Skipped model: materialise primary as passthrough, NO steps executed ---
+            # This is intentionally a passthrough and NOT a NoOpSink-execute.
+            # No subprocess is spawned, no capability pipeline runs.
+            # The passthrough puts the raw source GDF into the materializer so
+            # that downstream models referencing this one via _resolve() can find it.
+            # Safety: the validation above guarantees no included model depends on
+            # this model's capability output.
+            log.debug(
+                "manifest_model_skipped_by_filter",
+                model=model_name,
+                steps_filter=list(_effective_filter) if _effective_filter else [],
+            )
+            primary = _resolve(model.select)
+            materializer.materialize(
+                model_name,
+                primary,
+                MaterializationMode(model.materialize),
+                RefreshMode(model.refresh),
+            )
+            # Do NOT add to executed_order — the model was not run.
+            continue
+
+        # --- Included capability model: check upstream has data ---
+        if model.select in _no_data_models:
+            raise ValueError(
+                f"run_manifest: model '{model_name}' selects model "
+                f"'{model.select}' which produces no data output "
+                f"(it is a non-capability model with no select). "
+                f"Downstream capability models cannot receive GeoDataFrame "
+                f"data from a non-capability upstream."
+            )
+
+        # --- Included model: build sub-spec, optionally filtered ---
         sub_spec = _build_sub_pipeline(model, manifest.sources, model_names)
 
-        # Inputs: primary GDF first (PipelineExecutor's linear path keys
+        if _effective_filter is not None:
+            # Keep only the listed steps within this model's sub-spec.
+            from gispulse.core.pipeline import PipelineSpec as _PS
+            filtered_steps = [s for s in sub_spec.steps if s.id in _effective_filter]
+            sub_spec = _PS(
+                version=sub_spec.version,
+                name=sub_spec.name,
+                steps=filtered_steps,
+                triggers=sub_spec.triggers,
+                ref_layers=sub_spec.ref_layers,
+            )
+
+        primary = _resolve(model.select)
+
+        # --- resume_markers: pass per-step markers to this model's executor ---
+        model_step_ids_for_resume = {s.id for s in sub_spec.steps}
+        model_resume_markers = {
+            sid: marker
+            for sid, marker in _resume_markers.items()
+            if sid in model_step_ids_for_resume
+        }
+
+        # Inputs: primary first (PipelineExecutor's linear path keys
         # off the first value); any `with: <ref>` resolves into a named
         # entry that the existing ``ref_layer`` plumbing picks up.
-        inputs: dict[str, gpd.GeoDataFrame] = {model.select: primary}
+        # When the primary is a plain pd.DataFrame (tabular/non-geo source)
+        # and the model has no transform steps, we short-circuit the executor
+        # to avoid handing a non-GeoDataFrame to geometry-aware capabilities.
+        inputs: "dict[str, gpd.GeoDataFrame | pd.DataFrame]" = {model.select: primary}
         for step in sub_spec.steps:
             alias = step.params.get("ref_layer")
             if isinstance(alias, str) and alias not in inputs:
                 inputs[alias] = _resolve(alias)
 
-        results = executor.execute(sub_spec, inputs)
+        # Tabular guard: a plain pd.DataFrame source cannot be passed to
+        # geometry-aware capability steps. We distinguish two sub-cases:
+        #
+        # 1. Source is tabular AND the model has declared transform steps
+        #    → FAIL EXPLICITLY with a message naming the model, so the author
+        #    can fix their manifest rather than receiving silently wrong data.
+        # 2. Source is tabular AND no transform steps (passthrough)
+        #    → short-circuit: skip PipelineExecutor and use primary as terminal.
+        if not isinstance(primary, gpd.GeoDataFrame) and isinstance(primary, pd.DataFrame):
+            real_transforms = [t for t in (model.transform or []) if isinstance(t, dict)]
+            if real_transforms:
+                n = len(real_transforms)
+                raise ValueError(
+                    f"run_manifest: model '{model_name}' declares {n} transform "
+                    f"step(s) but its source '{model.select}' is tabular "
+                    f"(no geometry). Capability steps require a GeoDataFrame. "
+                    f"Either use a geo source or remove the transform steps."
+                )
+            # Passthrough — no transforms, materialise primary directly.
+            results: "dict[str, gpd.GeoDataFrame | pd.DataFrame]" = {}
+        else:
+            # For geo sources, all inputs must be GeoDataFrames — cast check
+            # delegated to capabilities at call time (existing behaviour).
+            # A per-model executor is created so resume_markers are scoped to
+            # the current model's step IDs (no cross-model marker leakage).
+            model_executor = PipelineExecutor(
+                execution_context=None,
+                cancel_check=cancel_check,
+                heartbeat=heartbeat,
+                resume_markers=model_resume_markers if model_resume_markers else None,
+            )
+            results = model_executor.execute(sub_spec, inputs, None, event_sink=_sink, run_id=run_id)  # type: ignore[arg-type]
 
         # The model's output is the last step's result — fall back to
         # any single produced output, then to the primary, so a
@@ -362,8 +674,10 @@ def run_manifest(
                 )
             assertion_warnings.extend(failures)
 
+        executed_order.append(model_name)
+
     return ManifestRunResult(
         materialized=dict(materializer.models),
-        execution_order=order,
+        execution_order=executed_order,
         assertion_warnings=assertion_warnings,
     )

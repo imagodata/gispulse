@@ -13,6 +13,59 @@ La source de vérité de ce fichier est [`CHANGELOG.md`](https://github.com/imag
 
 ---
 
+## [2.4.0] — 2026-09-12
+
+### Ajouté
+
+- **Requêtes DPE ciblées par `id_rnb` (#475).** `DpeSource.access_for` accepte un paramètre `id_rnb` qui construit un filtre Lucene `id_rnb:(A OR B)`, permettant de récupérer les diagnostics de bâtiments RNB précis plutôt que toute la table d'une commune — jusqu'à 100k lignes / 600s pour une grande ville, ramenées à une poignée de lignes. `id_rnb` prime sur `code_insee`, puis `code_departement` ; les identifiants sont validés (alphanumériques) pour éviter toute injection dans la chaîne de requête.
+- **`network_redundancy`.** Audit de redondance par site : pour chaque point d'entrée, compte les routes mutuellement disjointes (plafonnées à `k`, 2 par défaut) à travers un réseau linéaire vers un ensemble de points d'installation — 0 = inaccessible, 1 = point unique de défaillance, `k` = protégé. Même moteur de Suurballe que `disjoint_paths`. Tier Pro.
+- **Template de pipeline `reseau_expansion_resilience`.** Première composition bout-en-bout des capacités réseau nouvellement portées : composantes connexes → détection des ponts (SPOF structurels) → audit de redondance par site → filtre SPOF → ordre d'expansion glouton à coût marginal.
+- **`calibrate_detour_bands`.** Referme la boucle de routage : à partir d'observations routées (typiquement la sortie de `route_pairs` avec `provider="osrm"`), recalibre les facteurs de détour (« tortuosité ») — par palier, ratio médian routé/vol d'oiseau des observations tombant dans le palier. Tier Pro.
+- **`sample_surface_along_lines`.** Référencement linéaire : découpe chaque ligne en sa séquence ordonnée de segments homogènes selon la classe de surface traversée — une ligne par segment avec `length_m`, `share` et la sous-géométrie. Tier Pro.
+- **Fournisseurs de routage routier + capacité `route_pairs`.** Nouveau module `gispulse.core.routing_providers` — une abstraction `RoutingProvider` avec trois implémentations : `TortuosityProvider` (hors-ligne, vol d'oiseau × facteur de détour calibré), `OSRMProvider` (routage réel via httpx), et `CachedRoutingProvider` (GeoParquet pré-routé, clés géométriques canoniques). Erreurs typées `RoutingError`. La capacité `route_pairs` (Pro) les intègre aux pipelines.
+- **`disjoint_paths`.** K chemins mutuellement disjoints de coût **total** minimal entre deux points à travers un réseau linéaire (Suurballe — plus courts chemins successifs avec potentiels de Johnson). `mode="node"` (par défaut) interdit le partage de nœuds internes, `mode="edge"` seulement des arêtes. Tier Pro.
+- **`network_bridges`.** Marque chaque ligne dont la suppression déconnecte sa composante (pont / cut-edge, les SPOF structurels d'un réseau) avec une colonne booléenne `is_bridge`. Sans networkx. Tier Pro.
+- **`network_greedy_expansion`.** Expansion de réseau gloutonne multi-sources de type Prim avec coût d'activation par nœud, à partir d'un ensemble de nœuds frontière. Tier Pro.
+- **`cluster_balanced_kmeans`.** K-Means à taille bornée : répartit les centroïdes de géométrie en clusters dont la taille reste dans `[min_size, max_size]` (k-means++/Lloyd + rééquilibrage split/merge).
+
+### Corrigé
+
+- **`steiner_tree` sur un graphe avec une composante sans terminal.** L'heuristique de Mehlhorn (par défaut depuis networkx 3.2) indexait chaque nœud du graphe après un Dijkstra multi-source depuis les terminaux, ce qui levait une `KeyError` sur une composante déconnectée sans terminal — fréquent sur un réseau routier OSM brut. La résolution est désormais restreinte à la composante connexe des terminaux.
+
+---
+
+## [2.3.0] — 2026-06-14
+
+### Ajouté
+
+- **Orchestration manifeste v3 (#440).** Runtime de pipeline de bout en bout : entité `PipelineRun` + événements de cycle de vie sur l'EventHub, run-completion comme source de trigger avec câblage de scénario, exécution/validation de pipelines manifest v3 par HTTP, registre de step-kind avec étapes subprocess externes, surface de contrôle des runs (annulation/reprise/exécution partielle), étapes non-capability et modèles sans sélecteur.
+- **API CRUD des cartes enregistrées (#405, #446).** Persistance et rechargement de cartes — couches, styles, vue et filtres — via l'API HTTP.
+- **Capacités Consolidate Networks (famille `cn_*`, #465).** Port fidèle en pur shapely du plugin QGIS *Consolidate Networks* (`github.com/sducournau/consolidate_networks`) : huit nettoyeurs de topologie de réseaux linéaires disponibles sur toute surface GISPulse sans QGIS.
+- **`measure_spatial_impact` (#436).** Mesure de découpe/chevauchement pour les contrôles d'impact entité × parcelle.
+- **Agrégation multi-métrique H3 en une passe (#457).**
+- **Nouvelles sources open-data.** `src-dpe` (DPE, #422), `src-ocsge` (occupation du sol, #423), `src-sitadel` (permis de construire, #424), sources OSM + GRB publiques avec lecture de membre in-zip via `/vsizip` (#459), extraction de tags routiers OSM PBF + téléchargement local `materialize_pbf` (#463).
+- **Primitives geo commons (#438).** Briques HTTP / WFS / GeoJSON réutilisables et modèles géo génériques.
+- **`write_pmtiles_pyramid` (#435).** Couches multi-LOD dans une seule archive PMTiles.
+- **Loader universel pour sources tabulaires non-géo (#449).** Les entrées CSV/tabulaires passent par le même chemin de chargement.
+- **Briques PG-direct (#432).** Matérialiseur `ST_Subdivide` + loader DuckDB → PostGIS par lots.
+- **Sonde de disponibilité de source (#431)** à types de sonde extensibles, et **tiler vectoriel borné (#430)** — ingestion parallèle tuilée par bbox vers parquet.
+- **Purge de colonnes PostGIS pilotée par manifeste (#429, dry-run par défaut)**, **limites de ressources DuckDB opt-in (mémoire/temp/threads, #427)**, **CLI de source unifiée (#421)**, **`stream_vector_to_parquet` (#420)**, **détection d'encodage CSV avec repli (#426)**, et **reprise BulkIngestRunner skip-if-staged (#433)** plus tampon de portée département / `bulk_access_for` / alias GeoJSON (#419).
+
+### Corrigé
+
+- **Audit sécurité 2026-06-09 (#418).** Injection SQL, auth des routeurs HTTP, zip-slip (7z), SSRF et durcissement DoS, plus écriture CSV/XLSX et export COG manquants.
+- **Durcissement CDC v2.3.0 (#441).** Gestion `pg_notify` DELETE/PK, clés primaires composites, dérive documentaire.
+- **Les pipelines planifiés exécutent enfin leur `pipeline_config` (#439).**
+- **Correctifs du chemin manifeste.** Les modèles sans sélecteur s'exécutent dans l'ordre de déclaration (#458) ; annulation, heartbeat et élévation de timeout sur le chemin manifeste (#456).
+- **Stockage :** rend le backend Garage explicite (#462).
+
+### Modifié
+
+- **CI / chaîne d'approvisionnement (#400, #401, #444).** Actions GitHub épinglées par SHA, DCO least-privilege, montées de version `pyjwt` / `urllib3`.
+- **Base Python relevée à 3.12+.** Abandon du support Python 3.11, alignement du template de plugin et de la cible ruff.
+
+---
+
 ## [2.2.3] — 2026-06-09
 
 ### Ajouté

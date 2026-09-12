@@ -1,6 +1,6 @@
 {
   "generated_by": "scripts/build_templates_index.py",
-  "count": 21,
+  "count": 22,
   "items": [
     {
       "slug": "agriculture_rpg_bcae",
@@ -449,6 +449,42 @@
         "score_accessibilite (calculate)"
       ],
       "size_bytes": 3476
+    },
+    {
+      "slug": "reseau_expansion_resilience",
+      "file": "reseau_expansion_resilience.json",
+      "title": "reseau_expansion_resilience",
+      "description": "Planification et audit de résilience d'un réseau linéaire (fibre, eau, énergie) — composantes connexes, ponts (SPOF structurels), redondance par site vers les postes sources, puis ordre d'extension glouton au coût marginal depuis les postes.",
+      "domain": "reseau",
+      "tags": [
+        "reseau",
+        "resilience",
+        "spof",
+        "expansion",
+        "suurballe",
+        "prim"
+      ],
+      "requires_pro": true,
+      "requires_plugins": [],
+      "version": 2,
+      "capabilities": [
+        "reproject",
+        "connected_components",
+        "network_bridges",
+        "network_redundancy",
+        "filter",
+        "network_greedy_expansion"
+      ],
+      "step_count": 6,
+      "steps": [
+        "reseau_2154 (reproject)",
+        "composantes (connected_components)",
+        "ponts_spof (network_bridges)",
+        "redondance_sites (network_redundancy)",
+        "sites_spof (filter)",
+        "ordre_expansion (network_greedy_expansion)"
+      ],
+      "size_bytes": 2521
     },
     {
       "slug": "reseau_topology_prep",

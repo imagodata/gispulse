@@ -517,16 +517,42 @@ class TestStorageUploadDownloadDelete:
 class TestTierGatingAllFeatures:
     """Verify that each Pro feature is properly gated in Community tier."""
 
-    def test_community_blocks_s3_storage(self, monkeypatch):
-        """S3 storage is gated to Pro tier — Community gets LocalStorage fallback."""
-        from gispulse.persistence.storage import create_storage
+    def test_community_allows_s3_storage_when_endpoint_configured(self, monkeypatch):
+        """S3/Garage storage is community-usable when explicitly configured."""
+        import gispulse.persistence.storage as storage_module
+
+        captured: dict[str, object] = {}
+
+        class _FakeS3Storage:
+            def __init__(
+                self,
+                *,
+                endpoint_url: str,
+                bucket: str,
+                access_key: str,
+                secret_key: str,
+                region: str,
+            ) -> None:
+                captured.update(
+                    {
+                        "endpoint_url": endpoint_url,
+                        "bucket": bucket,
+                        "access_key": access_key,
+                        "secret_key": secret_key,
+                        "region": region,
+                    }
+                )
 
         monkeypatch.setenv("GISPULSE_S3_ENDPOINT", "http://minio:9000")
+        monkeypatch.setenv("GISPULSE_S3_BUCKET", "community-artifacts")
         monkeypatch.setenv("GISPULSE_TIER", "community")
         monkeypatch.delenv("GISPULSE_LICENSE_KEY", raising=False)
+        monkeypatch.setattr(storage_module, "S3Storage", _FakeS3Storage)
 
-        storage = create_storage()
-        assert isinstance(storage, LocalStorage)
+        storage = storage_module.create_storage()
+        assert isinstance(storage, _FakeS3Storage)
+        assert captured["endpoint_url"] == "http://minio:9000"
+        assert captured["bucket"] == "community-artifacts"
 
     def test_community_blocks_scheduler(self, monkeypatch):
         """PipelineScheduler.start() requires Pro tier."""

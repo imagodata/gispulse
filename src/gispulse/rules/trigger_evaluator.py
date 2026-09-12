@@ -28,6 +28,7 @@ from gispulse.core.models import (
     CompositeConditions,
     DMLConditions,
     FiredTrigger,
+    OnRunCompletedConditions,
     SpatialConstraintConditions,
     ThresholdConditions,
     TopologyConditions,
@@ -40,6 +41,19 @@ from gispulse.core.sql_safety import validate_layer_name as _validate_identifier
 from gispulse.rules.predicates import PredicateEvaluator
 
 MAX_CASCADE_DEPTH = 3
+
+
+def _quote_ident(name: str) -> str:
+    """Double-quote a (possibly schema-qualified) SQL identifier.
+
+    ``validate_layer_name`` is permissive (it accepts spaces, ``=``, parens,
+    ``UNION`` …) and is therefore only safe when the resulting identifier is
+    interpolated **between double quotes**. It forbids the ``"`` character, so
+    no escaping is required. Schema-qualified names (``schema.table``) are
+    split on ``.`` so each part is quoted independently:
+    ``"schema"."table"``.
+    """
+    return ".".join(f'"{part}"' for part in name.split("."))
 
 
 class CascadeDepthExceeded(Exception):
@@ -289,7 +303,7 @@ class TriggerEvaluator:
 
         table = tc.table or record.table_name
         try:
-            table = _validate_identifier(table)
+            table = _quote_ident(_validate_identifier(table))
             if tc.metric == "feature_count":
                 sql = f"SELECT COUNT(*) AS val FROM {table}"
             elif tc.metric == "total_area":
@@ -297,7 +311,7 @@ class TriggerEvaluator:
             elif tc.metric == "total_length":
                 sql = f"SELECT COALESCE(SUM(ST_Length(geom::geography)), 0) AS val FROM {table}"
             elif tc.metric in ("sum_value", "avg_value", "max_value", "min_value"):
-                field = _validate_identifier(tc.field or "value")
+                field = _quote_ident(_validate_identifier(tc.field or "value"))
                 agg = tc.metric.split("_")[0].upper()
                 sql = f"SELECT COALESCE({agg}({field}), 0) AS val FROM {table}"
             else:
@@ -362,7 +376,7 @@ class TriggerEvaluator:
             return True
 
         try:
-            table = _validate_identifier(table)
+            table = _quote_ident(_validate_identifier(table))
             _validate_business_expression(expression)
             sql = f"SELECT NOT ({expression}) AS violated FROM {table} WHERE id = %s"
             rows = self._postgis.execute(sql, (str(fid),))
@@ -391,7 +405,7 @@ class TriggerEvaluator:
 
         table = tc.table or record.table_name
         try:
-            table = _validate_identifier(table)
+            table = _quote_ident(_validate_identifier(table))
             geom_param = "ST_GeomFromText(%s, 4326)"
             params: list[Any] = [record.new_geom_wkt]
             if tc.topo_check == "no_overlap":
@@ -405,12 +419,12 @@ class TriggerEvaluator:
             elif tc.topo_check == "must_be_inside":
                 if not tc.ref_table:
                     return False
-                ref_table = _validate_identifier(tc.ref_table)
+                ref_table = _quote_ident(_validate_identifier(tc.ref_table))
                 sql = f"SELECT NOT EXISTS (SELECT 1 FROM {ref_table} WHERE ST_Contains(geom, {geom_param})) AS violated"
             elif tc.topo_check == "must_not_overlap_with":
                 if not tc.ref_table:
                     return False
-                ref_table = _validate_identifier(tc.ref_table)
+                ref_table = _quote_ident(_validate_identifier(tc.ref_table))
                 sql = f"SELECT EXISTS (SELECT 1 FROM {ref_table} WHERE ST_Overlaps(geom, {geom_param})) AS violated"
             else:
                 return False
@@ -437,7 +451,7 @@ class TriggerEvaluator:
             return True
 
         try:
-            ref_table = _validate_identifier(sc.ref_table)
+            ref_table = _quote_ident(_validate_identifier(sc.ref_table))
             geom_param = "ST_GeomFromText(%s, 4326)"
             params: list[Any] = [record.new_geom_wkt]
             if sc.spatial_type == "min_distance":
@@ -510,6 +524,58 @@ class TriggerEvaluator:
         """Generic handler for schedule, api, esb_event, webhook_in — always matches."""
         return True
 
+    def _eval_on_run_completed(
+        self, record: ChangeRecord, trigger: Trigger, typed_cond: Any = None
+    ) -> bool:
+        """ON_RUN_COMPLETED: fires when a run.completed/run.failed event arrives.
+
+        The ChangeRecord is synthetic, built by RunCompletionTriggerSink with::
+
+            table_name  = "run.events"
+            operation   = ChangeOperation.INSERT  (synthetic, ignored by this handler)
+            new_values  = {
+                "run_id":   str,
+                "status":   "completed" | "failed",
+                "source":   str,          # PipelineRun.source
+                "spec_ref": str,          # PipelineRun.spec_ref
+                "scope":    str,          # PipelineRun.scope
+                "depth":    int,          # trigger chain depth (0 = first-order)
+            }
+        """
+        if isinstance(typed_cond, OnRunCompletedConditions):
+            cond = typed_cond
+        else:
+            raw = trigger.conditions or {}
+            cond = OnRunCompletedConditions(
+                status=raw.get("status", "completed"),
+                source=raw.get("source", ""),
+                spec_ref=raw.get("spec_ref", ""),
+                scope=raw.get("scope", ""),
+                max_depth=int(raw.get("max_depth", 5)),
+            )
+
+        values = record.new_values or {}
+        event_status = values.get("status", "")
+        event_depth = int(values.get("depth", 0))
+
+        # Depth guard: reject if we are already at or beyond the max
+        if event_depth >= cond.max_depth:
+            return False
+
+        # Status filter: "any" matches both completed and failed
+        if cond.status != "any" and event_status != cond.status:
+            return False
+
+        # Optional filters (empty string = match all)
+        if cond.source and values.get("source", "") != cond.source:
+            return False
+        if cond.spec_ref and cond.spec_ref not in values.get("spec_ref", ""):
+            return False
+        if cond.scope and values.get("scope", "") != cond.scope:
+            return False
+
+        return True
+
     def _eval_source_changed(
         self, record: ChangeRecord, trigger: Trigger, typed_cond: Any = None
     ) -> bool:
@@ -556,6 +622,7 @@ class TriggerEvaluator:
         "esb_event": _eval_generic,
         "webhook_in": _eval_generic,
         "source_changed": _eval_source_changed,
+        "on_run_completed": _eval_on_run_completed,
     }
 
 

@@ -209,7 +209,30 @@ async def create_job(
 
     When a JobQueue is configured, the job is enqueued and processed by
     the worker.  Otherwise, falls back to FastAPI BackgroundTasks.
+
+    Validation:
+    - If ``pipeline_config`` + ``steps_filter`` are both present, the filter
+      is validated against the pipeline spec at submission time (422 on error).
     """
+    # --- Eager steps_filter validation ------------------------------------
+    # Validate the filter at submission time so the caller gets a 422 with a
+    # clear error message rather than a FAILED job with a cryptic error.
+    steps_filter = payload.parameters.get("steps_filter", [])
+    raw_pipeline_config = payload.parameters.get("pipeline_config")
+    if steps_filter and isinstance(raw_pipeline_config, dict):
+        try:
+            from gispulse.core.pipeline import _parse_v2
+            from gispulse.orchestration.runner import _apply_steps_filter
+
+            if raw_pipeline_config.get("version") == 2:
+                spec = _parse_v2(raw_pipeline_config)
+                _apply_steps_filter(spec, steps_filter, job_id="<validation>")
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "invalid_steps_filter", "message": str(exc)},
+            )
+
     job = Job(
         name=payload.name,
         dataset_id=payload.dataset_id,

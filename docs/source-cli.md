@@ -26,6 +26,20 @@ storage abstraction is used for local filesystem and S3/MinIO, so `source list`
 and `source delete` can enumerate artifacts from manifest records instead of
 guessing object prefixes.
 
+## Storage backend clarity
+
+Use `gispulse storage status --json` to inspect the backend that gispulse would
+select without uploading data. It reports `requested_mode`, `backend`,
+`storage_class`, `endpoint_configured`, `bucket`, `region`, `local_path`,
+`selection_reason`, and `fallback`.
+
+`create_storage(mode="auto")` preserves the historical behavior: if
+`GISPULSE_S3_ENDPOINT` is set, gispulse selects `S3Storage`; otherwise it selects
+`LocalStorage`. Explicit S3/Garage calls must use `mode="s3"` (or CLI
+`--dest s3`), which fails with `STORAGE_S3_NOT_CONFIGURED` instead of falling
+back to local storage when the endpoint is missing. Explicit local development
+must use `mode="local"` / `--dest local`.
+
 For S3 bulk entries currently supported by `BulkIngestRunner`
 (`TABLE_FILE` and `DOWNLOAD`), `source ingest --dest s3` delegates to that
 runner and persists its manifest output in the same inventory. Other entries

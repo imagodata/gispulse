@@ -47,17 +47,19 @@ BEGIN
             'trigger_id', '{trigger_id}',
             'table',      TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME,
             'operation',  TG_OP,
-            'row_id',     COALESCE(NEW.id::text, OLD.id::text, ''),
+            'row_id',     {row_id_expr},
             'timestamp',  now()::text
         )::text
     );
-    RETURN NEW;
+    -- AFTER triggers ignore the return value, but DELETE leaves NEW NULL;
+    -- COALESCE keeps the statement valid for all three operations.
+    RETURN COALESCE(NEW, OLD);
 END;
 $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS gispulse_trg_{suffix} ON "{schema}"."{table}";
 CREATE TRIGGER gispulse_trg_{suffix}
-    AFTER INSERT OR UPDATE ON "{schema}"."{table}"
+    AFTER INSERT OR UPDATE OR DELETE ON "{schema}"."{table}"
     FOR EACH ROW EXECUTE FUNCTION gispulse_notify_{suffix}();
 """
 
@@ -65,6 +67,34 @@ _DROP_TRIGGER_SQL = """
 DROP TRIGGER IF EXISTS gispulse_trg_{suffix} ON "{schema}"."{table}";
 DROP FUNCTION IF EXISTS gispulse_notify_{suffix}();
 """
+
+
+def _build_row_id_expr(pk: str | list[str]) -> str:
+    """Build the ``row_id`` SQL expression for the notify payload.
+
+    The primary key is configurable via the trigger's
+    ``conditions['pk']`` (default ``"id"``). For a composite key the
+    values are joined with ``concat_ws(',', ...)`` so the emitted
+    ``row_id`` carries every key column instead of just the first.
+
+    Every column name is validated with
+    :func:`gispulse.core.sql_safety.validate_identifier` before
+    interpolation — the DDL has no parameter binding.
+    """
+    cols = [pk] if isinstance(pk, str) else list(pk)
+    if not cols:
+        raise ValueError("trigger 'pk' must name at least one column")
+    for col in cols:
+        _safe_ident(col, "pk")
+    if len(cols) == 1:
+        c = cols[0]
+        return f'COALESCE(NEW."{c}"::text, OLD."{c}"::text, \'\')'
+    new_parts = ", ".join(f'NEW."{c}"::text' for c in cols)
+    old_parts = ", ".join(f'OLD."{c}"::text' for c in cols)
+    return (
+        f"COALESCE(concat_ws(',', {new_parts}), "
+        f"concat_ws(',', {old_parts}), '')"
+    )
 
 
 class TriggerManager:
@@ -106,6 +136,9 @@ class TriggerManager:
         The trigger model must have ``conditions`` with keys:
         - ``table``:  target table name
         - ``schema``: target schema (default "public")
+        - ``pk``:     primary-key column, or list of columns for a
+                      composite key (default "id"). Used to build the
+                      ``row_id`` carried in the notify payload.
 
         .. note::
             This method is part of the **Pro-only** ``esb_triggers`` feature.
@@ -127,6 +160,10 @@ class TriggerManager:
         _safe_ident(table, "table")
         _safe_ident(schema, "schema")
 
+        # Configurable primary key (default "id"); supports composite keys.
+        pk = trigger.conditions.get("pk", "id")
+        row_id_expr = _build_row_id_expr(pk)
+
         # Use trigger ID suffix to allow multiple triggers per table
         suffix = str(trigger.id).replace("-", "_")
         sql = _TRIGGER_FUNC_SQL.format(
@@ -134,6 +171,7 @@ class TriggerManager:
             table=table,
             schema=schema,
             trigger_id=str(trigger.id),
+            row_id_expr=row_id_expr,
         )
         self._engine.execute_sql(sql)
         self._installed[str(trigger.id)] = trigger

@@ -94,10 +94,17 @@ class ModelSpec:
     Attributes:
         name:        Model name (the key under ``models:``). Also the
                      terminal step id after compilation.
-        select:      Upstream layer reference — a source name or
-                     another model.
+        select:      Upstream layer reference — a source name or another
+                     model. **Optional** when all transform items are
+                     non-capability (``kind`` key present and != "capability").
+                     Omitting ``select`` on a model that contains at least one
+                     capability step is a validation error raised by
+                     :func:`validate_manifest`.
         transform:   List of ``{capability: params}`` shorthand items.
-                     Compiles to a chain of :class:`StepSpec`.
+                     An item is non-capability when its params dict contains
+                     ``kind: <value>`` where *value* is a non-empty string
+                     that is not ``"capability"``. Compiles to a chain of
+                     :class:`StepSpec`.
         materialize: ``view`` (default), ``table``, ``incremental``.
         refresh:     ``manual`` (default), ``on_change``, ``schedule``.
         assertions:  Data-quality gates run after materialization —
@@ -107,7 +114,7 @@ class ModelSpec:
     """
 
     name: str
-    select: str
+    select: str | None = None
     transform: list[dict[str, Any]] = field(default_factory=list)
     materialize: str = "view"
     refresh: str = "manual"
@@ -178,7 +185,10 @@ def _parse_models(raw: dict[str, Any]) -> dict[str, ModelSpec]:
     for name, spec in (raw or {}).items():
         out[name] = ModelSpec(
             name=name,
-            select=spec["select"],
+            # ``select`` is optional for models whose every transform item is
+            # non-capability.  Semantic validation enforces this constraint in
+            # validate_manifest() after all models are parsed.
+            select=spec.get("select"),
             transform=list(spec.get("transform") or []),
             materialize=spec.get("materialize", "view"),
             refresh=spec.get("refresh", "manual"),
@@ -300,14 +310,56 @@ def _resolve_ref(
     )
 
 
-def _split_transform(item: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    """Pull the ``{capability_name: params}`` pair out of a transform item."""
+def _split_transform(
+    item: dict[str, Any],
+) -> tuple[str, dict[str, Any], str]:
+    """Pull the ``{item_name: params}`` pair out of a transform item.
+
+    Returns ``(item_name, params_without_kind, effective_kind)``.
+
+    The ``kind`` key in params is **reserved**: when present and non-empty
+    and not ``"capability"``, the item compiles to a non-capability
+    :class:`~gispulse.core.pipeline.StepSpec` and the kind value is
+    forwarded as both ``step.kind`` and ``step.type``.  ``kind:
+    capability`` explicit is treated as the default (capability path).
+
+    ``kind`` is always stripped from the returned params dict — it is
+    pipeline plumbing, not a capability parameter.
+    """
     if len(item) != 1:
         raise ValueError(
             f"transform step must have exactly one key, got {list(item)!r}"
         )
-    (cap_name, params), = item.items()
-    return cap_name, dict(params or {})
+    (item_name, raw_params), = item.items()
+    params = dict(raw_params or {})
+    kind_val = params.pop("kind", None)
+
+    # AX fast-fail: ``kind`` must be a non-empty string when present.
+    # - Absent (None after pop)   → capability path (default).
+    # - "capability"              → capability path (explicit).
+    # - Non-string (int, list, …) → ValueError immediately.
+    # - Empty string ""           → ValueError (ambiguous; authors must be
+    #                               explicit — either omit the key or set
+    #                               "capability"). Silently normalising "" to
+    #                               capability would hide typos.
+    if kind_val is None:
+        effective_kind = "capability"
+    elif not isinstance(kind_val, str):
+        raise ValueError(
+            f"transform '{item_name}': 'kind' must be a string, "
+            f"got {type(kind_val).__name__!r} ({kind_val!r})"
+        )
+    elif kind_val == "":
+        raise ValueError(
+            f"transform '{item_name}': 'kind' must be a non-empty string; "
+            "omit the key entirely or set 'kind: capability' to use the "
+            "capability path"
+        )
+    elif kind_val == "capability":
+        effective_kind = "capability"
+    else:
+        effective_kind = kind_val
+    return item_name, params, effective_kind
 
 
 def _compile_model_steps(
@@ -322,18 +374,36 @@ def _compile_model_steps(
     intermediate step is named ``<model>__t<index>``. A transform's
     ``with: <ref>`` is converted into a multi-input edge plus a
     ``ref_layer`` capability param for the legacy ref-layer plumbing.
+
+    Non-capability steps (``kind`` key present and != ``"capability"``):
+    - Compile to ``StepSpec(kind=<kind>, type=<kind>, capability="")``
+    - The ``kind`` key is stripped from ``params`` (pipeline plumbing).
+    - ``with:`` on a non-capability step is a validation error: there is
+      no GeoDataFrame data flow to secondary inputs for external steps.
+
+    When ``model.select`` is ``None`` (allowed only when every transform
+    item is non-capability), the first step gets ``input=None``; each
+    subsequent step chains to the previous step id as usual.
     """
-    primary, primary_is_model = _resolve_ref(model.select, sources, model_names)
+    # --- Resolve primary input ---
     prev_input: str | list[str] | None
-    prev_input = primary if primary_is_model else None
-    # For a source-rooted model, no upstream step exists; the first step
-    # reads the primary input set by the executor (the source registered
-    # in ref_layers).
+    if model.select is not None:
+        primary, primary_is_model = _resolve_ref(model.select, sources, model_names)
+        prev_input = primary if primary_is_model else None
+        # For a source-rooted model, no upstream step exists; the first step
+        # reads the primary input set by the executor (the source registered
+        # in ref_layers).
+    else:
+        # No select → no primary data source. Only valid for models where
+        # every transform item is non-capability (enforced by validate_manifest).
+        prev_input = None
 
     transforms = model.transform
     if not transforms:
         # Passthrough — an identity model. Compile to a single
         # filter-no-op step that simply forwards the input.
+        # (Only reaches here when select is not None; no-select + no-transform
+        # is rejected by validate_manifest before compilation.)
         return [
             StepSpec(
                 id=model.name,
@@ -348,41 +418,68 @@ def _compile_model_steps(
     steps: list[StepSpec] = []
     n = len(transforms)
     for i, item in enumerate(transforms):
-        cap_name, params = _split_transform(item)
-        # `with: <ref>` ⇒ multi-input edge + ref_layer capability param.
-        extra_ref = params.pop("with", None)
-        inputs: str | list[str] | None = prev_input
-        if extra_ref is not None:
-            resolved, is_model = _resolve_ref(
-                extra_ref, sources, model_names
-            )
-            # ref_layer carries the secondary input for the existing
-            # ref-layer plumbing (spatial_join, attribute_join, …).
-            params.setdefault("ref_layer", resolved)
-            # When the primary input is itself an upstream *step* AND the
-            # with-ref names another *model*, surface the dep as a
-            # multi-input edge so the DAG executor wires both branches.
-            # When the primary is a *source* (prev_input is None), the
-            # secondary stays on ref_layer alone — adding it to step.input
-            # would silently swap the primary with the secondary.
-            if is_model and prev_input is not None:
-                base = (
-                    [prev_input]
-                    if isinstance(prev_input, str)
-                    else list(prev_input)
-                )
-                inputs = base + [resolved]
+        item_name, params, effective_kind = _split_transform(item)
         step_id = model.name if i == n - 1 else f"{model.name}__t{i}"
-        steps.append(
-            StepSpec(
-                id=step_id,
-                type="capability",
-                capability=cap_name,
-                params=params,
-                input=inputs,
-                order=i,
+
+        if effective_kind != "capability":
+            # --- Non-capability step ---
+            # ``with:`` is illegal: non-capability steps produce no GeoDataFrame
+            # and cannot receive a secondary data flow.
+            if "with" in params:
+                raise ValueError(
+                    f"models.{model.name}.transform[{i}].{item_name}: "
+                    f"'with:' is not allowed on a non-capability step "
+                    f"(kind={effective_kind!r}); non-capability steps produce "
+                    "no GeoDataFrame data flow that a secondary input could consume"
+                )
+            steps.append(
+                StepSpec(
+                    id=step_id,
+                    type=effective_kind,
+                    capability="",
+                    kind=effective_kind,
+                    params=params,
+                    input=prev_input,
+                    order=i,
+                )
             )
-        )
+        else:
+            # --- Capability step (existing unchanged behaviour) ---
+            cap_name = item_name
+            # `with: <ref>` ⇒ multi-input edge + ref_layer capability param.
+            extra_ref = params.pop("with", None)
+            inputs: str | list[str] | None = prev_input
+            if extra_ref is not None:
+                resolved, is_model = _resolve_ref(
+                    extra_ref, sources, model_names
+                )
+                # ref_layer carries the secondary input for the existing
+                # ref-layer plumbing (spatial_join, attribute_join, …).
+                params.setdefault("ref_layer", resolved)
+                # When the primary input is itself an upstream *step* AND the
+                # with-ref names another *model*, surface the dep as a
+                # multi-input edge so the DAG executor wires both branches.
+                # When the primary is a *source* (prev_input is None), the
+                # secondary stays on ref_layer alone — adding it to step.input
+                # would silently swap the primary with the secondary.
+                if is_model and prev_input is not None:
+                    base = (
+                        [prev_input]
+                        if isinstance(prev_input, str)
+                        else list(prev_input)
+                    )
+                    inputs = base + [resolved]
+            steps.append(
+                StepSpec(
+                    id=step_id,
+                    type="capability",
+                    capability=cap_name,
+                    params=params,
+                    input=inputs,
+                    order=i,
+                )
+            )
+
         prev_input = step_id
     return steps
 
@@ -404,8 +501,9 @@ def _topo_models(models: dict[str, ModelSpec]) -> list[str]:
     while remaining and progress:
         progress = False
         for name in list(remaining):
-            ref = remaining[name].select
-            if ref not in remaining:
+            ref = remaining[name].select  # may be None for non-capability models
+            # A model with select=None has no inter-model dependency → ready.
+            if ref is None or ref not in remaining:
                 ordered.append(name)
                 del remaining[name]
                 progress = True
@@ -651,20 +749,42 @@ def _extract_with_ref(params: object) -> str | None:
     return None
 
 
+def _item_is_noncapability(item: dict[str, Any]) -> bool:
+    """Return True when a transform item's params contain a non-capability kind."""
+    if not isinstance(item, dict) or len(item) != 1:
+        return False
+    (_, params), = item.items()
+    if not isinstance(params, dict):
+        return False
+    kind_val = params.get("kind")
+    return bool(kind_val) and kind_val != "capability"
+
+
 def validate_manifest(manifest: ManifestV3) -> list[str]:
     """Validate a v3 manifest at load-time.
 
-    Catches the three load-time concerns ADR 0005 / #248 calls for:
+    Catches the following load-time concerns:
 
-    - Unresolved ``select:`` and transform-level ``with:`` references —
-      a ``ModelSpec`` selecting a name that is neither a declared source
-      nor another model. Error (blocking).
-    - Cycles in the inter-model dependency graph, detected by
-      :func:`~gispulse.core.dag.topological_sort` (Kahn's algorithm,
-      shared with :class:`GraphExecutor`). Error (blocking).
-    - Orphan models — models nobody else selects. They are often the
-      pipeline's terminal outputs (perfectly legitimate), so this is
-      surfaced as a warning, not an error.
+    - **select semantics** — ``select`` is required when a model contains
+      at least one capability transform step (or no transforms at all, since
+      the identity passthrough must read from somewhere). It is optional only
+      when every transform item is non-capability. Violations raise.
+    - **Unresolved references** — a ``ModelSpec`` selecting a name that is
+      neither a declared source nor another model. Error (blocking).
+    - **with: on non-capability** — ``with:`` delivers a secondary GeoDataFrame
+      to a capability step; it is illegal on a non-capability step. Error.
+    - **Cycles** in the inter-model dependency graph, detected by
+      :func:`~gispulse.core.dag.topological_sort`. Error (blocking).
+    - **Orphan models** — models nobody else selects. Often the pipeline's
+      terminal outputs (perfectly legitimate); surfaced as a warning.
+
+    Design note — step kind existence is NOT validated here:
+        Step kinds like ``"external"`` are registered in the worker process
+        via ``register_step_kind()``. At HTTP validation time the server may
+        not have the application kinds loaded. This boundary validates
+        *structure* only; the worker fails early on unknown kinds at execution
+        time with a clear ``"unknown step kind"`` error. This is documented
+        intentionally so readers understand the split.
 
     Returns the list of *warnings*. Errors raise
     :class:`ManifestValidationError`.
@@ -680,7 +800,34 @@ def validate_manifest(manifest: ManifestV3) -> list[str]:
     inter_model_edges: list[tuple[str, str]] = []
 
     for name, model in manifest.models.items():
-        if not isinstance(model.select, str) or not model.select:
+        transforms = list(model.transform or [])
+
+        # --- Determine whether all transforms are non-capability ---
+        all_noncap = bool(transforms) and all(
+            _item_is_noncapability(step) for step in transforms
+        )
+
+        # --- select validation ---
+        if model.select is None:
+            if not all_noncap:
+                # No select is only valid when 100 % of transforms are
+                # non-capability. Capability steps need a GeoDataFrame primary
+                # input from a declared source or upstream model. The passthrough
+                # identity model also requires a select (it reads primary).
+                if not transforms:
+                    errors.append(
+                        f"models.{name}: 'select' is required when the model "
+                        "has no transform steps (passthrough identity requires "
+                        "an input source)"
+                    )
+                else:
+                    errors.append(
+                        f"models.{name}: 'select' is required when the model "
+                        "contains capability transform steps; omit 'select' only "
+                        "when every transform item is non-capability "
+                        "(kind != 'capability')"
+                    )
+        elif not isinstance(model.select, str) or not model.select:
             errors.append(
                 f"models.{name}: missing or empty 'select' reference"
             )
@@ -693,7 +840,8 @@ def validate_manifest(manifest: ManifestV3) -> list[str]:
             inter_model_edges.append((model.select, name))
             referenced_models.add(model.select)
 
-        for i, step in enumerate(model.transform or []):
+        # --- Transform step validation ---
+        for i, step in enumerate(transforms):
             if not isinstance(step, dict) or len(step) != 1:
                 errors.append(
                     f"models.{name}.transform[{i}]: must be a single-key "
@@ -701,6 +849,40 @@ def validate_manifest(manifest: ManifestV3) -> list[str]:
                 )
                 continue
             (cap, params), = step.items()
+
+            # Validate ``kind`` type early — _split_transform will raise at
+            # compile time, but validate_manifest must surface it at load time
+            # so /manifests/validate returns 422 with an actionable message.
+            if isinstance(params, dict) and "kind" in params:
+                kind_raw = params["kind"]
+                if not isinstance(kind_raw, str):
+                    errors.append(
+                        f"models.{name}.transform[{i}].{cap}: "
+                        f"'kind' must be a string, got "
+                        f"{type(kind_raw).__name__!r} ({kind_raw!r})"
+                    )
+                    continue
+                if kind_raw == "":
+                    errors.append(
+                        f"models.{name}.transform[{i}].{cap}: "
+                        "'kind' must be a non-empty string; omit the key or "
+                        "set 'kind: capability' to use the capability path"
+                    )
+                    continue
+
+            # ``with:`` on non-capability step
+            is_noncap = _item_is_noncapability(step)
+            if is_noncap:
+                if isinstance(params, dict) and "with" in params:
+                    errors.append(
+                        f"models.{name}.transform[{i}].{cap}: "
+                        "'with:' is not allowed on a non-capability step; "
+                        "non-capability steps produce no GeoDataFrame data "
+                        "flow that a secondary input could consume"
+                    )
+                continue  # ref validation below is for capability steps only
+
+            # Capability step: validate ``with:`` ref
             with_ref = _extract_with_ref(params)
             if with_ref is None:
                 continue

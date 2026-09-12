@@ -21,6 +21,20 @@ from gispulse.orchestration.scheduler import (
 )
 from gispulse.persistence.schedule_repository import ScheduleRepository
 
+# Valid v2 pipeline_config for tests that need a real config
+_VALID_PIPELINE_CONFIG = {
+    "version": 2,
+    "name": "test_pipeline",
+    "steps": [
+        {
+            "id": "filter",
+            "type": "capability",
+            "capability": "filter",
+            "params": {"expression": "value > 0"},
+        }
+    ],
+}
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -373,3 +387,90 @@ class TestPipelineScheduler:
             assert size == 0
         finally:
             await scheduler.stop()
+
+
+# ---------------------------------------------------------------------------
+# Test: P1b — dataset_id propagation from ScheduledPipeline → Job
+# ---------------------------------------------------------------------------
+
+
+class TestScheduledPipelineDatasetId:
+    """P1b: dataset_id is carried from the schedule through to the enqueued Job."""
+
+    @pytest.fixture(autouse=True)
+    def _set_pro_tier(self):
+        with patch.dict(os.environ, {
+            "GISPULSE_TIER": "pro",
+            "GISPULSE_LICENCE_SKIP_VERIFY": "true",
+            "GISPULSE_LICENSE_KEY": (
+                "eyJvcmciOiAidGVzdCIsICJ0aWVyIjogInBybyIsICJleHAiOiAiMjAzMC0wMS0wMVQwMDowMDowMFoifQ"
+                ".AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            ),
+        }):
+            yield
+
+    @pytest.mark.asyncio
+    async def test_enqueue_propagates_dataset_id(self):
+        """schedule.dataset_id is forwarded to job.dataset_id when enqueued."""
+        queue = InMemoryJobQueue()
+        dataset_id = uuid4()
+        schedule = ScheduledPipeline(
+            name="with_dataset",
+            cron_expression="* * * * *",
+            pipeline_config=_VALID_PIPELINE_CONFIG,
+            dataset_id=dataset_id,
+        )
+        scheduler = PipelineScheduler(job_queue=queue)
+        await scheduler.add(schedule)
+
+        job_id = await scheduler.run_now(str(schedule.id))
+        assert job_id is not None
+
+        job = await queue.dequeue()
+        assert job is not None
+        assert job.dataset_id == dataset_id
+
+    @pytest.mark.asyncio
+    async def test_enqueue_without_dataset_id_job_has_none(self):
+        """schedule without dataset_id → job.dataset_id is None."""
+        queue = InMemoryJobQueue()
+        schedule = ScheduledPipeline(
+            name="no_dataset",
+            cron_expression="* * * * *",
+            pipeline_config=_VALID_PIPELINE_CONFIG,
+            dataset_id=None,
+        )
+        scheduler = PipelineScheduler(job_queue=queue)
+        await scheduler.add(schedule)
+
+        await scheduler.run_now(str(schedule.id))
+        job = await queue.dequeue()
+        assert job is not None
+        assert job.dataset_id is None
+
+    def test_schedule_repository_persists_dataset_id(self, schedule_repo):
+        """dataset_id round-trips through SQLite save/get."""
+        dataset_id = uuid4()
+        sp = ScheduledPipeline(
+            name="persisted_dataset",
+            cron_expression="0 * * * *",
+            pipeline_config=_VALID_PIPELINE_CONFIG,
+            dataset_id=dataset_id,
+        )
+        schedule_repo.save(sp)
+        retrieved = schedule_repo.get(sp.id)
+        assert retrieved is not None
+        assert retrieved.dataset_id == dataset_id
+
+    def test_schedule_repository_persists_null_dataset_id(self, schedule_repo):
+        """dataset_id=None round-trips correctly (no coercion to str 'None')."""
+        sp = ScheduledPipeline(
+            name="null_dataset",
+            cron_expression="0 * * * *",
+            pipeline_config=_VALID_PIPELINE_CONFIG,
+            dataset_id=None,
+        )
+        schedule_repo.save(sp)
+        retrieved = schedule_repo.get(sp.id)
+        assert retrieved is not None
+        assert retrieved.dataset_id is None

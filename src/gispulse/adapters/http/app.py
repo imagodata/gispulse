@@ -12,6 +12,7 @@ variable (comma-separated list of valid keys). Absent or empty = auth disabled
 
 from __future__ import annotations
 
+import hmac
 import inspect
 import os
 from contextlib import asynccontextmanager
@@ -40,6 +41,8 @@ from gispulse.adapters.http.routers.jobs_router import router as jobs_router, re
 from gispulse.adapters.http.routers.portal_router import router as portal_router
 from gispulse.adapters.http.routers.projects_router import router as projects_router
 from gispulse.adapters.http.routers.rules_router import router as rules_router
+from gispulse.adapters.http.routers.runs_router import router as runs_router
+from gispulse.adapters.http.routers.saved_maps_router import router as saved_maps_router
 from gispulse.adapters.http.routers.scenarios_router import router as scenarios_router
 from gispulse.adapters.http.routers.sessions_router import router as sessions_router
 from gispulse.adapters.http.routers.schedules_router import router as schedules_router
@@ -48,13 +51,14 @@ from gispulse.adapters.http.routers.templates_router import router as templates_
 from gispulse.adapters.http.routers.triggers_router import router as triggers_router
 from gispulse.adapters.http.routers.watchers_router import router as watchers_router
 from gispulse.adapters.http.routers.relations_router import router as relations_router
+from gispulse.adapters.http.routers.manifests_router import router as manifests_router
 from gispulse.adapters.http.routers.marketplace_router import router as marketplace_router
 from gispulse.adapters.http.routers.pipelines_router import router as pipelines_router
 from gispulse.adapters.http.routers.ws_router import router as ws_router
 from gispulse.adapters.http.schemas import CapabilityInfo, HealthResponse
 from gispulse.capabilities import registry
 from gispulse.core.logging import get_logger
-from gispulse.core.models import Dataset, Job, Project, Rule, Scenario, TableRelation, Trigger
+from gispulse.core.models import Dataset, Job, Project, Rule, SavedMap, Scenario, TableRelation, Trigger
 from gispulse.core.observability import MetricsCollector
 from gispulse.orchestration.runner import JobRunner
 from gispulse.persistence.engine_factory import create_spatial_engine
@@ -112,6 +116,7 @@ def _setup_repos(app: FastAPI, storage_mode: str, db_path: Path) -> None:
         app.state.scenario_repo = SQLiteRepository(Scenario, db_path=db_path)
         app.state.trigger_repo = SQLiteRepository(Trigger, db_path=db_path)
         app.state.project_repo = SQLiteRepository(Project, db_path=db_path)
+        app.state.saved_map_repo = SQLiteRepository(SavedMap, db_path=db_path)
         app.state.relation_repo = SQLiteRepository(TableRelation, db_path=db_path)
     else:
         app.state.rule_repo = InMemoryRepository()
@@ -120,6 +125,7 @@ def _setup_repos(app: FastAPI, storage_mode: str, db_path: Path) -> None:
         app.state.scenario_repo = InMemoryRepository()
         app.state.trigger_repo = InMemoryRepository()
         app.state.project_repo = InMemoryRepository()
+        app.state.saved_map_repo = InMemoryRepository()
         app.state.relation_repo = InMemoryRepository()
 
     # RBAC auth repository (opt-in via GISPULSE_RBAC=true)
@@ -327,11 +333,79 @@ def create_app(
 
             # Start the job worker (polls the queue and executes jobs)
             from gispulse.orchestration.worker import JobWorker
+            from gispulse.persistence.run_repository import RunRepository
+
+            run_repo = RunRepository(db_path=db_path)
+            app.state.run_repo = run_repo
+
+            # Recover runs left RUNNING by a prior crash (emit via EventHub once wired)
+            try:
+                n_stale = run_repo.recover_stale_runs()
+                if n_stale:
+                    log.info("stale_runs_recovered", count=n_stale)
+            except Exception as exc:
+                log.warning("stale_run_recovery_failed", error=str(exc))
+
+            # EventHubSink: bridges RunEventSink -> EventHub.broadcast.
+            # Lives here (adapters layer) so orchestration stays decoupled
+            # from adapters/http — orchestration never imports adapters/.
+            class EventHubSink:
+                def __init__(self, hub):
+                    self._hub = hub
+
+                def emit(self, event_type: str, data: dict) -> None:
+                    import uuid as _uuid
+                    from datetime import datetime as _dt
+                    # Make data JSON-safe: UUID/datetime -> str
+                    safe: dict = {}
+                    for k, v in data.items():
+                        if isinstance(v, _uuid.UUID):
+                            safe[k] = str(v)
+                        elif isinstance(v, _dt):
+                            safe[k] = v.isoformat()
+                        else:
+                            safe[k] = v
+                    self._hub.broadcast(event_type, safe)
+
+            hub_sink = EventHubSink(app.state.event_hub)
+
+            # RunCompletionTriggerSink (issue #440-c): évalue les triggers
+            # on_run_completed sur chaque run.completed/run.failed et
+            # enqueue les jobs déclenchés. Vit ici (adapters layer) pour la
+            # même raison qu'EventHubSink : orchestration ne doit pas
+            # dépendre de adapters/.
+            # Sans triggers déclarés, comportement strictement identique
+            # à l'injection d'hub_sink seul (no-op conditionnel).
+            from gispulse.orchestration.trigger_bridge import TriggerJobBridge
+            from gispulse.orchestration.run_trigger_sink import RunCompletionTriggerSink
+
+            trigger_bridge = TriggerJobBridge(
+                job_queue=app.state.job_queue,
+                dataset_repo=app.state.dataset_repo,
+            )
+            # Capture the running event loop now (inside the async lifespan)
+            # so RunCompletionTriggerSink can schedule coroutines from sync
+            # FastAPI handler threads via asyncio.run_coroutine_threadsafe.
+            import asyncio as _asyncio
+            _lifespan_loop = _asyncio.get_running_loop()
+            run_trigger_sink = RunCompletionTriggerSink(
+                trigger_repo=app.state.trigger_repo,
+                bridge=trigger_bridge,
+                inner=hub_sink,
+                loop=_lifespan_loop,
+            )
+            app.state.trigger_bridge = trigger_bridge
+            # Expose the composite sink on app.state so scenario/manifest routers
+            # can emit run.* events through the same pipeline (EventHub + triggers).
+            app.state.event_sink = run_trigger_sink
+
             worker = JobWorker(
                 queue=app.state.job_queue,
                 runner=app.state.job_runner,
                 dataset_repo=app.state.dataset_repo,
                 job_repo=app.state.job_repo,
+                run_repo=run_repo,
+                event_sink=run_trigger_sink,
                 results_dir=_results_path,
             )
             app.state.job_worker = worker
@@ -533,7 +607,8 @@ def create_app(
                 except Exception:
                     pass
             # Close queue and metering connections
-            await app.state.job_queue.close()
+            if app.state.job_queue is not None:
+                await app.state.job_queue.close()
             await app.state.metering.close()
             spatial_engine.close()
         else:
@@ -770,7 +845,7 @@ def create_app(
         def metrics(request: Request) -> PlainTextResponse:
             if _metrics_token:
                 auth = request.headers.get("Authorization", "")
-                if auth != f"Bearer {_metrics_token}":
+                if not hmac.compare_digest(auth, f"Bearer {_metrics_token}"):
                     from fastapi.responses import JSONResponse
                     return JSONResponse(
                         status_code=401,
@@ -807,7 +882,9 @@ def create_app(
         app.include_router(rules_router)
         app.include_router(triggers_router)
         app.include_router(jobs_router)
+        app.include_router(runs_router)
         app.include_router(scenarios_router)
+        app.include_router(saved_maps_router)
         app.include_router(capabilities_router)
         app.include_router(templates_router)
         app.include_router(marketplace_router)
@@ -815,6 +892,7 @@ def create_app(
         app.include_router(filter_router)
         app.include_router(schedules_router)
         app.include_router(pipelines_router)
+        app.include_router(manifests_router)
         app.include_router(system_router)
         app.include_router(watchers_router)
         try:
@@ -844,29 +922,34 @@ def create_app(
         app.include_router(templates_router, **read_protected)
         app.include_router(rules_router, **write_protected)
         app.include_router(jobs_router, **protected)
+        app.include_router(runs_router, **protected)
         app.include_router(datasets_router, **protected)
         app.include_router(projects_router, **protected)
         app.include_router(scenarios_router, **protected)
+        app.include_router(saved_maps_router, **protected)
         app.include_router(triggers_router, **write_protected)
         app.include_router(relations_router, **write_protected)
         app.include_router(sessions_router, **protected)
         app.include_router(portal_router, **protected)
-        app.include_router(catalog_router)
-        app.include_router(filter_router)
+        app.include_router(catalog_router, **protected)
+        app.include_router(filter_router, **protected)
         app.include_router(schedules_router, **write_protected)
         app.include_router(pipelines_router, **write_protected)
+        app.include_router(manifests_router, **write_protected)
         app.include_router(system_router, **protected)
         app.include_router(watchers_router, **read_protected)
 
-        # Marketplace (read endpoints open, install/uninstall admin-gated internally)
-        app.include_router(marketplace_router)
+        # Marketplace: require a valid API key. Read endpoints stay usable for
+        # any authenticated caller; install/uninstall are additionally fail-closed
+        # behind RBAC admin role inside the router.
+        app.include_router(marketplace_router, **protected)
 
         # Admin (RBAC) and Billing (Stripe) routers ship in the gispulse-enterprise
         # plugin and are mounted by the ExtensionHub block below via
         # ``gispulse.routers`` entry-points — no legacy try/except needed.
 
         from gispulse.adapters.http.routers.ogc_features_router import router as ogc_features_router
-        app.include_router(ogc_features_router)
+        app.include_router(ogc_features_router, **read_protected)
 
         if cfg.engine.backend == "postgis":
             from gispulse.adapters.http.routers.tiles_router import router as tiles_router

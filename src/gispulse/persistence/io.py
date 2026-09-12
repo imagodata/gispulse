@@ -65,6 +65,7 @@ KMZ_KML_MAX_BYTES = 50 * 1024 * 1024
 WRITABLE_FORMATS = {
     ".gpkg", ".geojson", ".json", ".shp", ".fgb",
     ".gml", ".parquet", ".sqlite",
+    ".csv", ".tsv", ".xlsx",
 }
 
 
@@ -528,6 +529,33 @@ def write_vector(
     # --- GeoParquet ---
     if ext == ".parquet":
         gdf.to_parquet(path, **kwargs)
+    elif ext in (".csv", ".tsv", ".xlsx"):
+        # --- Tabular formats: serialize geometry as WKT ---
+        # The geometry is written into a "geometry" column so the matching
+        # reader (_read_csv_geo / WKT auto-detection) can round-trip it.
+        import pandas as pd
+
+        df = pd.DataFrame(gdf.copy())
+        geom_name = gdf.geometry.name if gdf.geometry is not None else "geometry"
+        # Serialize geometries to WKT, mapping null/empty geometries to None.
+        wkt_series = gdf.geometry.apply(
+            lambda geom: geom.wkt if geom is not None and not geom.is_empty else None
+        )
+        if geom_name in df.columns:
+            df = df.drop(columns=[geom_name])
+        df["geometry"] = wkt_series.values
+
+        if ext == ".xlsx":
+            try:
+                df.to_excel(path, index=False, sheet_name="Sheet1", **kwargs)
+            except ImportError as exc:
+                raise ImportError(
+                    "Writing XLSX files requires openpyxl. Install gispulse with its "
+                    "declared dependencies, or install openpyxl>=3.1,<4.0."
+                ) from exc
+        else:
+            sep = "\t" if ext == ".tsv" else ","
+            df.to_csv(path, sep=sep, index=False, **kwargs)
     else:
         # --- Standard Fiona-based ---
         driver = VECTOR_DRIVERS[ext]
