@@ -536,7 +536,7 @@ GISPULSE_TELEMETRY=0           # Disable via env var (CI-friendly)
 | Module | Status | Notes |
 |---|---|---|
 | Core models | Done | Dataset, Layer, Rule, Job, Artifact, Scenario, Trigger |
-| Vector capabilities | Done | 128 capabilities across 18 categories (geometry, overlay, attributes, classification, clustering, topology, temporal, 3D pointcloud, network), registry + strategy pattern |
+| Vector capabilities | Done | 144 capabilities across 18+ categories (geometry, overlay, attributes, classification, clustering, topology, temporal, 3D pointcloud, network, routing), registry + strategy pattern |
 | Rules engine | Done | JSON rules, sequential execution, predicates |
 | DuckDB session | Done | <100ms startup, GPKG native |
 | Multi-format I/O | Done | 13+ read formats, pyogrio |

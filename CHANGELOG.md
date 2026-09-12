@@ -7,8 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-09-12
+
 ### Added
 
+- **DPE queries scoped by `id_rnb` (#475).** `DpeSource.access_for` accepts an
+  `id_rnb` parameter that builds an `id_rnb:(A OR B)` Lucene filter, fetching
+  the diagnostics of specific RNB buildings instead of a whole commune's
+  table — a commune-wide fetch (up to 100k rows / 600s on a big city) becomes
+  a handful of rows. `id_rnb` takes precedence over `code_insee`, then
+  `code_departement`; ids are validated (alphanumeric) to keep the query
+  string injection-free.
 - **`network_redundancy` capability.** Per-site redundancy audit: for every
   input point, counts the mutually disjoint routes (capped at `k`, default
   2) through a line network to a set of facility points — 0 = unreachable,
@@ -934,6 +943,8 @@ Hotfix release that unblocks the v1.3.0 distribution: `pipx install gispulse` no
 - Structured logging with sanitized outputs
 - Input validation and type safety across portal node system
 
-[Unreleased]: https://github.com/imagodata/gispulse/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/imagodata/gispulse/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/imagodata/gispulse/compare/v2.3.0...v2.4.0
+[2.3.0]: https://github.com/imagodata/gispulse/compare/v1.0.0...v2.3.0
 [1.0.0]: https://github.com/imagodata/gispulse/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/imagodata/gispulse/releases/tag/v0.1.0
