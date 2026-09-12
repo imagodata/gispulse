@@ -13,6 +13,59 @@ The authoritative version of this file lives at [`CHANGELOG.md`](https://github.
 
 ---
 
+## [2.4.0] — 2026-09-12
+
+### Added
+
+- **DPE queries scoped by `id_rnb` (#475).** `DpeSource.access_for` accepts an `id_rnb` parameter that builds an `id_rnb:(A OR B)` Lucene filter, fetching the diagnostics of specific RNB buildings instead of a whole commune's table — a commune-wide fetch (up to 100k rows / 600s on a big city) becomes a handful of rows. `id_rnb` takes precedence over `code_insee`, then `code_departement`; ids are validated (alphanumeric) to keep the query string injection-free.
+- **`network_redundancy`.** Per-site redundancy audit: for every input point, counts the mutually disjoint routes (capped at `k`, default 2) through a line network to a set of facility points — 0 = unreachable, 1 = single point of failure, `k` = protected. Same Suurballe engine as `disjoint_paths`. Pro tier.
+- **`reseau_expansion_resilience` pipeline template.** First template composing the newly ported network capabilities end-to-end: connected components → bridge tagging (structural SPOFs) → per-site redundancy audit → SPOF filter → greedy marginal-cost expansion order.
+- **`calibrate_detour_bands`.** Closes the routing loop: feed it routed observations (typically the output of `route_pairs` with `provider="osrm"`) and it recalibrates the detour ("tortuosity") factors — per band, the median routed/straight ratio of the observations falling in the band. Pro tier.
+- **`sample_surface_along_lines`.** Linear referencing: splits every line into its ordered sequence of homogeneous segments by the surface class it crosses — one row per segment with `length_m`, `share` and the sub-line geometry. Pro tier.
+- **Road-routing providers + `route_pairs` capability.** New `gispulse.core.routing_providers` module — a `RoutingProvider` abstraction with three implementations: `TortuosityProvider` (offline), `OSRMProvider` (real road routing over httpx), and `CachedRoutingProvider` (pre-routed GeoParquet). Machine-readable `RoutingError`s. The `route_pairs` capability (Pro) bridges them into pipelines.
+- **`disjoint_paths`.** K mutually disjoint paths of minimum **total** cost between two points through a line network (Suurballe — successive shortest paths with Johnson potentials). `mode="node"` (default) forbids sharing interior nodes, `mode="edge"` only forbids sharing edges. Pro tier.
+- **`network_bridges`.** Tags every line whose removal disconnects its component (bridge / cut-edge — the structural SPOFs of a network) with a boolean `is_bridge` column. Dependency-free (no networkx). Pro tier.
+- **`network_greedy_expansion`.** Greedy multi-source Prim-style network expansion with a per-node activation cost. Pro tier.
+- **`cluster_balanced_kmeans`.** Size-bounded K-Means: partitions geometry centroids into clusters whose size stays within `[min_size, max_size]` (k-means++/Lloyd + split/merge rebalance).
+
+### Fixed
+
+- **`steiner_tree` on a graph with a terminal-less component.** The Mehlhorn heuristic (networkx's default since 3.2) indexes every node of the graph after a multi-source Dijkstra from the terminals, so a disconnected component without any terminal — common in a raw OSM road network — raised `KeyError`. The solve is now restricted to the terminals' connected component.
+
+---
+
+## [2.3.0] — 2026-06-14
+
+### Added
+
+- **Manifest v3 orchestration suite (#440).** End-to-end pipeline runtime: `PipelineRun` entity + lifecycle events on the EventHub, run-completion as a trigger source with scenario wiring, run + validate manifest v3 pipelines over HTTP, a step-kind registry with external subprocess steps, a run control surface — cancel / resume / partial execution, and non-capability steps + selectless models in manifest v3.
+- **Saved-map CRUD API (#405, #446).** Persist and reload maps — layers, styles, view and filters — over the HTTP API.
+- **Consolidate-networks capabilities (`cn_*` family, #465).** Faithful pure-shapely port of the QGIS *Consolidate Networks* plugin (`github.com/sducournau/consolidate_networks`), bringing eight line-network topology cleaners to every GISPulse surface without QGIS.
+- **`measure_spatial_impact` (#436).** Clip + overlap measurement for feature × parcel impact checks.
+- **H3 multi-metric aggregation in a single pass (#457).**
+- **New open-data source plugins.** `src-dpe` (energy performance, #422), `src-ocsge` (land cover, #423), `src-sitadel` (building permits, #424), public OSM + GRB sources with in-zip member reading via `/vsizip` (#459), and OSM PBF road-tag extraction + `materialize_pbf` local download (#463).
+- **Geo commons primitives (#438).** Reusable HTTP / WFS / GeoJSON building blocks and generic geo models.
+- **`write_pmtiles_pyramid` (#435).** Multi-LOD layers in a single PMTiles archive.
+- **Universal loader for non-geo tabular sources (#449).** CSV/tabular inputs flow through the same loader path.
+- **PG-direct building blocks (#432).** `ST_Subdivide` materializer + batched DuckDB → PostGIS loader.
+- **Source readiness probe engine (#431)** with extensible probe kinds, and a **bounded vector tiler (#430)** — bbox-tiled parallel ingest to parquet.
+- **Manifest-gated PostGIS column shed (#429, dry-run by default)**, **opt-in DuckDB resource limits (memory/temp/threads, #427)**, a **unified source CLI (#421)**, **`stream_vector_to_parquet` (#420)**, **CSV encoding detection with fallback (#426)**, and **BulkIngestRunner skip-if-staged resume (#433)** plus dept scope-stamp / `bulk_access_for` / GeoJSON aliases (#419).
+
+### Fixed
+
+- **Security audit 2026-06-09 (#418).** SQL injection, HTTP-router auth, zip-slip (7z), SSRF and DoS hardening, plus CSV/XLSX write and COG export gaps.
+- **CDC v2.3.0 hardening (#441).** `pg_notify` DELETE/PK handling, composite primary keys, and documentation drift.
+- **Scheduled pipelines actually execute their `pipeline_config` (#439).**
+- **Manifest path fixes.** Selectless models run in declaration order (#458); cancel, heartbeat and timeout elevation on the manifest path (#456).
+- **Storage:** make the Garage backend explicit (#462).
+
+### Changed
+
+- **CI / supply-chain (#400, #401, #444).** SHA-pinned GitHub Actions, least-privilege DCO, and `pyjwt` / `urllib3` bumps.
+- **Python baseline raised to 3.12+.** Dropped Python 3.11 support and aligned the plugin template and ruff target accordingly.
+
+---
+
 ## [2.2.3] — 2026-06-09
 
 ### Added
