@@ -48,11 +48,13 @@ Evidence rules:
   tell which), an axis ending inside (a junction or dead end on or under the
   structure), or an axis that crosses no other one.
 
-Axes are sorted by ``MORF``/``STATUS`` only: in-service 101-112 are
-carriageways; 113 (voetgangerszone), 114 (wandel- of fietsweg), 116 (tramweg)
-and 130 (veer), documented as closed to general motor traffic, are not;
-everything else — 120 dienstweg and 125 aardeweg (bare labels in the domain),
--8, a carriageway not in service — is unresolved.
+Axes are sorted by ``MORF``/``STATUS`` only: in-service 101-112 and 120
+(dienstweg) are carriageways; 113 (voetgangerszone), 114 (wandel- of
+fietsweg), 116 (tramweg), 125 (aardeweg) and 130 (veer) are not; everything
+else — -8, a carriageway not in service — is unresolved. 120 and 125 are bare
+labels in the domain: classing them is a costing-side decision, taken here
+explicitly (a service road is bored under like a road, an earthen track is
+trenched through) and listed in the report.
 
 ``complex_crossing`` is true when an axis of the unit has a motorway
 morphology (default ``MORF`` 101 autosnelweg, defined by the Wegenregister
@@ -89,152 +91,44 @@ https://metadata.dev-vlaanderen.be/srv/api/records/aff2c639-28cf-4bee-8fa8-92136
 from __future__ import annotations
 
 import math
-from collections import Counter
 from collections.abc import Iterable
 
 import geopandas as gpd
-import pandas as pd
-import shapely
 from shapely import STRtree
-from shapely.geometry import LineString, MultiLineString, MultiPolygon, Point, Polygon, box
-from shapely.ops import linemerge, unary_union
+from shapely.geometry import LineString, MultiLineString, MultiPolygon, Polygon, box
+from shapely.ops import unary_union
 
 from gispulse.capabilities.vector.reconcile_knw_structures import _code, _nonempty_id_column
+from gispulse.capabilities.vector.road_crossings_common import (
+    CARRIAGEWAY,
+    NON_CARRIAGEWAY,
+    UNRESOLVED,
+    CrossingsBuilder,
+    GroundElement,
+    endpoints,
+    group_touching,
+    points,
+    polygonal,
+    validate_numbers,
+)
 
 _STRUCTURE_CODES = frozenset({1, 12})  # KNW overbrugging, tunnelmond
 _KRUISPUNTZONE, _WEGSEGMENT = 1, 2  # WBN TYPE
 _IN_SERVICE = 4  # Wegsegment STATUS
 # Wegsegment MORF 101-112: documented motor-traffic ways and junctions (same
-# gate as classify_grb_faces).
-_CARRIAGEWAY_MORF = frozenset(range(101, 113))
-# Documented as closed to general motor traffic: voetgangerszone, wandel- of
-# fietsweg, tramweg, veer. 120 dienstweg and 125 aardeweg are bare labels: unresolved.
-_NON_CARRIAGEWAY_MORF = frozenset({113, 114, 116, 130})
+# gate as classify_grb_faces), plus 120 dienstweg by explicit decision.
+_CARRIAGEWAY_MORF = frozenset(range(101, 113)) | {120}
+# Documented as closed to general motor traffic (voetgangerszone, wandel- of
+# fietsweg, tramweg, veer), plus 125 aardeweg by explicit decision.
+_NON_CARRIAGEWAY_MORF = frozenset({113, 114, 116, 125, 130})
 _COMPLEX_MORF = (101,)  # autosnelweg
-_CARRIAGEWAY, _NON_CARRIAGEWAY, _UNRESOLVED = "carriageway", "non_carriageway", "unresolved"
-_COLUMNS = (
-    "road_id",
-    "structure",
-    "complex_crossing",
-    "structure_evidence",
-    "source",
-    "source_layer",
-    "source_ids",
-    "axis_ids",
-    "morf_codes",
-)
 
 
-def _lines(geometry) -> list[LineString]:
-    if geometry is None or geometry.is_empty:
-        return []
-    if isinstance(geometry, LineString):
-        return [geometry]
-    return [line for part in getattr(geometry, "geoms", ()) for line in _lines(part)]
-
-
-def _points(geometry) -> list[Point]:
-    if geometry is None or geometry.is_empty:
-        return []
-    if isinstance(geometry, Point):
-        return [geometry]
-    return [point for part in getattr(geometry, "geoms", ()) for point in _points(part)]
-
-
-def _polygonal(geometry) -> Polygon | MultiPolygon | None:
-    parts = [
-        polygon
-        for part in getattr(geometry, "geoms", [geometry])
-        for polygon in getattr(part, "geoms", [part])
-        if isinstance(polygon, Polygon) and not polygon.is_empty
-    ]
-    if not parts:
-        return None
-    return parts[0] if len(parts) == 1 else MultiPolygon(parts)
-
-
-def _endpoints(geometry) -> list[Point]:
-    return [Point(line.coords[i]) for line in _lines(geometry) for i in (0, -1)]
-
-
-def _pieces_inside(line, polygon, tolerance: float) -> list[LineString]:
-    """Axis pieces genuinely inside ``polygon``.
-
-    A tangent contact yields a point and a run along the boundary has its
-    midpoint on the boundary: neither is a piece of this footprint's axis.
-    """
-    return [
-        piece
-        for piece in _lines(line.intersection(polygon))
-        if piece.length > tolerance and polygon.contains(piece.interpolate(0.5, normalized=True))
-    ]
-
-
-def _simple_axes(pieces: Iterable[LineString]) -> list[LineString]:
-    """Join contiguous pieces (degree-2 nodes only, junctions stay split);
-    never emit a self-intersecting line."""
-    merged = _lines(linemerge(list(pieces)))
-    out: list[LineString] = []
-    for line in merged:
-        out.extend([line] if line.is_simple else _lines(shapely.node(line)))
-    return out
-
-
-def _self_crossings(line) -> list[Point]:
-    """Points where a non-simple axis crosses itself (not its own ends)."""
-    if line.is_simple:
-        return []
-    ends = {(p.x, p.y) for p in _endpoints(line)}
-    return [
-        p
-        for p in {(q.x, q.y): q for q in _endpoints(shapely.node(line))}.values()
-        if (p.x, p.y) not in ends
-    ]
-
-
-class _DisjointSets:
-    def __init__(self, size: int) -> None:
-        self.parent = list(range(size))
-
-    def find(self, item: int) -> int:
-        while self.parent[item] != item:
-            self.parent[item] = self.parent[self.parent[item]]
-            item = self.parent[item]
-        return item
-
-    def union(self, left: int, right: int) -> None:
-        self.parent[self.find(left)] = self.find(right)
-
-
-def _validate(
-    wbn,
-    wegsegment,
-    knw,
-    *,
-    wbn_fields,
-    knw_type_field,
-    axis_fields,
-    coverage_bounds,
-    numbers,
-):
+def _validate(wbn, wegsegment, knw, *, wbn_fields, knw_type_field, axis_fields):
     if any(frame.crs is None or frame.crs.to_epsg() != 31370 for frame in (wbn, wegsegment, knw)):
         raise ValueError("GRB_CROSSINGS_CRS_INVALID: EPSG:31370 required on every layer")
-    if (
-        len(coverage_bounds) != 4
-        or not all(math.isfinite(v) for v in coverage_bounds)
-        or coverage_bounds[0] >= coverage_bounds[2]
-        or coverage_bounds[1] >= coverage_bounds[3]
-    ):
-        raise ValueError("GRB_CROSSINGS_EXTENT_INVALID: ordered finite EPSG:31370 bounds required")
-    if any(not math.isfinite(v) or v < 0 for v in numbers.values()) or not (
-        numbers["exclusion_buffer_m"] > 0
-    ):
-        raise ValueError(
-            "GRB_CROSSINGS_TOLERANCE_INVALID: nonnegative finite tolerances and a positive "
-            "exclusion buffer required"
-        )
     for frame, fields in [(wbn, wbn_fields), (wegsegment, axis_fields), (knw, (knw_type_field,))]:
-        missing = [field for field in fields if field not in frame]
+        missing = [name for name in fields if name not in frame]
         if missing:
             raise ValueError(f"GRB_CROSSINGS_FIELD_MISSING: {missing}")
     for frame, allowed in [
@@ -245,9 +139,20 @@ def _validate(
             raise ValueError(
                 "GRB_CROSSINGS_GEOMETRY_INVALID: repair source geometries explicitly first"
             )
-    for frame, field in [(wbn, wbn_fields[0]), (wegsegment, axis_fields[0])]:
-        if _nonempty_id_column(frame, field, "GRB_CROSSINGS_ID_INVALID").duplicated().any():
+    for frame, name in [(wbn, wbn_fields[0]), (wegsegment, axis_fields[0])]:
+        if _nonempty_id_column(frame, name, "GRB_CROSSINGS_ID_INVALID").duplicated().any():
             raise ValueError("GRB_CROSSINGS_ID_INVALID: unique nonempty IDs required")
+
+
+def _bounds_area(coverage_bounds):
+    if (
+        len(coverage_bounds) != 4
+        or not all(math.isfinite(v) for v in coverage_bounds)
+        or coverage_bounds[0] >= coverage_bounds[2]
+        or coverage_bounds[1] >= coverage_bounds[3]
+    ):
+        raise ValueError("GRB_CROSSINGS_EXTENT_INVALID: ordered finite EPSG:31370 bounds required")
+    return box(*coverage_bounds)
 
 
 def build_grb_road_crossings(
@@ -281,87 +186,47 @@ def build_grb_road_crossings(
     lists every area removed from coverage with its reason. Reported lengths and
     counts are measured inside ``coverage_bounds`` only.
     """
-    axis_fields = (axis_id, axis_status_field, axis_morphology_field)
     numbers = {
         "length_tolerance_m": length_tolerance_m,
         "area_tolerance_m2": area_tolerance_m2,
         "boundary_tolerance_m": boundary_tolerance_m,
         "exclusion_buffer_m": exclusion_buffer_m,
     }
+    area = _bounds_area(coverage_bounds)
+    validate_numbers("GRB_CROSSINGS", area, numbers)
     _validate(
         wbn,
         wegsegment,
         knw,
         wbn_fields=(wbn_id, wbn_type_field),
         knw_type_field=knw_type_field,
-        axis_fields=axis_fields,
-        coverage_bounds=coverage_bounds,
-        numbers=numbers,
+        axis_fields=(axis_id, axis_status_field, axis_morphology_field),
     )
-    crs = wbn.crs
-    bounds = box(*coverage_bounds)
-    inside_bounds = bounds.buffer(boundary_tolerance_m)
-    shapely.prepare(inside_bounds)
     complex_codes = frozenset(int(c) for c in complex_morf_codes)
-    exclusions: list[tuple[str, object]] = []
-
-    def exclude(reason, geometry):
-        exclusions.append((reason, geometry))
 
     # --- Axes ---------------------------------------------------------------
-    axis_ids = _nonempty_id_column(wegsegment, axis_id, "GRB_CROSSINGS_ID_INVALID").tolist()
     axis_morf = [_code(v) for v in wegsegment[axis_morphology_field]]
     axis_kind = []
     for morf, status in zip(axis_morf, (_code(v) for v in wegsegment[axis_status_field])):
         if morf in _NON_CARRIAGEWAY_MORF:
-            axis_kind.append(_NON_CARRIAGEWAY)
+            axis_kind.append(NON_CARRIAGEWAY)
         elif morf in _CARRIAGEWAY_MORF and status == _IN_SERVICE:
-            axis_kind.append(_CARRIAGEWAY)
+            axis_kind.append(CARRIAGEWAY)
         else:
-            axis_kind.append(_UNRESOLVED)
-    axis_geoms = list(wegsegment.geometry)
-    axis_tree = STRtree(axis_geoms)
-    # Axis pieces some unit accounts for (a row, or an excluded footprint);
-    # whatever drivable length is left over gets a coverage hole.
-    accounted: dict[int, list[LineString]] = {}
-
-    def pieces_by_kind(footprint):
-        found: dict[str, dict[int, list[LineString]]] = {
-            _CARRIAGEWAY: {},
-            _NON_CARRIAGEWAY: {},
-            _UNRESOLVED: {},
-        }
-        for j in sorted(int(i) for i in axis_tree.query(footprint)):
-            pieces = _pieces_inside(axis_geoms[j], footprint, length_tolerance_m)
-            if pieces:
-                found[axis_kind[j]][j] = pieces
-        return found
-
-    def account(found_kind):
-        for j, pieces in found_kind.items():
-            accounted.setdefault(j, []).extend(pieces)
-
-    rows: list[dict] = []
-
-    def add_row(road_id, structure, layer, source_ids, footprint, pieces, evidence):
-        axes = _simple_axes(line for j in sorted(pieces) for line in pieces[j])
-        morfs = sorted({axis_morf[j] for j in pieces if axis_morf[j] is not None})
-        rows.append(
-            {
-                "road_id": road_id,
-                "structure": structure,
-                "complex_crossing": any(m in complex_codes for m in morfs),
-                "structure_evidence": evidence,
-                "source": "GRB",
-                "source_layer": layer,
-                "source_ids": "+".join(source_ids),
-                "axis_ids": ",".join(sorted({axis_ids[j] for j in pieces})),
-                "morf_codes": ",".join(str(m) for m in morfs),
-                "geometry": footprint,
-                "axis": axes[0] if len(axes) == 1 else MultiLineString(axes),
-            }
-        )
-        account(pieces)
+            axis_kind.append(UNRESOLVED)
+    builder = CrossingsBuilder(
+        axis_ids=_nonempty_id_column(wegsegment, axis_id, "GRB_CROSSINGS_ID_INVALID").tolist(),
+        axis_geoms=list(wegsegment.geometry),
+        axis_kind=axis_kind,
+        axis_codes=["" if m is None else str(m) for m in axis_morf],
+        axis_complex=[m in complex_codes for m in axis_morf],
+        crs=wbn.crs,
+        coverage_area=area,
+        numbers=numbers,
+        source="GRB",
+        region="VL",
+    )
+    axis_ids, axis_geoms = builder.axis_ids, builder.axis_geoms
 
     # --- Structures (KNW 1/12), grouped when they touch ----------------------
     structure_codes = knw[knw_type_field].map(_code)
@@ -382,17 +247,7 @@ def build_grb_road_crossings(
             raise ValueError("GRB_CROSSINGS_ID_INVALID: unique nonempty IDs required")
         structure_ids = structure_column.tolist()
     structure_geoms = list(structures.geometry)
-    structure_tree = STRtree(structure_geoms)
-    groups = _DisjointSets(len(structure_geoms))
-    if structure_geoms:
-        left, right = structure_tree.query(
-            structure_geoms, predicate="dwithin", distance=boundary_tolerance_m
-        )
-        for a, b in zip(left, right):
-            groups.union(int(a), int(b))
-    members: dict[int, list[int]] = {}
-    for position in range(len(structure_geoms)):
-        members.setdefault(groups.find(position), []).append(position)
+    members = group_touching(structure_geoms, boundary_tolerance_m)
     structure_report = {
         "groups": len(members),
         "grade_separated": 0,
@@ -402,23 +257,22 @@ def build_grb_road_crossings(
         "with_unresolved_axes": 0,
     }
 
-    for positions in sorted(members.values(), key=lambda ps: sorted(structure_ids[p] for p in ps)):
+    for positions in sorted(members, key=lambda ps: sorted(structure_ids[p] for p in ps)):
         ids = sorted(structure_ids[p] for p in positions)
-        footprint = _polygonal(unary_union([structure_geoms[p] for p in positions]))
-        if not inside_bounds.contains(footprint):
-            exclude("footprint_crosses_bounds", footprint)
-        found = pieces_by_kind(footprint)
-        carriageway, unresolved = found[_CARRIAGEWAY], found[_UNRESOLVED]
+        footprint = polygonal(unary_union([structure_geoms[p] for p in positions]))
+        builder.check_bounds(footprint)
+        found = builder.by_kind(builder.pieces(footprint))
+        carriageway, unresolved = found[CARRIAGEWAY], found[UNRESOLVED]
         if unresolved:
-            exclude("structure_axes_unresolved", footprint)
-            account(unresolved)
+            builder.exclude("structure_axes_unresolved", footprint)
+            builder.account(unresolved)
         if not carriageway:
             structure_report["unresolved" if unresolved else "without_carriageway"] += 1
             continue
         if unresolved:
             structure_report["with_unresolved_axes"] += 1
         ends_inside = any(
-            footprint.contains(point) for j in carriageway for point in _endpoints(axis_geoms[j])
+            footprint.contains(point) for j in carriageway for point in endpoints(axis_geoms[j])
         )
         crossed: set[int] = set()
         pairs = []
@@ -426,7 +280,7 @@ def build_grb_road_crossings(
         for n, a in enumerate(ordered):
             for b in ordered[n + 1 :]:
                 meeting = unary_union(carriageway[a]).intersection(unary_union(carriageway[b]))
-                if any(footprint.contains(p) for p in _points(meeting)):
+                if any(footprint.contains(p) for p in points(meeting)):
                     crossed.update((a, b))
                     pairs.append(f"{axis_ids[a]}x{axis_ids[b]}")
         if ends_inside:
@@ -441,28 +295,22 @@ def build_grb_road_crossings(
         if reason is None:
             structure_report["grade_separated"] += 1
             evidence = "KNW " + "+".join(ids) + " node-less axis crossings " + ",".join(pairs)
-            add_row(road_id, "grade_separated", "KNW", ids, footprint, carriageway, evidence)
+            builder.add_row(
+                road_id, "grade_separated", "KNW", ids, footprint, carriageway, evidence
+            )
         else:
             counts = structure_report["unknown"]
             counts[reason] = counts.get(reason, 0) + 1
             evidence = f"KNW {'+'.join(ids)} {reason}"
-            add_row(road_id, "unknown", "KNW", ids, footprint, carriageway, evidence)
-            exclude(f"structure_{reason}", footprint)
+            builder.add_row(road_id, "unknown", "KNW", ids, footprint, carriageway, evidence)
+            builder.exclude(f"structure_{reason}", footprint)
 
     # --- WBN elements: trim, sort, then group the fragments of one carriageway -
     wbn_ids = _nonempty_id_column(wbn, wbn_id, "GRB_CROSSINGS_ID_INVALID").tolist()
     wbn_geoms = list(wbn.geometry)
     wbn_types = [_code(v) for v in wbn[wbn_type_field]]
-    # Only a node where exactly two axis ends meet merely carries a road on.
-    # Three or more ends make a junction even when not mapped as a
-    # kruispuntzone; a single end is a dead end, possibly another street
-    # reaching into this corridor. An element holding either, or whose TYPE is
-    # not a documented code, is never assumed a fragment.
-    degree = Counter((round(p.x, 3), round(p.y, 3)) for g in axis_geoms for p in _endpoints(g))
-    stop_nodes = [Point(xy) for xy, count in degree.items() if count != 2]
-    stop_tree = STRtree(stop_nodes)
     order = sorted(range(len(wbn_geoms)), key=lambda i: (len(wbn_ids[i]), wbn_ids[i]))
-    wbn_tree = STRtree(wbn_geoms)
+    wbn_tree, structure_tree = STRtree(wbn_geoms), STRtree(structure_geoms)
     claimed: set[int] = set()
     wbn_report = {
         "elements": len(wbn_geoms),
@@ -475,9 +323,7 @@ def build_grb_road_crossings(
         "overlap_trimmed": 0,
         "unrecognised_type": sum(t not in (_KRUISPUNTZONE, _WEGSEGMENT) for t in wbn_types),
     }
-    # element -> (trimmed footprint, carriageway axis positions, complex flag,
-    # whether it may be merged as a fragment)
-    ground: dict[int, tuple] = {}
+    ground: list[GroundElement] = []
     for i in order:
         footprint = wbn_geoms[i]
         # Structures take priority ("een wegbaanelement houdt op ter hoogte van een
@@ -492,164 +338,52 @@ def build_grb_road_crossings(
         claimed.add(i)
         if trimmed is not footprint:
             wbn_report["overlap_trimmed"] += 1
-            trimmed = _polygonal(trimmed)
+            trimmed = polygonal(trimmed)
             if trimmed is None or trimmed.area <= area_tolerance_m2:
                 continue
-        if not inside_bounds.contains(trimmed):
-            exclude("footprint_crosses_bounds", trimmed)
-        found = pieces_by_kind(trimmed)
-        if found[_UNRESOLVED]:
-            account(found[_UNRESOLVED])
-            if found[_CARRIAGEWAY]:
+        builder.check_bounds(trimmed)
+        found = builder.by_kind(builder.pieces(trimmed))
+        if found[UNRESOLVED]:
+            builder.account(found[UNRESOLVED])
+            if found[CARRIAGEWAY]:
                 # Ground either way: only a trench crossing the unresolved branch
                 # alone would go unseen, so only that branch's surroundings go.
-                for pieces in found[_UNRESOLVED].values():
-                    for piece in pieces:
-                        exclude("wbn_axes_unresolved", piece.buffer(exclusion_buffer_m))
+                builder.exclude_buffers("wbn_axes_unresolved", found[UNRESOLVED])
             else:
-                exclude("wbn_axes_unresolved", trimmed)
-        if found[_CARRIAGEWAY]:
+                builder.exclude("wbn_axes_unresolved", trimmed)
+        if found[CARRIAGEWAY]:
             wbn_report["ground_elements"] += 1
-            wbn_report["with_unresolved_axes"] += bool(found[_UNRESOLVED])
-            complex_flag = any(axis_morf[j] in complex_codes for j in found[_CARRIAGEWAY])
-            mergeable = wbn_types[i] == _WEGSEGMENT and not any(
-                trimmed.contains(stop_nodes[int(k)]) for k in stop_tree.query(trimmed)
+            wbn_report["with_unresolved_axes"] += bool(found[UNRESOLVED])
+            # A kruispuntzone, an element holding a junction or a dead end, or
+            # one whose TYPE is not a documented code is never a fragment.
+            mergeable = wbn_types[i] == _WEGSEGMENT and not builder.has_stop_node(trimmed)
+            ground.append(
+                GroundElement(
+                    wbn_ids[i],
+                    trimmed,
+                    found[CARRIAGEWAY],
+                    mergeable,
+                    (len(wbn_ids[i]), wbn_ids[i]),
+                )
             )
-            ground[i] = (trimmed, frozenset(found[_CARRIAGEWAY]), complex_flag, mergeable)
-        elif found[_UNRESOLVED]:
+        elif found[UNRESOLVED]:
             wbn_report["unresolved"] += 1
-        elif found[_NON_CARRIAGEWAY]:
+        elif found[NON_CARRIAGEWAY]:
             wbn_report["non_carriageway"] += 1
         else:
             wbn_report["without_axis"] += 1
-            exclude("wbn_without_axis", trimmed)
+            builder.exclude("wbn_without_axis", trimmed)
+    wbn_report["ground_units"] = builder.add_ground_units(ground, "GRB:WBN:", "WBN", "maaiveld")
 
-    elements = sorted(ground, key=lambda i: (len(wbn_ids[i]), wbn_ids[i]))
-    position = {i: n for n, i in enumerate(elements)}
-    fragments = _DisjointSets(len(elements))
-    if elements:
-        ground_geoms = [ground[i][0] for i in elements]
-        left, right = STRtree(ground_geoms).query(
-            ground_geoms, predicate="dwithin", distance=boundary_tolerance_m
-        )
-        for a, b in zip(left, right):
-            i, k = elements[int(a)], elements[int(b)]
-            if (
-                i < k
-                and ground[i][3]
-                and ground[k][3]
-                and ground[i][2] == ground[k][2]
-                and ground[i][1] & ground[k][1]
-            ):
-                fragments.union(position[i], position[k])
-    units: dict[int, list[int]] = {}
-    for i in elements:
-        units.setdefault(fragments.find(position[i]), []).append(i)
-    for unit in units.values():
-        ids = [wbn_ids[i] for i in unit]  # already in (len, id) order
-        footprint = _polygonal(unary_union([ground[i][0] for i in unit]))
-        # Clip the original axes against the united footprint, so a carriageway
-        # crossing a fragment boundary keeps one continuous axis.
-        found = pieces_by_kind(footprint)
-        wbn_report["ground_units"] += 1
-        add_row(
-            f"GRB:WBN:{ids[0]}",
-            "ground",
-            "WBN",
-            ids,
-            footprint,
-            found[_CARRIAGEWAY],
-            f"WBN {'+'.join(ids)} maaiveld",
-        )
-
-    # --- Drivable axes and level conflicts no unit vouches for ----------------
-    drivable = [j for j, kind in enumerate(axis_kind) if kind != _NON_CARRIAGEWAY]
-    unaccounted_length = 0.0
-    for j in drivable:
-        done = accounted.get(j)
-        rest = axis_geoms[j]
-        if done:
-            rest = rest.difference(unary_union(done).buffer(boundary_tolerance_m))
-        for piece in _lines(rest):
-            if piece.length > max(length_tolerance_m, boundary_tolerance_m):
-                unaccounted_length += piece.intersection(bounds).length
-                exclude("axis_without_unit", piece.buffer(exclusion_buffer_m))
-    structure_guard = (
-        unary_union(structure_geoms).buffer(boundary_tolerance_m) if structure_geoms else None
-    )
-    if structure_guard is not None:
-        shapely.prepare(structure_guard)
-    conflict_points: list[Point] = []
-    drivable_geoms = [axis_geoms[j] for j in drivable]
-    if drivable_geoms:
-        left, right = STRtree(drivable_geoms).query(drivable_geoms, predicate="crosses")
-        for a, b in zip(left, right):
-            if a >= b:
-                continue
-            nodes = _endpoints(drivable_geoms[a]) + _endpoints(drivable_geoms[b])
-            for point in _points(drivable_geoms[a].intersection(drivable_geoms[b])):
-                if not any(point.distance(node) <= length_tolerance_m for node in nodes):
-                    conflict_points.append(point)
-        for geometry in drivable_geoms:
-            conflict_points.extend(_self_crossings(geometry))
-    conflicts = 0
-    for point in conflict_points:
-        if structure_guard is not None and structure_guard.contains(point):
-            continue
-        conflicts += bounds.contains(point)
-        exclude("nodeless_crossing_outside_structure", point.buffer(exclusion_buffer_m))
-
-    # --- Assemble -----------------------------------------------------------
-    if rows:
-        table = pd.DataFrame(rows).sort_values("road_id", kind="stable").reset_index(drop=True)
-        crossings = gpd.GeoDataFrame(
-            table[list(_COLUMNS)], geometry=gpd.GeoSeries(table.geometry, crs=crs), crs=crs
-        )
-        crossings["axis"] = gpd.GeoSeries(table.axis, crs=crs, index=crossings.index)
-    else:
-        crossings = gpd.GeoDataFrame(
-            {
-                column: pd.Series(dtype=bool if column == "complex_crossing" else object)
-                for column in _COLUMNS
-            },
-            geometry=gpd.GeoSeries([], crs=crs),
-            crs=crs,
-        )
-        crossings["axis"] = gpd.GeoSeries([], crs=crs, index=crossings.index)
-    crossings["complex_crossing"] = crossings["complex_crossing"].astype(bool)
-
-    kept = [
-        (reason, area)
-        for reason, geometry in exclusions
-        if (area := _polygonal(geometry.intersection(bounds))) is not None
-    ]
-    excluded = gpd.GeoDataFrame(
-        {"reason": [reason for reason, _ in kept]},
-        geometry=gpd.GeoSeries([area for _, area in kept], crs=crs),
-        crs=crs,
-    )
-    covered = _polygonal(bounds.difference(unary_union([area for _, area in kept])))
-    coverage = gpd.GeoDataFrame(
-        {"source": ["GRB"], "region": ["VL"]},
-        geometry=gpd.GeoSeries([covered if covered is not None else Polygon()], crs=crs),
-        crs=crs,
-    )
-    by_reason = excluded.dissolve("reason").area.to_dict() if len(excluded) else {}
-    report = {
-        "rows": len(crossings),
-        "structure_counts": {
-            str(k): int(v) for k, v in crossings.structure.value_counts().to_dict().items()
+    crossings, coverage, excluded, report = builder.finish(structure_geoms)
+    report.update(
+        wbn=wbn_report,
+        structures=structure_report,
+        thresholds={**numbers, "complex_morf_codes": sorted(complex_codes)},
+        axis_classes={
+            "carriageway_morf": sorted(_CARRIAGEWAY_MORF),
+            "non_carriageway_morf": sorted(_NON_CARRIAGEWAY_MORF),
+            "carriageway_status": _IN_SERVICE,
         },
-        "complex_rows": int(crossings.complex_crossing.sum()),
-        "wbn": wbn_report,
-        "structures": structure_report,
-        "coverage": {
-            "bounds_area_m2": float(bounds.area),
-            "covered_area_m2": float(covered.area) if covered is not None else 0.0,
-            "excluded_area_m2_by_reason": {str(k): float(v) for k, v in by_reason.items()},
-        },
-        "axis_without_unit_m": float(unaccounted_length),
-        "nodeless_crossings_outside_structures": int(conflicts),
-        "thresholds": {**numbers, "complex_morf_codes": sorted(complex_codes)},
-    }
+    )
     return crossings, coverage, excluded, report

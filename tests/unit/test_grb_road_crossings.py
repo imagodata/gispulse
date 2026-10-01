@@ -139,6 +139,17 @@ def test_an_element_of_undocumented_type_is_never_merged():
     assert report["wbn"]["unrecognised_type"] == 1
 
 
+def test_an_axis_on_the_inner_boundary_of_merged_fragments_belongs_to_the_unit():
+    crossings, coverage, exclusions, _ = build(
+        wbn((1, box(0, 0, 10, 10)), (2, box(10, 0, 20, 10))),
+        # 8 leaves 9 at (10, 5) and runs exactly along the inner boundary x = 10.
+        axes((9, LineString([(0, 5), (20, 5)])), (8, LineString([(10, 5), (10, 10)]))),
+    )
+    (row,) = crossings.itertuples()
+    assert row.source_ids == "1+2" and row.axis_ids == "8,9"
+    assert exclusions.empty and covers(coverage, 10, 8)
+
+
 def test_fragments_are_not_grouped_across_categories():
     crossings, *_ = build(
         wbn((1, box(0, 0, 10, 10)), (2, box(10, 0, 20, 10))),
@@ -170,7 +181,7 @@ def test_reported_lengths_stop_at_the_bounds():
 
 @pytest.mark.parametrize(
     "morf, status",
-    [(-8, 4), (103, 3), (120, 4), (125, 4)],  # unknown, not in service, dienstweg, aardeweg
+    [(-8, 4), (103, 3), (120, 3)],  # unknown, carriageway or dienstweg not in service
 )
 def test_wbn_element_with_unresolved_axes_has_no_row_and_is_excluded(morf, status):
     crossings, coverage, exclusions, report = build(
@@ -187,7 +198,7 @@ def test_an_unresolved_branch_in_a_ground_element_is_kept_out_of_coverage():
     # branch would see no axis: the branch's surroundings leave coverage.
     crossings, coverage, exclusions, report = build(
         wbn((1, box(0, 0, 100, 10))),
-        axes((9, LineString([(0, 5), (100, 5)])), (7, LineString([(50, 5), (50, 10)]), 120)),
+        axes((9, LineString([(0, 5), (100, 5)])), (7, LineString([(50, 5), (50, 10)]), -8)),
     )
     row = by_id(crossings)["GRB:WBN:1"]
     assert row.structure == "ground" and row.axis_ids == "9"
@@ -195,6 +206,20 @@ def test_an_unresolved_branch_in_a_ground_element_is_kept_out_of_coverage():
     assert not covers(coverage, 50, 8)
     assert covers(coverage, 90, 5)  # the verdict does not depend on the branch
     assert report["wbn"]["with_unresolved_axes"] == 1
+
+
+def test_an_in_service_dienstweg_is_a_carriageway_and_an_aardeweg_is_not():
+    # Decided for costing: a service road is bored under like a road, an
+    # earthen track is trenched through.
+    crossings, coverage, exclusions, report = build(
+        wbn((1, box(0, 0, 10, 10)), (2, box(0, 20, 10, 30))),
+        axes((9, LineString([(0, 5), (10, 5)]), 120), (8, LineString([(0, 25), (10, 25)]), 125)),
+    )
+    assert list(crossings.road_id) == ["GRB:WBN:1"]
+    assert by_id(crossings)["GRB:WBN:1"].structure == "ground"
+    assert exclusions.empty and covers(coverage, 5, 25)
+    assert 120 in report["axis_classes"]["carriageway_morf"]
+    assert 125 in report["axis_classes"]["non_carriageway_morf"]
 
 
 def test_wbn_element_without_any_axis_has_no_row_and_is_excluded():
@@ -372,7 +397,7 @@ def test_an_unresolved_axis_on_a_structure_keeps_it_out_of_coverage():
     lines = axes(
         ("U", LineString([(-20, 5), (30, 5)])),
         ("L", LineString([(5, -20), (5, 30)])),
-        ("D", LineString([(8, -20), (8, 8)]), 120),  # a dienstweg ending on the deck
+        ("D", LineString([(8, -20), (8, 8)]), -8),  # an unknown way ending on the deck
     )
     crossings, coverage, exclusions, report = build(
         _corridors(), lines, knw((77, 1, box(0, 0, 10, 10)))
