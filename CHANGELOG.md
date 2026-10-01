@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`gispulse_src_osm.read_pbf_roads` works against real PBF extracts.** It
+  queried a `geom` column that DuckDB spatial's `ST_ReadOSM` never had (the
+  reader is raw: `kind, id, tags, refs, lat, lon, ...`), so every real call
+  failed with `OSM_PBF_READ_FAILED`. Way geometry is now rebuilt from node
+  coordinates (highway ways only, referenced nodes only, node order kept),
+  reprojected with `always_xy` so EPSG:4326 is not read as (lat, lon). Ways
+  with < 2 resolved nodes or zero length are dropped and counted in
+  `gdf.attrs["diagnostics"]` (plus a warning); duplicate ids, out-of-memory
+  and a missing spatial extension get dedicated error codes. Belgium (686 MB
+  PBF, 1.48 M ways): ~10 s and 2.0 GB peak process RSS; it also completes with
+  `GISPULSE_DUCKDB_MEMORY_LIMIT=1GB` (DuckDB's own budget — the RSS peak stays
+  ~2 GB). Output columns are unchanged (`id`, `highway`, requested tags as
+  string columns, LineString geometry).
+
 ## [2.4.0] - 2026-09-12
 
 ### Added
