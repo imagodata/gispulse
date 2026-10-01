@@ -94,3 +94,54 @@ to join on and must stay geometric and level-aware (nearest covering axis,
 filtered by matching relative `lvl` within the local neighbourhood) — this
 plugin does not perform that match, and any consumer building one must document
 it as a geometric approximation, not a sourced identity.
+
+## Road crossings: level evidence
+
+`python -m gispulse_src_urbis.prepare --bbox <EPSG:31370> --output <dir>
+--write` fetches the four layers and publishes them with
+`road_crossings.geoparquet`, `road_crossings_coverage.geoparquet` and
+`road_crossings_exclusions.geoparquet`. These are built by
+`build_urbis_road_crossings`
+(`src/gispulse/capabilities/vector/urbis_road_crossings.py`). The contract is
+the GRB one. Without `--write` the command is a dry run, and a defect in the
+level evidence degrades that artifact only.
+
+`LVL` is relative, so it never proves anything alone. The rules pair it with
+the official structure polygons (decision D5).
+
+| unit | structure |
+|---|---|
+| touching road bridges (`Bridges` `ROB`), every carriageway axis inside | `grade_separated` |
+| touching road tunnels (`Tunnels` `ROT`), the carriageway axes below `LVL` 0 inside | `grade_separated` |
+| carriageway surfaces (`StreetSurfaces` `S`, `I`, `C`, `SC`, `IC`) at `LVL` 0, with their `LVL` 0 axes only | `ground` |
+| a carriageway surface above 0 outside a road bridge, or below 0 outside any tunnel | excluded (`surface_level_without_structure`) |
+
+A road bridge takes priority over the surface it covers, as for the GRB and
+the PICC. A tunnel does not: the road above it stays ground and keeps only its
+own `LVL` 0 axis. Railway, metro and pedestrian bridges and tunnels (`RAB`,
+`MB`, `PB`, `RAT`, `MT`, …) leave the road under or above them at ground.
+
+Footprints are carriageway surfaces, not the corridor: UrbIS draws sidewalks
+and medians as separate surfaces with no axis. Axes are sorted by `TYPE`:
+- `S`, `I`, `B`, `T`, `C`, `SC` and `IC` are carriageways;
+- `PT`, `PB`, `MT` and `RT` are not;
+- ramps `A`/`AC`, galleries `G`, places `P`, parking `K` and anything else are
+  unresolved.
+
+`complex_crossing` is true for `HIERARCHY` `H`. Touching `S` surfaces sharing
+an axis are merged; an `I` intersection is never merged.
+
+Validated live on a 5 × 5 km tile, Brussels centre-east (5.4 s):
+
+| item | value |
+|---|---|
+| ground units (from 8 001 surfaces) | 7 774 |
+| `grade_separated` | 42 (20 road bridges, 22 road tunnels) |
+| `unknown` | 0 |
+| ground footprints overlapping | none |
+| coverage | 93.8 % |
+| level contradictions | 35 |
+
+The largest hole, 44.6 ha, is the 2 687 carriageway surfaces that no axis
+crosses. They are excluded because a crossing there would count zero without
+an error. The artifact loads in MILOU's `load_road_crossings`.

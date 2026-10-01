@@ -56,7 +56,11 @@ def _access(layer: int) -> AccessSpec:
             "where": "1=1",
             "outFields": "*",
             "outSR": "4326",
-            "returnZ": "true",
+            # XY only: projected server-side to WGS84 *with* Z, some surfaces
+            # come back self-intersecting (measured on Liège, OBJECTID
+            # 201373/201374) although the same features are valid in XY or in
+            # EPSG:31370. No consumer reads the Z ordinate; PRECIS_Z is kept.
+            "returnZ": "false",
             "returnGeometry": "true",
             "f": "geojson",
             "orderByFields": "OBJECTID ASC",

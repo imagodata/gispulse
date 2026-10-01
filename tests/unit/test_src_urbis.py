@@ -109,3 +109,82 @@ def test_counted_wfs_does_not_label_unreferenced_geojson_as_projected(monkeypatc
             UrbisSource().access_for("urbis-street-surfaces-bxl"),
             extent=(148000, 170000, 149000, 171000),
         )
+
+
+def _urbis_stub(monkeypatch, *, surface_ids=("S1",)):
+    from types import SimpleNamespace
+
+    import geopandas as gpd
+    from shapely.geometry import LineString, box
+
+    layers = {
+        "urbisvector:StreetSurfaces": gpd.GeoDataFrame(
+            {
+                "INSPIRE_ID": list(surface_ids),
+                "TYPE": ["S"] * len(surface_ids),
+                "LVL": [0] * len(surface_ids),
+            },
+            geometry=[box(0, 0, 10, 10)] * len(surface_ids),
+            crs=31370,
+        ),
+        "urbisvector:StreetAxes": gpd.GeoDataFrame(
+            {"INSPIRE_ID": ["A1"], "TYPE": ["S"], "LVL": [0], "HIERARCHY": ["DR"]},
+            geometry=[LineString([(0, 5), (10, 5)])],
+            crs=31370,
+        ),
+    }
+    empty = gpd.GeoDataFrame(geometry=gpd.GeoSeries([], crs=31370), crs=31370)
+
+    def fetch(self, access, extent):
+        data = layers.get(access.params["typename"], empty)
+        return SimpleNamespace(data=data.copy(), metadata={"complete": True})
+
+    monkeypatch.setattr(WfsFetcher, "fetch", fetch)
+
+
+def test_prepare_dry_run_has_no_network_or_files(monkeypatch, tmp_path):
+    from gispulse_src_urbis.prepare import prepare_urbis
+
+    monkeypatch.setattr(WfsFetcher, "fetch", lambda *a, **kw: pytest.fail("network in dry-run"))
+    report = prepare_urbis(bbox=(0, 0, 1, 1), output=tmp_path / "u")
+    assert report["status"] == "planned"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_prepare_publishes_raw_layers_and_road_crossings(monkeypatch, tmp_path):
+    import geopandas as gpd
+    from gispulse_src_urbis.prepare import prepare_urbis
+
+    _urbis_stub(monkeypatch)
+    output = tmp_path / "u"
+    report = prepare_urbis(bbox=(-5, -5, 15, 15), output=output, write=True)
+    assert report["status"] == "complete"
+    assert report["road_crossings"]["status"] == "prepared"
+    assert report["road_crossings"]["structure_counts"] == {"ground": 1}
+    crossings = gpd.read_parquet(output / "road_crossings.geoparquet")
+    assert list(crossings.road_id) == ["UrbIS:S1"]
+    assert crossings["axis"].crs == crossings.crs
+    assert "urbis-bridges-bxl.geoparquet" in report["sha256"]
+
+
+def test_prepare_degrades_only_the_crossings_on_a_data_defect(monkeypatch, tmp_path):
+    from gispulse_src_urbis.prepare import prepare_urbis
+
+    _urbis_stub(monkeypatch, surface_ids=("S1", "S1"))
+    output = tmp_path / "u"
+    report = prepare_urbis(bbox=(-5, -5, 15, 15), output=output, write=True)
+    assert report["road_crossings"]["status"] == "failed"
+    assert "URBIS_CROSSINGS_ID_INVALID" in report["road_crossings"]["error"]
+    assert (output / "urbis-street-surfaces-bxl.geoparquet").exists()
+    assert not (output / "road_crossings.geoparquet").exists()
+
+
+@pytest.mark.parametrize(
+    "kwargs, code",
+    [({"bbox": (1, 0, 0, 1)}, "EXTENT"), ({"crossing_exclusion_buffer_m": 0}, "TOLERANCE")],
+)
+def test_prepare_validates_before_network(tmp_path, kwargs, code):
+    from gispulse_src_urbis.prepare import prepare_urbis
+
+    with pytest.raises(ValueError, match=code):
+        prepare_urbis(**{"bbox": (0, 0, 1, 1), "output": tmp_path / "u", **kwargs})

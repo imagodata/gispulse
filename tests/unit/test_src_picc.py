@@ -32,6 +32,8 @@ def test_source_requests_geojson_wgs84_with_counted_pagination(entry, layer):
     assert access.protocol is AccessProtocol.REST_API
     assert access.endpoint.endswith(f"/MapServer/{layer}/query")
     assert access.params["outSR"] == "4326"
+    # Projected to WGS84 with Z, some real surfaces come back self-intersecting.
+    assert access.params["returnZ"] == "false"
     assert access.params["orderByFields"] == "OBJECTID ASC"
     assert access.params["pagination"]["count_query"]["returnCountOnly"] == "true"
     assert "NIVEAU" in source.schema(entry)
@@ -104,3 +106,74 @@ def test_export_validates_bounds_before_network(tmp_path):
     ]:
         with pytest.raises(ValueError, match=code):
             export_picc(**{"bbox": (4, 50, 5, 51), "output": tmp_path / "picc", **kwargs})
+
+
+def _picc_stub(monkeypatch, *, axis_ids=("A1",)):
+    """Serve one Tronçon surface crossed by one Communale axis, in WGS84."""
+    from types import SimpleNamespace
+
+    import geopandas as gpd
+    from shapely.geometry import LineString, box
+
+    surface = gpd.GeoDataFrame(
+        {"OBJECTID": [1], "GEOREF_ID": ["S1"], "NATUR_DESC": ["Tronçon"], "NIVEAU": [None]},
+        geometry=gpd.GeoSeries([box(150000, 150000, 150010, 150010)], crs=31370).to_crs(4326),
+        crs=4326,
+    )
+    axis = gpd.GeoDataFrame(
+        {
+            "OBJECTID": list(range(1, len(axis_ids) + 1)),
+            "GEOREF_ID": list(axis_ids),
+            "NATUR_DESC": ["Communale"] * len(axis_ids),
+            "NIVEAU": [None] * len(axis_ids),
+        },
+        geometry=gpd.GeoSeries(
+            [LineString([(150000, 150005), (150010, 150005)])] * len(axis_ids), crs=31370
+        ).to_crs(4326),
+        crs=4326,
+    )
+
+    def fetch(self, access, **kwargs):
+        data = surface if access.endpoint.endswith("/24/query") else axis
+        return SimpleNamespace(data=data.copy(), metadata={"complete": True})
+
+    monkeypatch.setattr(RestGeoJsonFetcher, "fetch", fetch)
+
+
+def test_export_publishes_road_crossings_next_to_the_raw_layers(monkeypatch, tmp_path):
+    import geopandas as gpd
+    from gispulse_src_picc.export import export_picc
+
+    from gispulse.persistence.io import read_geoparquet
+
+    _picc_stub(monkeypatch)
+    output = tmp_path / "picc"
+    report = export_picc(bbox=(4.7, 50.4, 4.8, 50.5), output=output, write=True)
+    assert report["road_crossings"]["status"] == "prepared"
+    assert report["road_crossings"]["structure_counts"] == {"ground": 1}
+    crossings = read_geoparquet(str(output / "road_crossings.geoparquet"))
+    assert list(crossings.road_id) == ["PICC:S1"]
+    assert crossings["axis"].crs == crossings.crs and crossings.crs.to_epsg() == 31370
+    coverage = gpd.read_parquet(output / "road_crossings_coverage.geoparquet")
+    assert coverage.crs.to_epsg() == 31370 and len(coverage) == 1
+    assert {"road_crossings", "road_crossings_coverage"} <= {e["entry"] for e in report["layers"]}
+
+
+def test_a_crossings_defect_degrades_only_the_crossings(monkeypatch, tmp_path):
+    from gispulse_src_picc.export import export_picc
+
+    _picc_stub(monkeypatch, axis_ids=("A1", "A1"))  # duplicate GEOREF_ID
+    output = tmp_path / "picc"
+    report = export_picc(bbox=(4.7, 50.4, 4.8, 50.5), output=output, write=True)
+    assert report["status"] == "complete"
+    assert report["road_crossings"]["status"] == "failed"
+    assert "PICC_CROSSINGS_ID_INVALID" in report["road_crossings"]["error"]
+    assert (output / "picc-road-surfaces-wa.geoparquet").exists()
+    assert not (output / "road_crossings.geoparquet").exists()
+
+
+def test_export_rejects_a_nonpositive_crossing_buffer_before_network(tmp_path):
+    from gispulse_src_picc.export import export_picc
+
+    with pytest.raises(ValueError, match="PICC_TOLERANCE_INVALID"):
+        export_picc(bbox=(4, 50, 5, 51), output=tmp_path / "p", crossing_exclusion_buffer_m=0)
