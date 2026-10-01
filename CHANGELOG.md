@@ -7,21 +7,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-10-01
+
+The source plugins below (PICC, UrbIS, GRB, and OSM for the fix) live in the
+repository (`plugins/`), not in the `gispulse` wheel. Install them from the
+release tag, e.g.
+`pip install "gispulse-src-grb @ git+https://github.com/imagodata/gispulse@v2.5.0#subdirectory=plugins/gispulse-src-grb"`.
+PICC, UrbIS and GRB now declare `gispulse>=2.5.0`, which they need.
+
+### Added
+
+- **Belgian regional road layers (#496).** New `gispulse-src-picc` plugin
+  (Wallonia — road footprints `picc-road-surfaces-wa` and axes
+  `picc-road-axes-wa`, PICC MapServer layers 24/21, bbox in WGS84, ArcGIS
+  offset pagination completed on `exceededTransferLimit`). New
+  `gispulse-src-urbis` plugin (Brussels — `urbis-street-surfaces-bxl`,
+  `urbis-street-axes-bxl`, `urbis-bridges-bxl`, `urbis-tunnels-bxl` over
+  counted WFS, bbox in EPSG:31370, `TYPE`/`LVL` kept as delivered, the
+  advertised projected CRS required). `gispulse-src-grb` adds WGO internal
+  boundaries (`grb-wegopdeling-vl`), Wegsegment axes (`grb-wegsegment-vl`),
+  Wegknoop nodes (`grb-wegknoop-vl`) and KNW structures (`grb-kunstwerk-vl`)
+  to its WBN and WGA layers. GRB and UrbIS layers come in EPSG:31370. PICC is
+  fetched in EPSG:4326; its export (`python -m gispulse_src_picc.export`,
+  dry-run by default, `--write` to fetch) reprojects both layers to
+  EPSG:31370 and writes a `report.json` with source counts and SHA256
+  checksums. Source attributes are kept as delivered: no ground level or
+  price is inferred.
+- **Counted, bounded pagination core.** `gispulse.adapters.rest.offset_pages`
+  (`OffsetPagination`, `collect_offset_pages`) and
+  `gispulse.adapters.ogc.counted_wfs`, opted into per source through new
+  `AccessSpec` params: `pagination` and `require_extent`, plus `bbox_param`
+  (REST) and `count_format`, `bbox_filter`, `geometry_field`, `native_crs`
+  (WFS). The server count is read before and after collection and must be an
+  exact integer; ids must be present and unique; malformed pages, truncated
+  collections and `page_size` / `max_pages` / `max_features` overruns fail.
+  No partial collection is ever returned. `SourceResult.metadata` reports
+  `page_count`, `expected_count`, `complete` and `consistency`.
+- **GRB face preparation and classification.** `python -m
+  gispulse_src_grb.prepare` (bbox in EPSG:31370, dry-run by default,
+  `--write` to fetch) stages the raw layers, partitions along WGO boundaries
+  the WBN corridors fully covered by the bbox, and publishes
+  `candidate_faces` and `partition_diagnostics` GeoParquet files plus a
+  `report.json` with SHA256 checksums. `classified_faces` is added when
+  classification succeeds; otherwise the report says
+  `classification.status = "failed"`. Each face is labelled from documented
+  Wegsegment codes (`STATUS`, `VERH`, `MORF`), never from geometry:
+  `carriageway_paved` (`MORF` 101–112 with `VERH` 1/12),
+  `carriageway_unpaved` (motor-traffic axis with `VERH=2`, or aardeweg
+  `MORF=125` with `VERH` 2/-8/-9/missing; dienstweg `MORF=120` with `VERH=2`
+  only under `--dienstweg-unpaved-evidence`, off by default), otherwise
+  `unmapped` with a named `classification_reason`; conflicting axes fail
+  closed (`axis_surface_conflict`). When it succeeds, KNW reconciliation adds
+  `structure_proximity` / `structure_evidence` as diagnostics only. The
+  bundle-level `ready_for_costing` stays `false`, and `carriageway_unpaved`
+  is not yet validated on real unpaved data. The building blocks are plain
+  functions (`partition_polygons`, `classify_grb_faces`,
+  `reconcile_knw_structures`, `validate_functional_faces`) in the
+  `gispulse.capabilities.vector.*` modules, not registered capabilities.
+
+### Changed
+
+- **Every GRB entry now goes through the counted WFS (#496),** including the
+  existing `grb-wegbaan-vl` and `grb-aanhorigheid-vl`. A fetch without a
+  bbox raises `WFS_EXTENT_REQUIRED` instead of downloading the whole layer;
+  the native `INTERSECTS` predicate replaces `BBOX`, with the same predicate
+  and `OIDN` sort for counts and pages; a response without a CRS is rejected
+  (`WFS_CRS_MISSING`); per-layer limits apply (2000 per page, 1000 pages,
+  1 000 000 features, `REST_FEATURE_LIMIT` beyond). On a core older than
+  2.5.0 every GRB entry raises `GRB_COUNTED_WFS_REQUIRED`.
+- **`grb-wegbaan-vl` is a road corridor, not a carriageway.** Its `kind`
+  changes from `carriageway` to `road_corridor`, since WBN covers the whole
+  corridor. `grb-aanhorigheid-vl` (WGA) is relabelled from shoulders
+  (*accotements*) to ancillary road structures.
+
 ### Fixed
 
-- **`gispulse_src_osm.read_pbf_roads` works against real PBF extracts.** It
+- **`gispulse_src_osm.read_pbf_roads` works against real PBF extracts (#499).** It
   queried a `geom` column that DuckDB spatial's `ST_ReadOSM` never had (the
   reader is raw: `kind, id, tags, refs, lat, lon, ...`), so every real call
   failed with `OSM_PBF_READ_FAILED`. Way geometry is now rebuilt from node
   coordinates (highway ways only, referenced nodes only, node order kept),
   reprojected with `always_xy` so EPSG:4326 is not read as (lat, lon). Ways
   with < 2 resolved nodes or zero length are dropped and counted in
-  `gdf.attrs["diagnostics"]` (plus a warning); duplicate ids, out-of-memory
-  and a missing spatial extension get dedicated error codes. Belgium (686 MB
+  `gdf.attrs["diagnostics"]` (plus a warning); ways missing some nodes are
+  kept, a straight segment bridging the gap, and listed in
+  `gdf.attrs["partially_resolved_ids"]`. Duplicate ids, out-of-memory and a
+  missing spatial extension get dedicated error codes. Belgium (686 MB
   PBF, 1.48 M ways): ~10 s and 2.0 GB peak process RSS; it also completes with
   `GISPULSE_DUCKDB_MEMORY_LIMIT=1GB` (DuckDB's own budget — the RSS peak stays
   ~2 GB). Output columns are unchanged (`id`, `highway`, requested tags as
-  string columns, LineString geometry).
+  string columns, LineString geometry); rows are sorted by `id`.
 
 ## [2.4.0] - 2026-09-12
 
@@ -959,7 +1034,8 @@ Hotfix release that unblocks the v1.3.0 distribution: `pipx install gispulse` no
 - Structured logging with sanitized outputs
 - Input validation and type safety across portal node system
 
-[Unreleased]: https://github.com/imagodata/gispulse/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/imagodata/gispulse/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/imagodata/gispulse/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/imagodata/gispulse/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/imagodata/gispulse/compare/v1.0.0...v2.3.0
 [1.0.0]: https://github.com/imagodata/gispulse/compare/v0.1.0...v1.0.0

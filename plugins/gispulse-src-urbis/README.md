@@ -6,7 +6,7 @@ Four raw layers from the official WFS:
 
 Endpoint: https://geoservices-vector.irisnet.be/geoserver/urbisvector/wfs
 
-The plugin requires this branch's counted WFS core. The request extent and output
+The plugin requires gispulse >= 2.5.0 (counted WFS core). The request extent and output
 are **EPSG:31370**, unlike PICC's WGS84 request extent. A missing or invalid bbox
 fails before HTTP. Counts (`numberMatched`) are checked before/after collection;
 IDs (`INSPIRE_ID`) must be unique and pagination is sorted by that field. Each
