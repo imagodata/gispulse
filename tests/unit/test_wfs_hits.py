@@ -5,7 +5,7 @@ import pytest
 
 from gispulse.adapters.ogc.counted_wfs import _get_wfs_hits
 from gispulse.adapters.ogc.wfs_fetcher import WfsFetcher
-from gispulse.core.plugin_model import AccessSpec, AccessProtocol
+from gispulse.core.plugin_model import AccessProtocol, AccessSpec
 
 
 def access():

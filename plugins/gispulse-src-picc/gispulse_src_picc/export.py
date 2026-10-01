@@ -8,7 +8,7 @@ import json
 import math
 import shutil
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from gispulse.adapters.rest.rest_fetcher import RestGeoJsonFetcher
@@ -102,9 +102,7 @@ def export_picc(
                     **result.metadata,
                 }
             )
-        report.update(
-            status="complete", layers=layers, fetched_at=datetime.now(timezone.utc).isoformat()
-        )
+        report.update(status="complete", layers=layers, fetched_at=datetime.now(UTC).isoformat())
         (staging / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         if output.exists():
             raise ValueError("PICC_OUTPUT_EXISTS: output appeared during extraction")
@@ -133,7 +131,7 @@ def main() -> int:
             max_pages=args.max_pages,
             max_features=args.max_features,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI boundary
         print(
             json.dumps(
                 {

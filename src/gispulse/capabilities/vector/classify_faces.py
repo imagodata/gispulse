@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import geopandas as gpd
 
-
 _ALLOWED = {"carriageway_paved", "carriageway_unpaved", "sidewalk", "unmapped"}
 # Every explicit class other than ``unmapped`` was decided by a documented
 # source code, so it is per-face classified. This per-face flag is a

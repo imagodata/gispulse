@@ -1,15 +1,18 @@
 """PICC source contract: real service IDs, bounded requests, raw source semantics."""
 
 from __future__ import annotations
+
 import sys
 from pathlib import Path
+
 import pytest
 
 _PKG = Path(__file__).resolve().parents[2] / "plugins" / "gispulse-src-picc"
 sys.path.insert(0, str(_PKG))
 from gispulse_src_picc.source import PiccSource
-from gispulse.core.plugin_model import AccessProtocol
+
 from gispulse.adapters.rest.rest_fetcher import RestGeoJsonFetcher
+from gispulse.core.plugin_model import AccessProtocol
 
 
 def test_plugin_manifest_and_entries():
@@ -63,9 +66,10 @@ def test_export_dry_run_has_no_network_or_files(monkeypatch, tmp_path):
 
 def test_export_failure_on_second_layer_publishes_nothing(monkeypatch, tmp_path):
     from types import SimpleNamespace
+
     import geopandas as gpd
-    from shapely.geometry import box
     from gispulse_src_picc.export import export_picc
+    from shapely.geometry import box
 
     calls = []
 

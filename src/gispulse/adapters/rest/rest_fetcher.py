@@ -23,7 +23,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 from gispulse.adapters.rest.offset_pages import OffsetPagination, collect_offset_pages
-from gispulse.adapters.rest.retry import RetrySpec, get_json_with_retry, sleep as _sleep
+from gispulse.adapters.rest.retry import RetrySpec, get_json_with_retry
+from gispulse.adapters.rest.retry import sleep as _sleep
 from gispulse.core.logging import get_logger
 from gispulse.core.plugin_model import (
     AccessProtocol,

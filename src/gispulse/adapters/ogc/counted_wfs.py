@@ -8,9 +8,9 @@ import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import urlencode
 
-from gispulse.adapters.rest.retry import RetrySpec, get_json_with_retry
 from gispulse.adapters.rest.offset_pages import OffsetPagination, collect_offset_pages
 from gispulse.adapters.rest.rest_fetcher import _get_geojson_with_retry
+from gispulse.adapters.rest.retry import RetrySpec, get_json_with_retry
 
 
 def _get_wfs_hits(url: str, timeout: float) -> dict:

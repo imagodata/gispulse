@@ -19,10 +19,10 @@ sys.path.insert(0, _PKG_PATH)
 for _module in ("gispulse_src_grb.source", "gispulse_src_grb"):
     sys.modules.pop(_module, None)
 
-from gispulse_src_grb.source import GrbSource  # noqa: E402
+from gispulse_src_grb.source import GrbSource
 
-from gispulse.core.plugin_model import AccessProtocol, Payload, SourceDomain  # noqa: E402
-from gispulse.core.sources import DataSource  # noqa: E402
+from gispulse.core.plugin_model import AccessProtocol, Payload, SourceDomain
+from gispulse.core.sources import DataSource
 
 pytestmark = pytest.mark.usefixtures("offline_ssrf")
 
@@ -84,6 +84,7 @@ def test_extended_grb_entries_preserve_specific_attributes(source):
 
 def test_grb_dry_run_has_no_side_effects(tmp_path, monkeypatch):
     from gispulse_src_grb.prepare import prepare_grb
+
     from gispulse.adapters.ogc.wfs_fetcher import WfsFetcher
 
     monkeypatch.setattr(WfsFetcher, "fetch", lambda *a, **k: pytest.fail("network in dry run"))
@@ -94,11 +95,13 @@ def test_grb_dry_run_has_no_side_effects(tmp_path, monkeypatch):
 
 
 def test_grb_failure_on_second_layer_never_publishes_prefix(tmp_path, monkeypatch):
-    from gispulse_src_grb.prepare import prepare_grb
-    from gispulse.adapters.ogc.wfs_fetcher import WfsFetcher
     from types import SimpleNamespace
+
     import geopandas as gpd
+    from gispulse_src_grb.prepare import prepare_grb
     from shapely.geometry import box
+
+    from gispulse.adapters.ogc.wfs_fetcher import WfsFetcher
 
     calls = []
 
@@ -158,9 +161,8 @@ def test_grb_bundle_publishes_a_separate_evidence_based_classification(tmp_path,
     import json
 
     import geopandas as gpd
-    from shapely.geometry import LineString
-
     from gispulse_src_grb.prepare import prepare_grb
+    from shapely.geometry import LineString
 
     # MORF=103: "weg bestaande uit één rijbaan" — a documented motor-traffic code.
     wegsegment = gpd.GeoDataFrame(
@@ -208,9 +210,8 @@ def test_grb_bundle_publishes_a_separate_evidence_based_classification(tmp_path,
 
 def test_grb_bundle_flags_faces_whose_corridor_touches_a_bridge(tmp_path, monkeypatch):
     import geopandas as gpd
-    from shapely.geometry import LineString, box
-
     from gispulse_src_grb.prepare import prepare_grb
+    from shapely.geometry import LineString, box
 
     wegsegment = gpd.GeoDataFrame(
         {"OIDN": [1], "WS_OIDN": ["9"], "VERH": [1], "STATUS": [4], "MORF": [103]},
@@ -239,9 +240,8 @@ def test_grb_bundle_never_labels_a_pedestrian_path_as_carriageway(tmp_path, monk
     cycling path, closed to other vehicles) STATUS=4 VERH=1 must not become
     carriageway_paved just because it is a paved, in-service axis."""
     import geopandas as gpd
-    from shapely.geometry import LineString
-
     from gispulse_src_grb.prepare import prepare_grb
+    from shapely.geometry import LineString
 
     pedestrian_path = gpd.GeoDataFrame(
         {"OIDN": [1], "WS_OIDN": ["9"], "VERH": [1], "STATUS": [4], "MORF": [114]},
@@ -263,9 +263,8 @@ def test_grb_bundle_keeps_explicitly_unpaved_axes_out_of_the_paved_class(tmp_pat
     published as carriageway_unpaved, never folded into carriageway_paved, and
     the bundle-level ready_for_costing stays false."""
     import geopandas as gpd
-    from shapely.geometry import LineString
-
     from gispulse_src_grb.prepare import prepare_grb
+    from shapely.geometry import LineString
 
     gravel_road = gpd.GeoDataFrame(
         {"OIDN": [1], "WS_OIDN": ["9"], "VERH": [2], "STATUS": [4], "MORF": [103]},
@@ -288,9 +287,8 @@ def test_grb_bundle_keeps_explicitly_unpaved_axes_out_of_the_paved_class(tmp_pat
 
 def test_grb_bundle_service_road_option_is_plumbed_and_recorded(tmp_path, monkeypatch):
     import geopandas as gpd
-    from shapely.geometry import LineString
-
     from gispulse_src_grb.prepare import prepare_grb
+    from shapely.geometry import LineString
 
     service_road = gpd.GeoDataFrame(
         {"OIDN": [1], "WS_OIDN": ["9"], "VERH": [2], "STATUS": [4], "MORF": [120]},
@@ -339,9 +337,8 @@ def test_grb_bundle_survives_a_broken_wegsegment_layer_and_degrades_classificati
 ):
     """A Wegsegment defect must not erase acquisition the raw layers already paid for."""
     import geopandas as gpd
-    from shapely.geometry import LineString
-
     from gispulse_src_grb.prepare import prepare_grb
+    from shapely.geometry import LineString
 
     # Missing VERH entirely: classify_grb_faces raises GRB_CLASSIFY_FIELD_MISSING.
     broken = gpd.GeoDataFrame(
@@ -372,9 +369,8 @@ def test_a_genuine_classifier_bug_is_never_relabelled_as_a_data_defect(tmp_path,
     entirely and must surface as a crash, not a data-defect report.
     """
     import geopandas as gpd
-    from shapely.geometry import LineString
-
     import gispulse_src_grb.prepare as prepare_module
+    from shapely.geometry import LineString
 
     wegsegment = gpd.GeoDataFrame(
         {"OIDN": [1], "WS_OIDN": ["9"], "VERH": [1], "STATUS": [4]},

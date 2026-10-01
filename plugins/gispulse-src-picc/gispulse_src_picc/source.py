@@ -6,7 +6,6 @@ matching of axes and footprints, and all client costing are separate concerns.
 
 from __future__ import annotations
 
-
 from gispulse.plugins.api import (
     AccessProtocol,
     AccessSpec,

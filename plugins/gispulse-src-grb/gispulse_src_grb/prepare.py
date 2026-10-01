@@ -266,7 +266,7 @@ def main() -> int:
             unsplit_max_width_m=args.unsplit_max_width_m,
             dienstweg_unpaved_evidence=args.dienstweg_unpaved_evidence,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI boundary
         print(
             json.dumps(
                 {

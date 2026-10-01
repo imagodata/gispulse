@@ -55,7 +55,7 @@ class OffsetPagination:
 
 def _count(payload: dict[str, Any], key: str) -> int:
     if not isinstance(payload, dict):
-        raise ValueError("REST_COUNT_INVALID: object payload required")
+        raise ValueError("REST_COUNT_INVALID: object payload required")  # noqa: TRY004
     count = payload.get(key)
     if "error" in payload or not isinstance(count, int) or isinstance(count, bool) or count < 0:
         raise ValueError("REST_COUNT_INVALID: nonnegative count required; inspect service error")
@@ -94,7 +94,7 @@ def collect_offset_pages(
         )
         pages += 1
         if not isinstance(payload, dict):
-            raise ValueError("REST_PAGE_INVALID: object payload required")
+            raise ValueError("REST_PAGE_INVALID: object payload required")  # noqa: TRY004
         page = payload.get("features")
         if (
             payload.get("type") != "FeatureCollection"
@@ -106,7 +106,9 @@ def collect_offset_pages(
             raise ValueError("REST_COUNT_CHANGED: response exceeds declared count or page size")
         for feature in page:
             if not isinstance(feature, dict) or not isinstance(feature.get("properties"), dict):
-                raise ValueError("REST_FEATURE_INVALID: feature properties required")
+                raise ValueError(  # noqa: TRY004 - malformed upstream data, not a caller bug
+                    "REST_FEATURE_INVALID: feature properties required"
+                )
             identifier = feature["properties"].get(spec.id_field)
             if (
                 not isinstance(identifier, (str, int))

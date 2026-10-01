@@ -196,8 +196,8 @@ def reconcile_knw_structures(
     flagged = result.structure_proximity != _NONE
     unmatched_structures = len(structures) - len(matched_structure_positions)
     report = {
-        "input_faces": int(len(result)),
-        "knw_structures_considered": int(len(structures)),
+        "input_faces": len(result),
+        "knw_structures_considered": len(structures),
         "flagged_faces": int(flagged.sum()),
         "flagged_corridors": int(result.loc[flagged, polygon_id].astype(str).nunique()),
         # A structure counted above but absent here touches no WBN corridor

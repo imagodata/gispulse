@@ -10,6 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "plugins" / "gispulse-src-urbis"))
 from gispulse_src_urbis.source import UrbisSource
+
 from gispulse.adapters.ogc.wfs_fetcher import WfsFetcher
 
 

@@ -99,6 +99,7 @@ https://www.vlaanderen.be/digitaal-vlaanderen/onze-diensten-en-platformen/basisk
 from __future__ import annotations
 
 import math
+from itertools import pairwise
 
 import geopandas as gpd
 import pandas as pd
@@ -173,7 +174,7 @@ def _interior_length(line, polygon) -> float:
 def _segments(geometry):
     for part in getattr(geometry, "geoms", (geometry,)):
         coordinates = list(part.coords)
-        for start, end in zip(coordinates, coordinates[1:]):
+        for start, end in pairwise(coordinates):
             segment = LineString([start, end])
             if segment.length > 0:
                 yield segment
@@ -559,8 +560,8 @@ def classify_grb_faces(
     areas = result.geometry.area.groupby(result.functional_class).sum().to_dict()
     total_area = float(result.geometry.area.sum())
     report = {
-        "input_faces": int(len(result)),
-        "in_service_axes": int(len(in_service)),
+        "input_faces": len(result),
+        "in_service_axes": len(in_service),
         "classes": {name: int(counts.get(name, 0)) for name in _CLASSES},
         "class_ratios": {
             name: (int(counts.get(name, 0)) / len(result) if len(result) else 0.0)
