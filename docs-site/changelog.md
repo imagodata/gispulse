@@ -13,6 +13,37 @@ La source de vérité de ce fichier est [`CHANGELOG.md`](https://github.com/imag
 
 ---
 
+## [2.5.1] — 2026-10-01
+
+Les plugins source PICC et UrbIS passent en 0.2.0 et déclarent désormais `gispulse>=2.5.1` : leurs constructeurs de traversées sont livrés dans ce core. Les plugins vivent toujours dans le dépôt, pas dans le wheel ; installez-les depuis le tag de la release, par exemple `pip install "gispulse-src-picc @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-picc"`. Le code du plugin GRB est inchangé : son nouveau comportement vient du core.
+
+### Ajouté
+
+- **Preuve de niveau des traversées de voirie pour la Wallonie et Bruxelles (#502).** Mêmes fichiers et mêmes colonnes que l'artefact GRB de 2.5.0 (`road_crossings`, `road_crossings_coverage`, `road_crossings_exclusions`, EPSG:31370).
+  - **Wallonie :** `python -m gispulse_src_picc.export --write` publie aussi `road_crossings*.geoparquet` (`build_picc_road_crossings`).
+    - Les surfaces `Ouvrage d'art` à `NIVEAU` ≥ 1 (tabliers de pont) sont `grade_separated` ; le niveau est donné par la source.
+    - Les surfaces `Ouvrage d'art` à `NIVEAU` 0 sont `ground`, de même que les surfaces `Tronçon`, `Carrefour` et `Aire de repos` à `NIVEAU` 0 ou vide, par une lecture en monde clos de l'inventaire continu. Un `NIVEAU` illisible n'est jamais lu comme vide.
+    - Les tunnels (`NIVEAU` ≤ −1) sont `unknown` et sortent de la couverture : les axes PICC ne portent pas de niveau, on ne peut donc pas distinguer l'axe d'un tunnel d'une rue au-dessus.
+    - Tabliers et tunnels priment tous deux sur les surfaces au sol qu'ils recouvrent.
+  - **Bruxelles :** nouvelle commande `python -m gispulse_src_urbis.prepare` (à blanc par défaut, `--write` pour télécharger ; `build_urbis_road_crossings`).
+    - Les ponts routiers (`ROB`) sont `grade_separated`, de même que les tunnels routiers (`ROT`) avec les axes sous `LVL` 0 qu'ils contiennent.
+    - Les surfaces de chaussée à `LVL` 0 sont `ground`, avec leurs axes à `LVL` 0.
+    - Un niveau qu'aucun ouvrage n'explique sort de la couverture.
+  - Les deux commandes acceptent `--crossing-exclusion-buffer-m` (15 m par défaut). Si la construction échoue sur une erreur `PICC_CROSSINGS_*` / `URBIS_CROSSINGS_*`, le rapport indique `road_crossings.status = "failed"` et les couches brutes restent publiées ; toute autre erreur fait échouer la commande entière. Le `report.json` PICC gagne `crossing_exclusion_buffer_m`, `road_crossings` et des entrées dérivées dans `layers` (`derived: true`, sans clés de source ni de comptage).
+  - **Différences avec GRB, pour les consommateurs :** `morf_codes` contient les libellés de classe de route de la source (PICC `NATUR_DESC`, UrbIS `TYPE`/`HIERARCHY`), pas des codes `MORF` entiers ; `grade_separated` repose sur le niveau donné par la source (PICC `NIVEAU`, UrbIS `ROB`/`ROT`), pas sur le test GRB de croisement sans nœud ; ponts et tunnels sont groupés séparément, si bien qu'un pont au-dessus d'un tunnel donne deux lignes dont les emprises se recouvrent.
+  - **Limite connue (les trois régions) :** le polygone de couverture n'est pas découpé au territoire de la source ; la partie d'une emprise hors de la Flandre, de la Wallonie ou de Bruxelles est donc déclarée couverte alors que la source n'y a pas de données.
+  - Les trois régions partagent désormais `road_crossings_common` (découpe des axes, fusion des fragments, comptabilité de la couverture, contrat de sortie). Les constructeurs sont de simples fonctions, pas des capabilities enregistrées.
+
+### Modifié
+
+- **Traversées GRB : un dienstweg `MORF` 120 en service (`STATUS` 4) est une chaussée, un aardeweg `MORF` 125 n'en est pas une (#502).** C'est une décision de chiffrage explicite, rapportée sous la nouvelle clé `road_crossings.axis_classes` du rapport. En 2.5.0, les deux étaient non résolus et sortaient de la couverture. En conséquence, les dienstwegen produisent désormais des lignes `ground` ; les éléments WBN et KNW qui ne portent que des aardewegen entrent dans la couverture sans ligne ; et un dienstweg qui se termine dans un ouvrage KNW le rend désormais `unknown` (il était `grade_separated`, mais hors couverture). Un 120 hors service reste non résolu.
+
+### Corrigé
+
+- **L'export PICC n'échoue plus sur des emprises réelles (#502).** La source demande désormais une géométrie XY seule (`returnZ=false`) : les couches PICC brutes sont donc en 2D. Projetées côté serveur en WGS84 avec Z, certaines surfaces revenaient auto-intersectées et `export_picc` levait `PICC_LAYER_INVALID` (mesuré sur une tuile de 6 × 6 km à Liège).
+
+---
+
 ## [2.5.0] — 2026-10-01
 
 Les plugins source ci-dessous (PICC, UrbIS, GRB, et OSM pour le correctif) vivent dans le dépôt (`plugins/`), pas dans le wheel `gispulse`. Installez-les depuis le tag de la release, par exemple `pip install "gispulse-src-grb @ git+https://github.com/imagodata/gispulse@v2.5.0#subdirectory=plugins/gispulse-src-grb"`. PICC, UrbIS et GRB déclarent désormais `gispulse>=2.5.0`, dont ils ont besoin.

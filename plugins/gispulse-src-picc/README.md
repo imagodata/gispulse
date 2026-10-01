@@ -1,8 +1,8 @@
 # PICC Wallonia vector source
 
 Provides raw road footprints (`picc-road-surfaces-wa`, layer 24) and axes
-(`picc-road-axes-wa`, layer 21). Requires gispulse >= 2.5.0 (counted pagination
-core); older cores fail before HTTP access.
+(`picc-road-axes-wa`, layer 21). Requires gispulse >= 2.5.1 (counted pagination
+core, PICC road crossings); older cores fail before HTTP access.
 
 Official services:
 - https://geoservices.wallonie.be/arcgis/rest/services/TOPOGRAPHIE/PICC_VDIFF/MapServer/24
