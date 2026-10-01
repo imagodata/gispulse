@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Road-crossings level evidence for Wallonia and Brussels.**
+  - **Wallonia:** `export_picc` now also publishes `road_crossings*.geoparquet`
+    (`build_picc_road_crossings`).
+    - `Ouvrage d'art` surfaces at `NIVEAU` ≥ 1 (bridge decks) are
+      `grade_separated`; the level is stated by the source.
+    - `NIVEAU` 0 surfaces are `ground`, and so are `Tronçon`/`Carrefour`
+      surfaces with an empty `NIVEAU`, by a closed-world reading of the
+      continuous inventory. An unreadable `NIVEAU` is never read as empty.
+    - Tunnels (`NIVEAU` ≤ −1) are `unknown` and leave coverage: PICC axes carry
+      no level, so a tunnel's axis cannot be told from a street above it.
+    - Decks and tunnels both take priority over the ground surfaces they
+      cover.
+  - **Brussels:** new `gispulse_src_urbis.prepare` command
+    (`build_urbis_road_crossings`).
+    - Road bridges (`ROB`) are `grade_separated`, and so are road tunnels
+      (`ROT`) with the axes below `LVL` 0 inside them.
+    - Carriageway surfaces at `LVL` 0 are `ground`, with their `LVL` 0 axes.
+    - A level that no structure explains leaves coverage.
+  - All three regions now share `road_crossings_common` (axis clipping,
+    fragment merging, coverage accounting, output contract).
+- **GRB road crossings: `MORF` 120 dienstweg is a carriageway, 125 aardeweg
+  is not** (explicit costing decision, reported under `axis_classes`).
+  In 2.5.0 both were unresolved and left out of coverage.
+
+### Fixed
+
+- **PICC export no longer fails on real extents.** The source now requests
+  XY-only geometry (`returnZ=false`). Projected server-side to WGS84 with Z,
+  some surfaces came back self-intersecting, and `export_picc` raised
+  `PICC_LAYER_INVALID` (measured on a 6 × 6 km tile at Liège).
+
 ## [2.5.0] - 2026-10-01
 
 The source plugins below (PICC, UrbIS, GRB, and OSM for the fix) live in the

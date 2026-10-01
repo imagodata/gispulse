@@ -535,11 +535,13 @@ WBN, Wegsegment and KNW directly, never the classification):
   coverage, with its reason.
 
 Axes are sorted by `MORF`/`STATUS` only. In-service (`STATUS` 4) 101–112
-are carriageways (the classification's gate). 113 voetgangerszone, 114
-wandel- of fietsweg, 116 tramweg and 130 veer, documented as closed to
-general motor traffic, are not. Everything else — 120 dienstweg and 125
-aardeweg (bare labels in the domain), −8, a carriageway not in service — is
-**unresolved**.
+(the classification's gate) and 120 dienstweg are carriageways. 113
+voetgangerszone, 114 wandel- of fietsweg, 116 tramweg, 125 aardeweg and 130
+veer are not. Everything else — −8, a carriageway not in service — is
+**unresolved**. 120 and 125 are bare labels in the domain; classing them is a
+costing-side decision, taken explicitly (a service road is bored under like a
+road, an earthen track is trenched through) and listed in the report under
+`axis_classes`.
 
 **`ground` comes from a WBN element, never from a default.** The
 objectenhandboek page *wegbaan*: "enkel de aan het maaiveld zichtbare
@@ -596,19 +598,19 @@ row. Footprints are never claimed twice: structures take priority over WBN
 WBN `OIDN`.
 
 **Validated live** on three bboxes (Gand 5.5 × 6.5 km, two 6 × 6 km tiles
-near Oudenaarde and Leuven), 1.4–2.0 s each, with 9, 2 and 5 merged
+near Oudenaarde and Leuven), 1.2–2.5 s each, with 9, 2 and 5 merged
 units:
 
 | bbox | ground units (elements) | grade_separated | unknown: single / ends inside / not crossed | ground elements with an unresolved axis + unresolved-only elements | drivable axis without unit | coverage |
 |---|---|---|---|---|---|---|
-| Gand | 2 405 (2 414) | 21 | 8 / 7 / 3 | 87 + 19 | 61.1 km | 93.3 % |
-| Oudenaarde | 1 793 (1 795) | 6 | 11 / 3 / 2 | 33 + 2 | 35.9 km | 96.3 % |
-| Leuven | 1 790 (1 795) | 8 | 12 / 4 / 0 | 146 + 19 | 87.2 km | 91.4 % |
+| Gand | 2 408 (2 417) | 21 | 8 / 7 / 3 | 1 + 0 | 31.8 km | 96.1 % |
+| Oudenaarde | 1 793 (1 795) | 6 | 11 / 3 / 2 | 0 + 0 | 23.6 km | 97.4 % |
+| Leuven | 1 790 (1 795) | 8 | 12 / 4 / 0 | 0 + 0 | 35.4 km | 96.2 % |
 
 No WBN element overlaps a KNW 1/12 polygon and no two WBN elements overlap
 (above 0.01 m²); every axis is simple. Most axes without a unit are local
 access roads the GRB maps with no WBN (in Gand, 57 of 85 sampled were
-private) and aardewegen.
+private).
 
 **Known limits.**
 

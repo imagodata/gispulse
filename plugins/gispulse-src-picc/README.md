@@ -83,3 +83,75 @@ relation table (or an equivalent channel) becomes reachable, any axis-to-
 footprint association is necessarily geometric (nearest/covering match), which
 is an approximation this plugin does not perform and which any consumer must
 label as such, not as an official-contract match.
+
+## Road crossings: level evidence
+
+`export_picc` also publishes `road_crossings.geoparquet`,
+`road_crossings_coverage.geoparquet` and `road_crossings_exclusions.geoparquet`,
+built by `build_picc_road_crossings`
+(`src/gispulse/capabilities/vector/picc_road_crossings.py`). The contract is
+the GRB one: one row per road unit, in EPSG:31370, with the footprint, an
+`axis` column, `road_id`, `structure`, `complex_crossing` and provenance. A
+defect in the level evidence degrades that artifact only (`road_crossings:
+{"status": "failed"}`), never the raw layers.
+
+The rules rest on the absolute `NIVEAU` of `VOIRIE_SURFACE` documented above
+(decision D5).
+
+| surface | structure |
+|---|---|
+| `Ouvrage d'art`, `NIVEAU` ≥ 1, touching surfaces grouped | `grade_separated` (deck, stated level); takes priority over the ground under it |
+| `Ouvrage d'art`, `NIVEAU` ≤ −1, touching surfaces grouped | `unknown`, with every axis inside; takes priority over the ground above it; excluded from coverage |
+| `Ouvrage d'art`, `NIVEAU` 0 | `ground` (stated) |
+| `Tronçon`, `Carrefour`, `Aire de repos`, `NIVEAU` empty | `ground`, by a closed-world reading of the continuous inventory (every structure surface is an `Ouvrage d'art`) |
+| `NIVEAU` present but unreadable (`1,0`, `1.5`, text), an `Ouvrage d'art` with no `NIVEAU`, any other nature | excluded from coverage |
+
+Measured on Liège: the PICC draws a `NIVEAU` 0 surface under every deck (75
+overlaps with `+1` surfaces) and above every tunnel (60 with `−1`). The
+`Tronçon` surfaces overlap almost nothing.
+
+**Why tunnels are `unknown` although their level is stated.** Axes carry no
+level (`NIVEAU` is empty on layer 21) and no official link to their surface.
+Inside a tunnel footprint, the tunnel's axis cannot be told from a street
+passing above it.
+- Labelled `grade_separated`, the tunnel would hide that street: a crossing
+  there would count zero without an error.
+- Left to the ground surface above, the tunnel's axis would be bored as a
+  ground crossing. A first version did this, and an adversarial review
+  measured 674 m of tunnel axes carried by `ground` rows on Liège.
+
+`unknown` makes the consumer ask for proof instead. A deck has no such
+ambiguity, because it takes the ground under it out of the ground units.
+
+Axes are sorted by `NATUR_DESC`:
+- `Communale`, `Nationale`, `Autoroute` and `Ring` are carriageways;
+- `Piste cyclable`, `Chemin ou sentier` and `Sentier` are not (`Chemin ou
+  sentier` follows the decision taken for the GRB aardeweg);
+- anything else is unresolved.
+
+`complex_crossing` is true for `Autoroute`. Fragments are merged as for the
+GRB: touching `Tronçon` surfaces sharing an axis and with no junction or dead
+end inside are merged; a `Carrefour` is never merged. An empty layer may come
+back without its property columns.
+
+Validated live on a 6 × 6 km tile at Liège (`export_picc --write`, 4 s):
+
+| item | value |
+|---|---|
+| ground units (from 3 798 ground surfaces) | 3 755 |
+| bridges, `grade_separated` | 77 |
+| tunnels, `unknown` | 16 |
+| ground footprints overlapping | none |
+| `ground` axes inside a tunnel | none |
+| coverage | 98.7 % |
+| surfaces carrying no axis | 174 |
+| node-less axis crossings outside structures | 33 |
+
+The artifact loads in MILOU's `load_road_crossings`. Of the tile's 31 tracés,
+one now stops on `ROAD_CROSSING_LEVEL_UNKNOWN` at a tunnel, which is the
+intended behaviour.
+
+The source requests XY-only geometry (`returnZ=false`). Projected
+server-side to WGS84 *with* Z, two surfaces of that tile came back
+self-intersecting, although the same features are valid in XY or in
+EPSG:31370. The export used to fail on them (`PICC_LAYER_INVALID`).
