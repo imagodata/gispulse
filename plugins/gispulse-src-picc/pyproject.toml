@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gispulse-src-picc"
+version = "0.1.0"
+description = "PICC Wallonia road footprints and axes via counted REST pagination"
+requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+dependencies = ["gispulse>=2.3.0,<3.0.0"]
+
+[project.entry-points."gispulse.data_sources"]
+picc = "gispulse_src_picc:register"
+
+[tool.gispulse.plugin]
+kind = "source"
+protocol = ">=1.0,<2.0"
+domain = "base"
+jurisdiction = "BE"
+display_name = "PICC Wallonia — road footprints and axes"
