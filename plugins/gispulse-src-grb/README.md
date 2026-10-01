@@ -552,12 +552,13 @@ carriageway-only surface. Touching `wegsegment`-type elements sharing a
 carriageway axis and the same `complex_crossing` are fragments of one
 carriageway: one `road_id`, footprints united, the original axes clipped
 against the union so they stay continuous across arbitrary element cuts. A
-`kruispuntzone` (WBN `TYPE` 1), an element holding a node where three or
-more axis ends meet (a junction not mapped as a kruispuntzone — a side
-street, a parking entrance) and an element with an undocumented `TYPE` are
-never merged. On the three bboxes below, 13, 3 and 5 units are merged; the
-few carrying several street names are one carriageway whose left/right or
-municipal names differ.
+`kruispuntzone` (WBN `TYPE` 1), an element holding an axis end that is not a
+plain pass-through node — three or more ends (a junction not mapped as a
+kruispuntzone: a side street, a parking entrance) or a single one (a dead
+end, possibly another street reaching into the corridor) — and an element
+with an undocumented `TYPE` are never merged. Where such a rule blocks a
+genuine continuation, the boundary behaves element by element (a crossing
+very close to the cut is bored a little short).
 
 **`grade_separated` needs a level relation, not a bridge polygon.** Touching
 KNW `overbrugging` (1) / `tunnelmond` (12) polygons form one structure. It
@@ -595,12 +596,13 @@ row. Footprints are never claimed twice: structures take priority over WBN
 WBN `OIDN`.
 
 **Validated live** on three bboxes (Gand 5.5 × 6.5 km, two 6 × 6 km tiles
-near Oudenaarde and Leuven), 1.8–2.5 s each:
+near Oudenaarde and Leuven), 1.4–2.0 s each, with 9, 2 and 5 merged
+units:
 
 | bbox | ground units (elements) | grade_separated | unknown: single / ends inside / not crossed | ground elements with an unresolved axis + unresolved-only elements | drivable axis without unit | coverage |
 |---|---|---|---|---|---|---|
-| Gand | 2 401 (2 414) | 21 | 8 / 7 / 3 | 87 + 19 | 61.1 km | 93.3 % |
-| Oudenaarde | 1 791 (1 795) | 6 | 11 / 3 / 2 | 33 + 2 | 35.9 km | 96.3 % |
+| Gand | 2 405 (2 414) | 21 | 8 / 7 / 3 | 87 + 19 | 61.1 km | 93.3 % |
+| Oudenaarde | 1 793 (1 795) | 6 | 11 / 3 / 2 | 33 + 2 | 35.9 km | 96.3 % |
 | Leuven | 1 790 (1 795) | 8 | 12 / 4 / 0 | 146 + 19 | 87.2 km | 91.4 % |
 
 No WBN element overlaps a KNW 1/12 polygon and no two WBN elements overlap

@@ -21,9 +21,10 @@ Evidence rules:
   ``wegsegment``-type elements that share a carriageway axis (and the same
   category) are fragments of one carriageway: one ``road_id``, footprints
   united, axes joined. A ``kruispuntzone`` (WBN ``TYPE`` 1), an element
-  holding a node where three or more axis ends meet (a junction the GRB did not
-  map as a kruispuntzone), and an element with an undocumented ``TYPE`` always
-  stay units of their own. ``road_id`` is the unit's first WBN ``OIDN``: stable
+  holding an axis end that is not a plain pass-through node (where three or
+  more ends meet: a junction the GRB did not map as a kruispuntzone; a single
+  end: a dead end reaching into it), and an element with an undocumented
+  ``TYPE`` always stay units of their own. ``road_id`` is the unit's first WBN ``OIDN``: stable
   for a given acquisition, but a unit cut by the bounds of another acquisition
   can get another id — never concatenate bundles without deduplicating on
   ``source_ids``.
@@ -452,12 +453,14 @@ def build_grb_road_crossings(
     wbn_ids = _nonempty_id_column(wbn, wbn_id, "GRB_CROSSINGS_ID_INVALID").tolist()
     wbn_geoms = list(wbn.geometry)
     wbn_types = [_code(v) for v in wbn[wbn_type_field]]
-    # Where three or more axis ends meet, carriageways join: an element holding
-    # such a node is a junction even when not mapped as a kruispuntzone, and
-    # an element whose TYPE is not a documented code is never assumed a fragment.
+    # Only a node where exactly two axis ends meet merely carries a road on.
+    # Three or more ends make a junction even when not mapped as a
+    # kruispuntzone; a single end is a dead end, possibly another street
+    # reaching into this corridor. An element holding either, or whose TYPE is
+    # not a documented code, is never assumed a fragment.
     degree = Counter((round(p.x, 3), round(p.y, 3)) for g in axis_geoms for p in _endpoints(g))
-    junction_nodes = [Point(xy) for xy, count in degree.items() if count >= 3]
-    junction_tree = STRtree(junction_nodes)
+    stop_nodes = [Point(xy) for xy, count in degree.items() if count != 2]
+    stop_tree = STRtree(stop_nodes)
     order = sorted(range(len(wbn_geoms)), key=lambda i: (len(wbn_ids[i]), wbn_ids[i]))
     wbn_tree = STRtree(wbn_geoms)
     claimed: set[int] = set()
@@ -510,7 +513,7 @@ def build_grb_road_crossings(
             wbn_report["with_unresolved_axes"] += bool(found[_UNRESOLVED])
             complex_flag = any(axis_morf[j] in complex_codes for j in found[_CARRIAGEWAY])
             mergeable = wbn_types[i] == _WEGSEGMENT and not any(
-                trimmed.contains(junction_nodes[int(k)]) for k in junction_tree.query(trimmed)
+                trimmed.contains(stop_nodes[int(k)]) for k in stop_tree.query(trimmed)
             )
             ground[i] = (trimmed, frozenset(found[_CARRIAGEWAY]), complex_flag, mergeable)
         elif found[_UNRESOLVED]:

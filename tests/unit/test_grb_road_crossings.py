@@ -120,6 +120,16 @@ def test_an_element_holding_a_junction_node_is_never_merged():
     assert set(crossings.road_id) == {"GRB:WBN:1", "GRB:WBN:2"}
 
 
+def test_an_element_reached_by_a_dead_end_street_is_never_merged():
+    # Street 13 ends 3 m inside the main corridor without joining it: sharing
+    # that stub must not merge the two streets.
+    crossings, *_ = build(
+        wbn((1, box(0, 0, 30, 10)), (2, box(10, 10, 20, 30))),
+        axes((11, LineString([(0, 3), (30, 3)])), (13, LineString([(15, 7), (15, 30)]))),
+    )
+    assert set(crossings.road_id) == {"GRB:WBN:1", "GRB:WBN:2"}
+
+
 def test_an_element_of_undocumented_type_is_never_merged():
     crossings, _, _, report = build(
         wbn((1, box(0, 0, 10, 10), "kruispuntzone"), (2, box(10, 0, 20, 10))),

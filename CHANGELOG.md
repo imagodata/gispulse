@@ -21,9 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fragments of one carriageway share a `road_id` (never across a junction). `grade_separated` needs carriageway axes crossing without a node
   inside a KNW bridge/tunnel group, all of them taking part and none ending
   inside; any other structure is `unknown`. Coverage excludes `unknown`
-  footprints, unresolved axes (`MORF` 120, 125, −8, not in service) with the
-  structure or WBN element they would leave unproven, footprints leaving the
-  bbox, and a `crossing_exclusion_buffer_m`
+  footprints, structures and WBN elements left unproven by an unresolved axis
+  (`MORF` 120, 125, −8, not in service; only a buffer around it inside a
+  `ground` element), footprints leaving the bbox, and a `crossing_exclusion_buffer_m`
   (default 15 m) around drivable axes no unit accounts for and around
   node-less crossings outside structures. `complex_crossing` comes from
   `MORF` 101 autosnelweg.
