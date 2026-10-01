@@ -511,6 +511,128 @@ drillable at grade without a separate check. No KNW polygon in this bbox is
 typed `tunnel`
 (12), so that path is exercised only by the unit tests' synthetic geometry.
 
+## Road crossings: level evidence
+
+`build_grb_road_crossings`
+(`src/gispulse/capabilities/vector/grb_road_crossings.py`), wired into
+`prepare_grb`, publishes three files next to the classification (it reads
+WBN, Wegsegment and KNW directly, never the classification):
+
+- `road_crossings.geoparquet` — one row per physical road unit, EPSG:31370:
+
+  | column | content |
+  |---|---|
+  | geometry (active) | footprint, `Polygon`/`MultiPolygon` |
+  | `axis` | second geometry column, `LineString`/`MultiLineString`, clipped to the footprint |
+  | `road_id` | `GRB:WBN:<first OIDN>` or `GRB:KNW:<OIDN>+<OIDN>…` |
+  | `structure` | `ground`, `grade_separated` or `unknown` |
+  | `complex_crossing` | `MORF` in `complex_morf_codes` (default 101 autosnelweg) |
+  | `structure_evidence`, `source`, `source_layer`, `source_ids`, `axis_ids`, `morf_codes` | provenance |
+
+- `road_crossings_coverage.geoparquet` — one polygon: where the artifact is
+  complete;
+- `road_crossings_exclusions.geoparquet` — every area removed from that
+  coverage, with its reason.
+
+Axes are sorted by `MORF`/`STATUS` only. In-service (`STATUS` 4) 101–112
+are carriageways (the classification's gate). 113 voetgangerszone, 114
+wandel- of fietsweg, 116 tramweg and 130 veer, documented as closed to
+general motor traffic, are not. Everything else — 120 dienstweg and 125
+aardeweg (bare labels in the domain), −8, a carriageway not in service — is
+**unresolved**.
+
+**`ground` comes from a WBN element, never from a default.** The
+objectenhandboek page *wegbaan*: "enkel de aan het maaiveld zichtbare
+wegcorridor wordt opgenomen als wegbaan. Waar de wegcorridor ingetunneld is,
+op een overbrugging gelegen is of door een overbrugging wordt afgedekt, wordt
+geen wegbaan (Wbn) opgenomen." WBN elements carrying a carriageway axis are
+therefore positive evidence of a ground-level corridor. **The footprint is
+the whole WBN corridor** (sidewalks and verges inside it), not a
+carriageway-only surface. Touching `wegsegment`-type elements sharing a
+carriageway axis and the same `complex_crossing` are fragments of one
+carriageway: one `road_id`, footprints united, the original axes clipped
+against the union so they stay continuous across arbitrary element cuts. A
+`kruispuntzone` (WBN `TYPE` 1), an element holding an axis end that is not a
+plain pass-through node — three or more ends (a junction not mapped as a
+kruispuntzone: a side street, a parking entrance) or a single one (a dead
+end, possibly another street reaching into the corridor) — and an element
+with an undocumented `TYPE` are never merged. Where such a rule blocks a
+genuine continuation, the boundary behaves element by element (a crossing
+very close to the cut is bored a little short).
+
+**`grade_separated` needs a level relation, not a bridge polygon.** Touching
+KNW `overbrugging` (1) / `tunnelmond` (12) polygons form one structure. It
+is `grade_separated` when at least two carriageway axes cross inside it
+without a node, every such axis takes part in such a crossing, and none ends
+inside. The OSLO Wegenregister profile defines a Wegknoop as the object
+describing connectivity between two segments: axes crossing with no node are
+not connected there, and the KNW polygon documents the structure separating
+them. This is an **inference from two official facts**, not a stated rule
+(the Wegenregister `OngelijkgrondseKruising` relation states it directly
+and is not exposed by any WFS). Measured on a Gand sample: 91 of the 101
+node-less crossings of carriageway axes lie inside a KNW 1/12 polygon.
+
+**`unknown`**: any other structure carrying a carriageway axis —
+`single_axis` (a road over water, or under a railway bridge: KNW alone
+cannot tell which), `axis_ends_inside` (a junction or dead end on or under
+the structure), `axis_not_crossed`.
+
+**Coverage** starts from the bbox and excludes:
+
+| reason | what |
+|---|---|
+| `structure_<reason>` | every `unknown` footprint |
+| `structure_axes_unresolved` | every structure carrying an unresolved axis (it could change the verdict) |
+| `wbn_axes_unresolved` | a WBN element carrying only unresolved axes; inside a `ground` element, a buffer around the unresolved axis only (a trench crossing that axis alone would see none) |
+| `wbn_without_axis` | a WBN element with no axis at all |
+| `footprint_crosses_bounds` | every footprint leaving the bbox: axes entirely outside were never acquired, so its verdict cannot be trusted |
+| `axis_without_unit` | a `crossing_exclusion_buffer_m` buffer (default 15 m) around drivable axis length no unit accounts for: a road with no footprint (a private road the GRB did not capture, a tunnel body) or one lying exactly on a boundary |
+| `nodeless_crossing_outside_structure` | the same buffer around node-less crossings and self-crossings of drivable axes outside every structure: level evidence contradicting the ground rule |
+
+A structure with no drivable axis is no road and stays covered; a WBN
+element carrying only documented non-motor axes stays covered without a
+row. Footprints are never claimed twice: structures take priority over WBN
+("een wegbaanelement houdt op ter hoogte van een kunstwerk"), then the lower
+WBN `OIDN`.
+
+**Validated live** on three bboxes (Gand 5.5 × 6.5 km, two 6 × 6 km tiles
+near Oudenaarde and Leuven), 1.4–2.0 s each, with 9, 2 and 5 merged
+units:
+
+| bbox | ground units (elements) | grade_separated | unknown: single / ends inside / not crossed | ground elements with an unresolved axis + unresolved-only elements | drivable axis without unit | coverage |
+|---|---|---|---|---|---|---|
+| Gand | 2 405 (2 414) | 21 | 8 / 7 / 3 | 87 + 19 | 61.1 km | 93.3 % |
+| Oudenaarde | 1 793 (1 795) | 6 | 11 / 3 / 2 | 33 + 2 | 35.9 km | 96.3 % |
+| Leuven | 1 790 (1 795) | 8 | 12 / 4 / 0 | 146 + 19 | 87.2 km | 91.4 % |
+
+No WBN element overlaps a KNW 1/12 polygon and no two WBN elements overlap
+(above 0.01 m²); every axis is simple. Most axes without a unit are local
+access roads the GRB maps with no WBN (in Gand, 57 of 85 sampled were
+private) and aardewegen.
+
+**Known limits.**
+
+- KNW completeness: `ground` relies on the GRB not having missed a
+  structure; the node-less-crossing exclusion catches part of these.
+- Up/down is never resolved. `grade_separated` holds for an excavation that
+  follows one of the crossing roads through the structure; an excavation dug
+  at ground level under a deck, off any mapped road, would cross the lower
+  road there and is not represented. `single_axis` structures stay
+  `unknown` even when the road is plainly on the deck.
+- `complex_crossing` is per unit: a corridor carrying an autosnelweg and its
+  parallelweg is complex as a whole.
+- The footprint is the whole corridor. A consumer that bores "the full
+  length inside the footprint" over-bores a trench that runs *along* a road
+  inside its corridor and wavers across its axis: run against 25 real MILOU
+  tracés, that accounts for 36 such "crossings" totalling 7.35 km (up to
+  922 m). Telling a longitudinal run from a crossing belongs to the consumer.
+- `road_id` is stable for one acquisition only; bundles from different
+  bounds must be deduplicated on `source_ids`, never concatenated.
+- An axis piece ending within floating-point distance of a footprint
+  boundary, or at a self-crossing split, is a measure-zero consumer edge case.
+- The exclusion buffer has no source basis; it is an explicit, reported
+  parameter. Flanders only: PICC/UrbIS level evidence is not wired here.
+
 ## Validation
 
 2026-09-08, the Gand bbox above, page size 5: 52 WBN (11 pages), 139 WGO

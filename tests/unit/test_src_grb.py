@@ -141,7 +141,9 @@ def _grb_wfs_stub(monkeypatch, *, wegsegment, knw=None):
             pd.DataFrame({"OIDN": [], "TYPE": []}), geometry=gpd.GeoSeries([], crs=31370)
         )
     layers = {
-        "GRB:WBN": gpd.GeoDataFrame({"OIDN": [1]}, geometry=[box(0, 0, 10, 10)], crs=31370),
+        "GRB:WBN": gpd.GeoDataFrame(
+            {"OIDN": [1], "TYPE": [2]}, geometry=[box(0, 0, 10, 10)], crs=31370
+        ),
         "GRB:WGO": gpd.GeoDataFrame(
             {"OIDN": [1], "TYPE": [1]}, geometry=[LineString([(0, 8), (10, 8)])], crs=31370
         ),
@@ -357,6 +359,10 @@ def test_grb_bundle_survives_a_broken_wegsegment_layer_and_degrades_classificati
     assert (output / "partition_diagnostics.geoparquet").exists()
     assert (output / "grb-wegsegment-vl.geoparquet").exists()
     assert not (output / "classified_faces.geoparquet").exists()
+    # The same defect (no MORF either) degrades road crossings the same way.
+    assert report["road_crossings"]["status"] == "failed"
+    assert "GRB_CROSSINGS_FIELD_MISSING" in report["road_crossings"]["error"]
+    assert not (output / "road_crossings.geoparquet").exists()
 
 
 def test_a_genuine_classifier_bug_is_never_relabelled_as_a_data_defect(tmp_path, monkeypatch):
@@ -394,3 +400,43 @@ def test_a_genuine_classifier_bug_is_never_relabelled_as_a_data_defect(tmp_path,
     output = tmp_path / "bundle"
     with pytest.raises(ValueError, match="GRB_FUNCTION_CLASS_UNKNOWN"):
         prepare_module.prepare_grb(bbox=(-1, -1, 11, 11), output=output, write=True)
+
+
+def test_grb_bundle_publishes_road_crossings_with_a_separate_coverage(tmp_path, monkeypatch):
+    import geopandas as gpd
+    from gispulse_src_grb.prepare import prepare_grb
+    from shapely.geometry import LineString, Point
+
+    from gispulse.persistence.io import read_geoparquet
+
+    road = gpd.GeoDataFrame(
+        {"OIDN": [1], "WS_OIDN": ["9"], "VERH": [1], "STATUS": [4], "MORF": [103]},
+        geometry=[LineString([(0, 4), (10, 4)])],
+        crs=31370,
+    )
+    _grb_wfs_stub(monkeypatch, wegsegment=road)
+    output = tmp_path / "bundle"
+    report = prepare_grb(bbox=(-1, -1, 11, 11), output=output, write=True)
+
+    crossings_report = report["road_crossings"]
+    assert crossings_report["status"] == "prepared"
+    assert crossings_report["structure_counts"] == {"ground": 1}
+    assert crossings_report["thresholds"]["exclusion_buffer_m"] == 15.0
+    assert report["crossing_exclusion_buffer_m"] == 15.0
+    crossings = read_geoparquet(str(output / "road_crossings.geoparquet"))
+    assert list(crossings.road_id) == ["GRB:WBN:1"]
+    assert crossings["axis"].crs == crossings.crs and crossings.crs.to_epsg() == 31370
+    coverage = gpd.read_parquet(output / "road_crossings_coverage.geoparquet")
+    assert coverage.geometry.iloc[0].contains(Point(5, 4))
+    assert (output / "road_crossings_exclusions.geoparquet").exists()
+    assert {"road_crossings.geoparquet", "road_crossings_coverage.geoparquet"} <= set(
+        report["sha256"]
+    )
+
+
+def test_grb_plan_rejects_a_nonpositive_crossing_buffer_up_front(tmp_path):
+    from gispulse_src_grb.prepare import prepare_grb
+
+    with pytest.raises(ValueError, match="GRB_TOLERANCE_INVALID"):
+        prepare_grb(bbox=(0, 0, 1, 1), output=tmp_path / "b", crossing_exclusion_buffer_m=0)
+    assert list(tmp_path.iterdir()) == []

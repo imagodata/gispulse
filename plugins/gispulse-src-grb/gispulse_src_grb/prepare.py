@@ -15,6 +15,7 @@ from gispulse.adapters.ogc.wfs_fetcher import WfsFetcher
 from gispulse.adapters.rest.offset_pages import OffsetPagination
 from gispulse.capabilities.vector.classify_faces import validate_functional_faces
 from gispulse.capabilities.vector.classify_grb_faces import classify_grb_faces
+from gispulse.capabilities.vector.grb_road_crossings import build_grb_road_crossings
 from gispulse.capabilities.vector.polygon_partition import partition_polygons
 from gispulse.capabilities.vector.reconcile_knw_structures import reconcile_knw_structures
 from gispulse.core.io.geoparquet import write_geoparquet
@@ -28,8 +29,9 @@ _ENTRIES = (
     "grb-kunstwerk-vl",
 )
 
-# GeoJSON empties omit property schemas; the classification reads these codes.
+# GeoJSON empties omit property schemas; classification and crossings read these codes.
 _CLASSIFIED_FIELDS = {
+    "grb-wegbaan-vl": ("TYPE",),
     "grb-wegopdeling-vl": ("TYPE",),
     "grb-wegsegment-vl": ("WS_OIDN", "VERH", "STATUS", "MORF"),
     "grb-kunstwerk-vl": ("TYPE",),
@@ -51,12 +53,16 @@ def prepare_grb(
     axis_min_extent_m: float = 5.0,
     unsplit_max_width_m: float = 12.0,
     dienstweg_unpaved_evidence: bool = False,
+    crossing_exclusion_buffer_m: float = 15.0,
 ) -> dict:
     """Publish raw layers, unclassified candidate faces and an evidence-based classification.
 
     Tolerances account for numerical residuals only; no snapping or simplification.
     Limits apply per layer. The bbox is in the native EPSG:31370 CRS. The
     classification thresholds are explicit and recorded in the report.
+    ``crossing_exclusion_buffer_m`` is the half-width the road-crossings
+    coverage removes around a drivable axis with no footprint (see
+    ``grb_road_crossings``).
     """
     if (
         len(bbox) != 4
@@ -77,6 +83,8 @@ def prepare_grb(
         )
         or not math.isfinite(unsplit_max_width_m)
         or unsplit_max_width_m <= 0
+        or not math.isfinite(crossing_exclusion_buffer_m)
+        or crossing_exclusion_buffer_m <= 0
     ):
         raise ValueError("GRB_TOLERANCE_INVALID: nonnegative finite tolerances required")
     if not math.isfinite(axis_coverage_ratio_min) or not 0.0 <= axis_coverage_ratio_min <= 1.0:
@@ -109,6 +117,7 @@ def prepare_grb(
         "axis_min_extent_m": axis_min_extent_m,
         "unsplit_max_width_m": unsplit_max_width_m,
         "dienstweg_unpaved_evidence": dienstweg_unpaved_evidence,
+        "crossing_exclusion_buffer_m": crossing_exclusion_buffer_m,
         "ready_for_costing": False,
     }
     if not write:
@@ -153,6 +162,32 @@ def prepare_grb(
         write_geoparquet(
             diagnostics, str(staging / "partition_diagnostics.geoparquet"), compression="zstd"
         )
+        # Level evidence for road crossings reads WBN, Wegsegment and KNW
+        # directly, never the classification: a defect in one of them degrades
+        # this artifact alone, like the classification below.
+        try:
+            crossings, coverage, exclusions, crossings_report = build_grb_road_crossings(
+                frames["grb-wegbaan-vl"],
+                frames["grb-wegsegment-vl"],
+                frames["grb-kunstwerk-vl"],
+                coverage_bounds=bbox,
+                length_tolerance_m=length_tolerance_m,
+                area_tolerance_m2=area_tolerance_m2,
+                boundary_tolerance_m=boundary_tolerance_m,
+                exclusion_buffer_m=crossing_exclusion_buffer_m,
+            )
+        except ValueError as exc:
+            if not str(exc).startswith("GRB_CROSSINGS_"):
+                raise
+            crossings_report = {"status": "failed", "error": str(exc)}
+        else:
+            for name, frame in [
+                ("road_crossings", crossings),
+                ("road_crossings_coverage", coverage),
+                ("road_crossings_exclusions", exclusions),
+            ]:
+                write_geoparquet(frame, str(staging / f"{name}.geoparquet"), compression="zstd")
+            crossings_report = {"status": "prepared", **crossings_report}
         try:
             classified, classification = classify_grb_faces(
                 faces,
@@ -219,6 +254,7 @@ def prepare_grb(
             candidate_faces=len(faces),
             topology=diagnostics.status.value_counts().sort_index().to_dict(),
             classification=classification_report,
+            road_crossings=crossings_report,
         )
         (staging / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         if output.exists():
@@ -249,6 +285,7 @@ def main() -> int:
         action="store_true",
         help="also count MORF=120 (dienstweg) axes coded VERH=2 as unpaved evidence",
     )
+    parser.add_argument("--crossing-exclusion-buffer-m", type=float, default=15.0)
     args = parser.parse_args()
     try:
         report = prepare_grb(
@@ -265,6 +302,7 @@ def main() -> int:
             axis_min_extent_m=args.axis_min_extent_m,
             unsplit_max_width_m=args.unsplit_max_width_m,
             dienstweg_unpaved_evidence=args.dienstweg_unpaved_evidence,
+            crossing_exclusion_buffer_m=args.crossing_exclusion_buffer_m,
         )
     except Exception as exc:  # noqa: BLE001 - CLI boundary
         print(
