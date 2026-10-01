@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **GRB road-crossings level evidence (`build_grb_road_crossings`).**
+  `prepare_grb` now also publishes `road_crossings.geoparquet` (one row per
+  road unit, EPSG:31370: footprint, a second `axis` geometry column,
+  `road_id`, `structure` = `ground` / `grade_separated` / `unknown`,
+  `complex_crossing`, provenance), `road_crossings_coverage.geoparquet`
+  (where the artifact is complete) and `road_crossings_exclusions.geoparquet`
+  (every area left out of coverage, with its reason). `ground` comes only
+  from WBN elements — captured by the GRB only where the corridor is visible
+  at ground level — never as a default; the footprint is the whole corridor;
+  fragments of one carriageway share a `road_id` (never across a junction). `grade_separated` needs carriageway axes crossing without a node
+  inside a KNW bridge/tunnel group, all of them taking part and none ending
+  inside; any other structure is `unknown`. Coverage excludes `unknown`
+  footprints, unresolved axes (`MORF` 120, 125, −8, not in service) with the
+  structure or WBN element they would leave unproven, footprints leaving the
+  bbox, and a `crossing_exclusion_buffer_m`
+  (default 15 m) around drivable axes no unit accounts for and around
+  node-less crossings outside structures. `complex_crossing` comes from
+  `MORF` 101 autosnelweg.
+
 ### Fixed
 
 - **`gispulse_src_osm.read_pbf_roads` works against real PBF extracts.** It
