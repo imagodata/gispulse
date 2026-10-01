@@ -12,9 +12,17 @@ def frame(values):
 
 
 def test_explicit_classes_are_retained_and_reported():
-    result, report = validate_functional_faces(frame(["carriageway_paved", "sidewalk", None]))
-    assert result.functional_class.tolist() == ["carriageway_paved", "sidewalk", "unmapped"]
-    assert result.ready_for_costing.tolist() == [True, True, False]
+    result, report = validate_functional_faces(
+        frame(["carriageway_paved", "carriageway_unpaved", "sidewalk", None])
+    )
+    assert result.functional_class.tolist() == [
+        "carriageway_paved",
+        "carriageway_unpaved",
+        "sidewalk",
+        "unmapped",
+    ]
+    assert result.ready_for_costing.tolist() == [True, True, True, False]
+    assert report["classified_faces"] == 3 and report["unmapped_faces"] == 1
     assert report["inference"] is False
 
 

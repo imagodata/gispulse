@@ -1,3 +1,5 @@
+import math
+
 import geopandas as gpd
 import pandas as pd
 import pytest
@@ -97,12 +99,16 @@ def test_mixed_surface_code_still_counts_as_paved():
     assert at(result, 5, 4).functional_class == "carriageway_paved"
 
 
-def test_unpaved_surface_never_reaches_costing():
-    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 2, 4, AXIS)))
+def test_unpaved_motorized_axis_becomes_unpaved_carriageway_never_paved():
+    result, report = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 2, 4, AXIS)))
     carriageway = at(result, 5, 4)
-    assert carriageway.functional_class == "unmapped"
-    assert carriageway.classification_reason == "axis_surface_not_paved"
-    assert carriageway.classification_evidence == "101:VERH=2"
+    assert carriageway.functional_class == "carriageway_unpaved"
+    assert carriageway.classification_reason == "in_service_unpaved_axis"
+    # Unpaved verdicts cite MORF too: some rest on MORF alone.
+    assert carriageway.classification_evidence == "101:VERH=2:MORF=103"
+    assert carriageway.axis_coverage_ratio == pytest.approx(1.0)
+    assert report["classes"]["carriageway_unpaved"] == 1
+    assert report["classes"]["carriageway_paved"] == 0
 
 
 @pytest.mark.parametrize("verh", [-8, -9, None])
@@ -137,8 +143,8 @@ def test_contradictory_axis_surfaces_stay_unmapped_not_silently_paved():
     result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
     carriageway = at(result, 5, 4)
     assert carriageway.functional_class == "unmapped"
-    assert carriageway.classification_reason == "contradictory_axis_surface"
-    assert carriageway.classification_evidence == "101:VERH=1,102:VERH=2"
+    assert carriageway.classification_reason == "axis_surface_conflict"
+    assert carriageway.classification_evidence == "101:VERH=1:MORF=103,102:VERH=2:MORF=103"
 
 
 @pytest.mark.parametrize("status", [1, 2, 3, 5, -8, None])
@@ -386,7 +392,9 @@ def test_pedestrian_path_axis_never_becomes_carriageway_despite_paved_in_service
     assert face.classification_evidence == "101:VERH=1"
 
 
-@pytest.mark.parametrize("morf", [113, 116, 120, 125, 130])
+# 125 (aardeweg) is absent: coded VERH=1 it contradicts itself, see the
+# carriageway_unpaved section below.
+@pytest.mark.parametrize("morf", [113, 116, 120, 130])
 def test_other_non_motorized_morf_codes_never_become_carriageway(morf):
     result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 1, 4, morf, AXIS)))
     face = at(result, 5, 4)
@@ -437,3 +445,377 @@ def test_unsplit_corridor_width_guard_does_not_apply_to_partitioned_faces():
         faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 1, 4, AXIS)), unsplit_max_width_m=0.5
     )
     assert at(result, 5, 4).functional_class == "carriageway_paved"
+
+
+# --- carriageway_unpaved: explicit unpaved axis evidence, never geometry ---
+
+# MORF 125 = "aardeweg" (earthen track); MORF 120 = "dienstweg" (service road,
+# most of them coded VERH=1 on the live WFS).
+EARTHEN_MORF = 125
+SERVICE_MORF = 120
+SECOND_AXIS = LineString([(0, 5), (10, 5)])
+
+
+@pytest.mark.parametrize("verh", [2, -8, -9, None])
+def test_earthen_track_is_unpaved_evidence_whatever_its_unknown_or_unpaved_verh(verh):
+    result, _ = classify(
+        faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, verh, 4, EARTHEN_MORF, AXIS))
+    )
+    face = at(result, 5, 4)
+    assert face.functional_class == "carriageway_unpaved"
+    assert face.classification_reason == "in_service_unpaved_axis"
+    code = "unknown" if verh is None else verh
+    assert face.classification_evidence == f"101:VERH={code}:MORF=125"
+
+
+@pytest.mark.parametrize("verh", [1, 12])
+def test_earthen_track_coded_paved_contradicts_itself_and_stays_unmapped(verh):
+    result, _ = classify(
+        faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, verh, 4, EARTHEN_MORF, AXIS))
+    )
+    face = at(result, 5, 4)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_surface_conflict"
+    assert face.classification_evidence == f"101:VERH={verh}:MORF=125"
+
+
+@pytest.mark.parametrize(
+    "unpaved_axis",
+    [(102, 2, 4, CARRIAGEWAY_MORF, SECOND_AXIS), (102, -9, 4, EARTHEN_MORF, SECOND_AXIS)],
+)
+@pytest.mark.parametrize("paved_verh", [1, 12])
+def test_paved_and_unpaved_evidence_on_one_face_is_a_conflict(paved_verh, unpaved_axis):
+    axes = wegsegment((101, paved_verh, 4, AXIS), unpaved_axis)
+    result, report = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
+    face = at(result, 5, 4)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_surface_conflict"
+    assert face.classification_evidence.startswith(f"101:VERH={paved_verh}:MORF=103,102:")
+    assert report["classes"]["carriageway_paved"] == 0
+    assert report["classes"]["carriageway_unpaved"] == 0
+
+
+@pytest.mark.parametrize("unpaved_axis", [(101, 2, 4, AXIS), (101, -9, 4, EARTHEN_MORF, AXIS)])
+def test_a_motorized_axis_of_unknown_surface_blocks_an_unpaved_verdict(unpaved_axis):
+    # Unlike the paved class, the newer unpaved class does not let an unknown
+    # surface pass: that axis may be the face's own road.
+    axes = wegsegment(unpaved_axis, (102, -8, 4, SECOND_AXIS))
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
+    face = at(result, 5, 4)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_surface_unknown"
+    assert "102:VERH=-8:MORF=103" in face.classification_evidence
+
+
+def test_unpaved_non_motorized_path_is_not_an_unpaved_carriageway():
+    # A VERH=2 walking/cycling path is unpaved, but it is not a carriageway.
+    result, _ = classify(
+        faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 2, 4, PEDESTRIAN_MORF, AXIS))
+    )
+    face = at(result, 5, 4)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_not_motorized_carriageway"
+
+
+@pytest.mark.parametrize("verh", [2, -8, None])
+def test_service_road_is_not_unpaved_evidence_by_default(verh):
+    result, report = classify(
+        faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, verh, 4, SERVICE_MORF, AXIS))
+    )
+    face = at(result, 5, 4)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_not_motorized_carriageway"
+    assert report["options"] == {"dienstweg_unpaved_evidence": False}
+
+
+def test_opted_in_service_road_coded_unpaved_is_unpaved_evidence():
+    result, report = classify(
+        faces_of(WCZ_SPLIT),
+        wgo(WCZ_SPLIT),
+        wegsegment((101, 2, 4, SERVICE_MORF, AXIS)),
+        dienstweg_unpaved_evidence=True,
+    )
+    face = at(result, 5, 4)
+    assert face.functional_class == "carriageway_unpaved"
+    assert face.classification_reason == "in_service_unpaved_axis"
+    assert face.classification_evidence == "101:VERH=2:MORF=120"
+    assert report["options"] == {"dienstweg_unpaved_evidence": True}
+
+
+@pytest.mark.parametrize("verh", [1, 12, -8, -9, None, 0])
+def test_opted_in_service_road_is_never_assumed_unpaved(verh):
+    # Most dienstwegen are coded VERH=1 on the live WFS: the opt-in admits an
+    # explicitly unpaved one, it never makes an unknown or paved one unpaved.
+    result, _ = classify(
+        faces_of(WCZ_SPLIT),
+        wgo(WCZ_SPLIT),
+        wegsegment((101, verh, 4, SERVICE_MORF, AXIS)),
+        dienstweg_unpaved_evidence=True,
+    )
+    face = at(result, 5, 4)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_not_motorized_carriageway"
+
+
+def test_service_road_only_conflicts_with_a_paved_axis_when_opted_in():
+    axes = wegsegment((101, 1, 4, AXIS), (102, 2, 4, SERVICE_MORF, SECOND_AXIS))
+    default, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
+    assert at(default, 5, 4).functional_class == "carriageway_paved"
+    assert at(default, 5, 4).classification_evidence == "101:VERH=1"
+    opted, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes, dienstweg_unpaved_evidence=True)
+    assert at(opted, 5, 4).classification_reason == "axis_surface_conflict"
+
+
+@pytest.mark.parametrize("value", [1, "true", None])
+def test_dienstweg_option_must_be_a_real_bool(value):
+    # TypeError, not ValueError: callers degrade GRB_CLASSIFY_* ValueErrors as
+    # data defects, and a caller mistake must never be swallowed that way.
+    with pytest.raises(TypeError, match="GRB_CLASSIFY_OPTION_INVALID"):
+        classify(
+            faces_of(WCZ_SPLIT),
+            wgo(WCZ_SPLIT),
+            wegsegment((101, 1, 4, AXIS)),
+            dienstweg_unpaved_evidence=value,
+        )
+
+
+@pytest.mark.parametrize("status", [1, 2, 3, 5, -8, None])
+@pytest.mark.parametrize("morf", [CARRIAGEWAY_MORF, EARTHEN_MORF])
+def test_unpaved_axis_not_in_service_is_not_evidence(status, morf):
+    result, _ = classify(
+        faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 2, status, morf, AXIS))
+    )
+    face = at(result, 5, 4)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "no_in_service_axis_evidence"
+
+
+def test_unpaved_axis_below_the_coverage_threshold_proves_nothing():
+    # Same face/axis matching rules as paved: 4 m of a 6 m in-corridor run is
+    # 0.67 < 0.8, so the unpaved axis is not evidence for this face.
+    crossing = LineString([(5, 4), (5, 20)])
+    result, _ = classify(
+        faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, 2, 4, EARTHEN_MORF, crossing))
+    )
+    face = at(result, 2, 4)
+    assert face.axis_coverage_ratio == pytest.approx(4 / 6)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "no_in_service_axis_evidence"
+
+
+def test_unpaved_axis_on_a_shared_face_boundary_proves_nothing():
+    on_edge = LineString([(0, 8), (10, 8)])
+    result, _ = classify(
+        faces_of(WCZ_SPLIT),
+        wgo(WCZ_SPLIT),
+        wegsegment((101, 2, 4, on_edge)),
+        axis_coverage_ratio_min=0.0,
+    )
+    assert set(result.functional_class) == {"unmapped"}
+
+
+def test_unsplit_corridor_width_guard_also_applies_to_unpaved_evidence():
+    wide_axis = LineString([(0, 5), (30, 5)])
+    faces = faces_of(width=30, height=10)
+    result, _ = classify(faces, wgo(), wegsegment((101, 2, 4, wide_axis)), unsplit_max_width_m=8.0)
+    face = at(result, 15, 5)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "unsplit_corridor_too_wide_for_single_carriageway"
+    assert face.classification_evidence == "101:VERH=2:MORF=103"
+    narrow, _ = classify(faces, wgo(), wegsegment((101, 2, 4, wide_axis)))
+    assert at(narrow, 15, 5).functional_class == "carriageway_unpaved"
+
+
+def test_woz_boundaries_never_make_a_face_unpaved():
+    # A face bordered only by Woz lines (edge of a soft shoulder) and with no
+    # axis evidence stays unmapped: the shoulder is never read from WGO.
+    woz = (2, LineString([(0, 8), (10, 8)]))
+    result, _ = classify(faces_of(woz), wgo(woz), wegsegment((101, 1, 4, AXIS)))
+    shoulder = at(result, 5, 9)
+    assert shoulder.woz_boundary_ratio > 0
+    assert shoulder.functional_class == "unmapped"
+    assert shoulder.classification_reason == "no_in_service_axis_evidence"
+    assert at(result, 5, 4).functional_class == "carriageway_paved"
+
+
+@pytest.mark.parametrize("verh", [99, 0, 3])
+def test_earthen_track_with_an_undocumented_surface_code_is_not_evidence(verh):
+    result, _ = classify(
+        faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), wegsegment((101, verh, 4, EARTHEN_MORF, AXIS))
+    )
+    face = at(result, 5, 4)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_not_motorized_carriageway"
+
+
+@pytest.mark.parametrize("morf", [PEDESTRIAN_MORF, 113, 116, SERVICE_MORF, None])
+@pytest.mark.parametrize("unpaved_axis", [(101, 2, 4, AXIS), (101, -8, 4, EARTHEN_MORF, AXIS)])
+def test_any_explicitly_paved_axis_vetoes_an_unpaved_verdict(unpaved_axis, morf):
+    # A paved axis need not be motorized to contradict an unpaved verdict: the
+    # conflict is about surface, and the newer class gets the stricter rule.
+    axes = wegsegment(unpaved_axis, (102, 1, 4, morf, SECOND_AXIS))
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
+    face = at(result, 5, 4)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_surface_conflict"
+    assert "102:VERH=1:MORF=" in face.classification_evidence
+
+
+def test_an_unbound_footpath_does_not_veto_a_paved_carriageway():
+    # The reverse is not symmetric on purpose: VERH=2 on a footpath says nothing
+    # about the carriageway, and carriageway_paved keeps its validated rule.
+    axes = wegsegment((101, 1, 4, AXIS), (102, 2, 4, PEDESTRIAN_MORF, SECOND_AXIS))
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
+    face = at(result, 5, 4)
+    assert face.functional_class == "carriageway_paved"
+    assert face.classification_evidence == "101:VERH=1"
+
+
+# A 40x8 corridor cut by three transversal Wcz lines: the longitudinal axis
+# covers only 0.25 of its in-corridor length in each face (below threshold),
+# while an axis crossing the corridor inside one face covers it fully.
+TRANSVERSAL_CUTS = tuple((1, LineString([(x, 0), (x, 8)])) for x in (10, 20, 30))
+LONGITUDINAL = LineString([(0, 4), (40, 4)])
+CROSSING = LineString([(15, -5), (15, 13)])
+
+
+def transversal_faces():
+    return faces_of(*TRANSVERSAL_CUTS, width=40, height=8)
+
+
+@pytest.mark.parametrize(
+    "crossing_axis",
+    [(2, 2, 4, CARRIAGEWAY_MORF, CROSSING), (2, -8, 4, EARTHEN_MORF, CROSSING)],
+)
+def test_a_paved_axis_below_the_threshold_still_vetoes_an_unpaved_crossing(crossing_axis):
+    axes = wegsegment((1, 1, 4, CARRIAGEWAY_MORF, LONGITUDINAL), crossing_axis)
+    result, _ = classify(transversal_faces(), wgo(*TRANSVERSAL_CUTS), axes)
+    face = at(result, 15, 4)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_surface_conflict"
+    assert face.classification_evidence.startswith("1:VERH=1:MORF=103,2:")
+    # The verdict-deciding crossing axis covers the face fully.
+    assert face.axis_coverage_ratio == pytest.approx(1.0)
+    # Faces the crossing axis does not reach are unaffected.
+    assert at(result, 5, 4).classification_reason == "no_in_service_axis_evidence"
+
+
+def test_an_unpaved_axis_below_the_threshold_still_vetoes_a_paved_crossing():
+    axes = wegsegment(
+        (1, 2, 4, CARRIAGEWAY_MORF, LONGITUDINAL), (2, 1, 4, CARRIAGEWAY_MORF, CROSSING)
+    )
+    result, _ = classify(transversal_faces(), wgo(*TRANSVERSAL_CUTS), axes)
+    face = at(result, 15, 4)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_surface_conflict"
+    assert face.classification_evidence == "1:VERH=2:MORF=103,2:VERH=1:MORF=103"
+
+
+@pytest.mark.parametrize("verh", [-8, -9, None])
+def test_an_unpaved_crossing_cannot_decide_a_road_of_unknown_surface(verh):
+    axes = wegsegment(
+        (1, verh, 4, CARRIAGEWAY_MORF, LONGITUDINAL), (2, 2, 4, CARRIAGEWAY_MORF, CROSSING)
+    )
+    result, _ = classify(transversal_faces(), wgo(*TRANSVERSAL_CUTS), axes)
+    face = at(result, 15, 4)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_surface_unknown"
+
+
+def test_an_unpaved_crossing_over_a_road_with_no_in_service_axis_still_classifies():
+    # Known, documented limit: if the crossed road has no in-service axis at
+    # all, nothing on the face contradicts the crossing axis.
+    axes = wegsegment(
+        (1, 1, 5, CARRIAGEWAY_MORF, LONGITUDINAL), (2, 2, 4, CARRIAGEWAY_MORF, CROSSING)
+    )
+    result, _ = classify(transversal_faces(), wgo(*TRANSVERSAL_CUTS), axes)
+    assert at(result, 15, 4).functional_class == "carriageway_unpaved"
+
+
+# A gravel side road ending on the paved axis: 6 m inside the corridor (past
+# a 5 m floor), only 4 m of them inside the carriageway face (0.67 < 0.8).
+SIDE_ROAD_STUB = LineString([(5, 10), (5, 4)])
+
+
+@pytest.mark.parametrize("stub_morf", [CARRIAGEWAY_MORF, EARTHEN_MORF])
+def test_a_side_road_ending_on_the_axis_does_not_demote_a_paved_carriageway(stub_morf):
+    axes = wegsegment((101, 1, 4, AXIS), (102, 2, 4, stub_morf, SIDE_ROAD_STUB))
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes, axis_min_extent_m=5.0)
+    face = at(result, 5, 4)
+    assert face.functional_class == "carriageway_paved"
+    assert face.classification_evidence == "101:VERH=1"
+
+
+def test_a_side_road_shorter_than_half_the_paved_axis_never_vetoes_even_without_floor():
+    # 4 m inside the face against a 10 m paved axis: under half its length.
+    axes = wegsegment((101, 1, 4, AXIS), (102, 2, 4, SIDE_ROAD_STUB))
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
+    assert at(result, 5, 4).functional_class == "carriageway_paved"
+
+
+# A 40 m carriageway face (y in [0, 8]) with a sidewalk strip above it, and a
+# gravel road joining the paved axis at 30 degrees: 12 m inside the corridor,
+# 8 m inside the carriageway face — past a 5 m floor, under half of 40 m.
+LONG_SPLIT = (1, LineString([(0, 8), (40, 8)]))
+LONG_AXIS = LineString([(0, 4), (40, 4)])
+OBLIQUE_STUB = LineString([(20 - 6 / math.tan(math.radians(30)), 10), (20, 4)])
+
+
+def test_an_oblique_side_road_does_not_demote_a_long_paved_carriageway():
+    axes = wegsegment((101, 1, 4, LONG_AXIS), (102, 2, 4, OBLIQUE_STUB))
+    faces = faces_of(LONG_SPLIT, width=40, height=10)
+    result, _ = classify(faces, wgo(LONG_SPLIT), axes, axis_min_extent_m=5.0)
+    assert at(result, 20, 2).functional_class == "carriageway_paved"
+
+
+def test_a_side_road_matched_inside_an_unsplit_corridor_still_demotes_it():
+    # Known, fail-closed limit: in an unsplit corridor face and corridor
+    # coincide, so any axis past the extent floor is a *match* (ratio 1.0 by
+    # construction), and a matched unpaved axis always contradicts a paved one
+    # — as a matched VERH=2 carriageway already did before this class existed.
+    stub = LineString([(20 - 4 / math.tan(math.radians(30)), 8), (20, 4)])
+    faces = faces_of(width=40, height=8)
+    assert set(faces.topology_status) == {"unsplit"}
+    axes = wegsegment((101, 1, 4, LONG_AXIS), (102, -9, 4, EARTHEN_MORF, stub))
+    result, _ = classify(faces, wgo(), axes, axis_min_extent_m=5.0)
+    face = at(result, 20, 2)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_surface_conflict"
+
+
+@pytest.mark.parametrize(
+    "crossed",
+    [
+        (1, -8, 4, PEDESTRIAN_MORF, LONGITUDINAL),
+        (1, -9, 4, None, LONGITUDINAL),
+        (1, -8, 4, SERVICE_MORF, LONGITUDINAL),
+        (1, 2, 4, PEDESTRIAN_MORF, LONGITUDINAL),
+    ],
+)
+def test_an_unpaved_crossing_cannot_decide_a_face_another_axis_runs_through(crossed):
+    axes = wegsegment(crossed, (2, 2, 4, CARRIAGEWAY_MORF, CROSSING))
+    result, _ = classify(transversal_faces(), wgo(*TRANSVERSAL_CUTS), axes)
+    face = at(result, 15, 4)
+    assert face.functional_class == "unmapped"
+    assert face.classification_reason == "axis_not_motorized_carriageway"
+    assert face.classification_evidence.startswith("1:VERH=")
+
+
+def test_an_unpaved_axis_grazing_the_face_by_numerical_noise_vetoes_nothing():
+    # A neighbouring gravel road overshooting the shared WGO line by 1e-9 m.
+    grazing = LineString([(0, 9), (5, 9), (5, 8 - 1e-9), (5.0001, 9), (10, 9)])
+    axes = wegsegment((101, 1, 4, AXIS), (102, 2, 4, grazing))
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
+    assert at(result, 5, 4).functional_class == "carriageway_paved"
+
+
+def test_an_unmatched_earthen_track_coded_paved_does_not_veto_a_paved_carriageway():
+    # Its VERH agrees with the paved verdict; only matched, it contradicts itself.
+    axes = wegsegment((101, 1, 4, AXIS), (102, 1, 4, EARTHEN_MORF, SIDE_ROAD_STUB))
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), axes)
+    assert at(result, 5, 4).functional_class == "carriageway_paved"
+    matched = wegsegment((101, 1, 4, AXIS), (102, 1, 4, EARTHEN_MORF, SECOND_AXIS))
+    result, _ = classify(faces_of(WCZ_SPLIT), wgo(WCZ_SPLIT), matched)
+    face = at(result, 5, 4)
+    assert face.classification_reason == "axis_surface_conflict"
+    assert face.classification_evidence == "101:VERH=1:MORF=103,102:VERH=1:MORF=125"

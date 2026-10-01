@@ -50,6 +50,7 @@ def prepare_grb(
     axis_coverage_ratio_min: float = 0.8,
     axis_min_extent_m: float = 5.0,
     unsplit_max_width_m: float = 12.0,
+    dienstweg_unpaved_evidence: bool = False,
 ) -> dict:
     """Publish raw layers, unclassified candidate faces and an evidence-based classification.
 
@@ -80,6 +81,8 @@ def prepare_grb(
         raise ValueError("GRB_TOLERANCE_INVALID: nonnegative finite tolerances required")
     if not math.isfinite(axis_coverage_ratio_min) or not 0.0 <= axis_coverage_ratio_min <= 1.0:
         raise ValueError("GRB_RATIO_INVALID: classification ratio required within [0, 1]")
+    if not isinstance(dienstweg_unpaved_evidence, bool):
+        raise TypeError("GRB_OPTION_INVALID: dienstweg_unpaved_evidence must be a bool")
     if output.exists():
         raise ValueError("GRB_OUTPUT_EXISTS: choose a fresh output directory")
     source = GrbSource()
@@ -105,6 +108,7 @@ def prepare_grb(
         "axis_coverage_ratio_min": axis_coverage_ratio_min,
         "axis_min_extent_m": axis_min_extent_m,
         "unsplit_max_width_m": unsplit_max_width_m,
+        "dienstweg_unpaved_evidence": dienstweg_unpaved_evidence,
         "ready_for_costing": False,
     }
     if not write:
@@ -159,6 +163,7 @@ def prepare_grb(
                 unsplit_max_width_m=unsplit_max_width_m,
                 boundary_tolerance_m=boundary_tolerance_m,
                 length_tolerance_m=length_tolerance_m,
+                dienstweg_unpaved_evidence=dienstweg_unpaved_evidence,
             )
         except ValueError as exc:
             # A single bad Wegsegment record (duplicate/blank ID, invalid
@@ -239,6 +244,11 @@ def main() -> int:
     parser.add_argument("--axis-coverage-ratio-min", type=float, default=0.8)
     parser.add_argument("--axis-min-extent-m", type=float, default=5.0)
     parser.add_argument("--unsplit-max-width-m", type=float, default=12.0)
+    parser.add_argument(
+        "--dienstweg-unpaved-evidence",
+        action="store_true",
+        help="also count MORF=120 (dienstweg) axes coded VERH=2 as unpaved evidence",
+    )
     args = parser.parse_args()
     try:
         report = prepare_grb(
@@ -254,6 +264,7 @@ def main() -> int:
             axis_coverage_ratio_min=args.axis_coverage_ratio_min,
             axis_min_extent_m=args.axis_min_extent_m,
             unsplit_max_width_m=args.unsplit_max_width_m,
+            dienstweg_unpaved_evidence=args.dienstweg_unpaved_evidence,
         )
     except Exception as exc:
         print(

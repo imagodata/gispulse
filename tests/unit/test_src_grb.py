@@ -174,6 +174,7 @@ def test_grb_bundle_publishes_a_separate_evidence_based_classification(tmp_path,
 
     assert report["classification"]["classes"] == {
         "carriageway_paved": 1,
+        "carriageway_unpaved": 0,
         "sidewalk": 0,
         "unmapped": 1,
     }
@@ -255,6 +256,82 @@ def test_grb_bundle_never_labels_a_pedestrian_path_as_carriageway(tmp_path, monk
     assert report["classification"]["reasons"].get("axis_not_motorized_carriageway", 0) >= 1
     classified = gpd.read_parquet(output / "classified_faces.geoparquet")
     assert "carriageway_paved" not in set(classified.functional_class)
+
+
+def test_grb_bundle_keeps_explicitly_unpaved_axes_out_of_the_paved_class(tmp_path, monkeypatch):
+    """The guard this class exists for: a VERH=2 in-service carriageway must be
+    published as carriageway_unpaved, never folded into carriageway_paved, and
+    the bundle-level ready_for_costing stays false."""
+    import geopandas as gpd
+    from shapely.geometry import LineString
+
+    from gispulse_src_grb.prepare import prepare_grb
+
+    gravel_road = gpd.GeoDataFrame(
+        {"OIDN": [1], "WS_OIDN": ["9"], "VERH": [2], "STATUS": [4], "MORF": [103]},
+        geometry=[LineString([(0, 4), (10, 4)])],
+        crs=31370,
+    )
+    _grb_wfs_stub(monkeypatch, wegsegment=gravel_road)
+    output = tmp_path / "bundle"
+    report = prepare_grb(bbox=(-1, -1, 11, 11), output=output, write=True)
+
+    assert report["classification"]["classes"]["carriageway_unpaved"] == 1
+    assert report["classification"]["classes"]["carriageway_paved"] == 0
+    assert report["classification"]["options"] == {"dienstweg_unpaved_evidence": False}
+    assert report["dienstweg_unpaved_evidence"] is False
+    assert report["ready_for_costing"] is False
+    classified = gpd.read_parquet(output / "classified_faces.geoparquet")
+    assert set(classified.functional_class) == {"carriageway_unpaved", "unmapped"}
+    assert "ready_for_costing" not in classified.columns
+
+
+def test_grb_bundle_service_road_option_is_plumbed_and_recorded(tmp_path, monkeypatch):
+    import geopandas as gpd
+    from shapely.geometry import LineString
+
+    from gispulse_src_grb.prepare import prepare_grb
+
+    service_road = gpd.GeoDataFrame(
+        {"OIDN": [1], "WS_OIDN": ["9"], "VERH": [2], "STATUS": [4], "MORF": [120]},
+        geometry=[LineString([(0, 4), (10, 4)])],
+        crs=31370,
+    )
+    _grb_wfs_stub(monkeypatch, wegsegment=service_road)
+    report = prepare_grb(
+        bbox=(-1, -1, 11, 11),
+        output=tmp_path / "bundle",
+        write=True,
+        dienstweg_unpaved_evidence=True,
+    )
+    assert report["dienstweg_unpaved_evidence"] is True
+    assert report["classification"]["options"] == {"dienstweg_unpaved_evidence": True}
+    assert report["classification"]["classes"]["carriageway_unpaved"] == 1
+    assert report["ready_for_costing"] is False
+
+
+def test_grb_plan_rejects_a_non_bool_service_road_option_up_front(tmp_path):
+    from gispulse_src_grb.prepare import prepare_grb
+
+    # Validated before any I/O (here, even before a dry-run plan), and as a
+    # TypeError: the classifier's GRB_CLASSIFY_* ValueErrors degrade the bundle,
+    # which would hide a caller mistake.
+    with pytest.raises(TypeError, match="GRB_OPTION_INVALID"):
+        prepare_grb(bbox=(0, 0, 1, 1), output=tmp_path / "b", dienstweg_unpaved_evidence="yes")
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("flag, expected", [([], False), (["--dienstweg-unpaved-evidence"], True)])
+def test_grb_cli_exposes_the_service_road_option(tmp_path, monkeypatch, capsys, flag, expected):
+    import json
+    import sys
+
+    from gispulse_src_grb.prepare import main
+
+    argv = ["prepare", "--bbox", "0", "0", "1", "1", "--output", str(tmp_path / "b"), *flag]
+    monkeypatch.setattr(sys, "argv", argv)
+    assert main() == 0
+    assert json.loads(capsys.readouterr().out)["dienstweg_unpaved_evidence"] is expected
 
 
 def test_grb_bundle_survives_a_broken_wegsegment_layer_and_degrades_classification(

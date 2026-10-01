@@ -26,9 +26,14 @@ Official semantics (Digitaal Vlaanderen, objectenhandboek GRB):
   measured and reported per face for diagnosis, but a face without axis
   evidence stays ``unmapped`` regardless of how much Wcz borders it.
 - Wegsegment ``VERH``: 1 paved, 2 unpaved, 12 mixed, -8 unknown, -9 not
-  applicable. An axis with an unknown/not-applicable code is neither paved
-  nor unpaved evidence — it is simply insufficient, and never contradicts a
-  genuinely paved or unpaved axis covering the same face.
+  applicable. The objectenhandboek domain reads 1 *verharde weg*, 2
+  *onverharde weg*, 12 *weg met zowel vaste en losse verharding*; the
+  ``LBLVERH`` label delivered with the data reads 1 *weg met vaste
+  verharding*, 2 *weg met losse verharding*. On its own, an axis with an
+  unknown/not-applicable code is neither paved nor unpaved evidence — it is
+  simply insufficient, and never contradicts a genuinely paved or unpaved
+  axis covering the same face. (A ``MORF=125`` axis is the one exception:
+  its morphology alone is unpaved evidence, see below.)
   ``STATUS``: 1 permit requested, 2 permit granted, 3 under construction,
   4 in service, 5 out of service, -8 unknown.
 - Wegsegment ``MORF`` (morfologische wegklasse) classifies what the axis
@@ -45,12 +50,47 @@ Official semantics (Digitaal Vlaanderen, objectenhandboek GRB):
   the small set of codes officially describing a motor-traffic way or
   junction (101–112: motorway, dual/single carriageway, roundabout, special
   traffic situation, traffic square, on/off-ramps, parallel/service road,
-  parking/service entrance) count toward ``carriageway_paved``. Explicitly
-  excluded: 113/114 (pedestrian/cycling, not for other vehicles), 116
-  (tram-only), 120 (dienstweg — an unpaved-by-default service track, not a
-  public carriageway), 125 (aardeweg — an earthen track, unpaved by
-  definition), 130 (veer — a ferry crossing, not a road), any other or
-  unknown code.
+  parking/service entrance) count toward ``carriageway_paved``. Excluded
+  from it: 113/114 (pedestrian/cycling, not for other vehicles), 116
+  (tram-only), 120 (dienstweg, a service road), 125 (aardeweg, an earthen
+  track), 130 (veer — a ferry crossing, not a road), any other or unknown
+  code. The domain gives 120/125 as bare labels, with no surface rule.
+- ``carriageway_unpaved`` rests on the same quality of evidence as
+  ``carriageway_paved``: a documented source code on an in-service axis that
+  clears the same coverage rules, never geometry. An axis is unpaved evidence
+  when it is motorized (``MORF`` 101–112) with ``VERH=2``, or when its
+  ``MORF`` is 125 (aardeweg) with ``VERH`` 2, -8, -9 or missing — on the live
+  WFS (October 2026) in-service aardewegen are ``VERH=2`` (10000+) or -9
+  (1282) far more often than 1/12 (435). ``MORF=120`` (dienstweg) only counts
+  with ``VERH=2`` and only if the caller opts in with
+  ``dienstweg_unpaved_evidence=True``: most in-service dienstwegen are coded
+  ``VERH=1`` (797 against 115), so a dienstweg is never assumed unpaved. ``VERH=2`` is an
+  unbound surface (gravel, crushed stone), **not** necessarily bare earth.
+  This module states what the source says; which client tariff an unpaved
+  carriageway maps to is decided downstream, never here. WGO boundaries play
+  no part: a Woz line marks the edge of a soft shoulder, but reading the
+  shoulder from adjacency is the same invertible inference that removed
+  ``sidewalk``.
+- A positive verdict is blocked, fail-closed, by contradicting evidence.
+  Contradictions are looked for among every candidate axis (past the extent
+  floor in the corridor, with more than ``length_tolerance_m`` inside the
+  face), not only those above the coverage threshold, so an axis that merely
+  crosses the face can still veto. ``carriageway_unpaved`` is only granted
+  when every such axis is itself unpaved evidence: an axis coded ``VERH`` 1
+  or 12, whatever its ``MORF``, gives ``axis_surface_conflict``; a
+  motor-traffic axis of unknown surface, which may be the face's own road
+  with the unpaved axis only crossing it, gives ``axis_surface_unknown``; any
+  other axis gives ``axis_not_motorized_carriageway``. ``carriageway_paved``
+  is vetoed (``axis_surface_conflict``) only by unpaved evidence that is
+  itself matched or runs, inside the face, at least ``axis_min_extent_m`` and
+  half the length of the longest deciding paved axis: an unbound footpath
+  says nothing about the carriageway beside it, and an unmatched gravel side
+  road joining the axis, at any angle, must not demote a long carriageway. The
+  asymmetry is deliberate:
+  the new class has not yet been validated on real unpaved data, the paved
+  class has. A *matched* aardeweg coded ``VERH`` 1 or 12 contradicts itself
+  and gives ``axis_surface_conflict``; as a mere candidate it only vetoes the
+  unpaved class, like any paved axis.
 
 https://www.vlaanderen.be/digitaal-vlaanderen/onze-diensten-en-platformen/basiskaart-vlaanderen-grb/objectenhandboek-basiskaart-vlaanderen-grb/wegopdeling-wgo
 https://www.vlaanderen.be/digitaal-vlaanderen/onze-diensten-en-platformen/basiskaart-vlaanderen-grb/objectenhandboek-basiskaart-vlaanderen-grb/wegsegment-wegsegment
@@ -70,17 +110,20 @@ _WCZ, _WOZ, _WRB = 1, 2, 3  # WGO TYPE
 _IN_SERVICE = 4  # Wegsegment STATUS
 _PAVED = frozenset({1, 12})  # Wegsegment VERH: paved, and mixed paved/unbound
 _UNPAVED = frozenset({2})  # Wegsegment VERH: unpaved. -8/-9/other are unknown, not unpaved.
+_UNKNOWN_SURFACE = frozenset({-8, -9, None})  # documented unknown/not applicable, or missing
 # Wegsegment MORF codes officially describing a motor-traffic way or junction.
 # Excludes 113/114 (pedestrian/cycling, explicitly closed to other vehicles),
-# 116 (tram-only), 120 (service track, unpaved by default), 125 (earthen
-# track), 130 (ferry crossing) and any code outside this documented range.
+# 116 (tram-only), 120 (service road), 125 (earthen track), 130 (ferry
+# crossing) and any code outside this documented range.
 _MOTORIZED_MORF = frozenset(range(101, 113))
+_EARTHEN_TRACK_MORF = 125  # aardeweg
+_SERVICE_ROAD_MORF = 120  # dienstweg: opt-in, and only when coded VERH=2
 # partition_polygons reports "unsplit" when area is conserved, no cut/dangle/
 # invalid residual exceeds tolerance, and there was simply nothing to split —
 # a WBN corridor with no internal WGO line is entirely and unambiguously one
 # face. That is a resolved topology, not an unresolved one.
 _RESOLVED_STATUSES = ("partitioned", "unsplit")
-_CLASSES = ("carriageway_paved", "sidewalk", "unmapped")
+_CLASSES = ("carriageway_paved", "carriageway_unpaved", "sidewalk", "unmapped")
 _TEXT_COLUMNS = ("functional_class", "classification_reason", "classification_evidence")
 _RATIO_COLUMNS = (
     "axis_coverage_ratio",
@@ -158,15 +201,28 @@ def _boundary_ratios(face, trees: dict[int, STRtree], tolerance: float) -> dict[
     return ratios
 
 
-def _format_evidence(matches, surface_field: str) -> str:
-    """Pair each retained axis with its own surface code, deduplicated and sorted."""
-    pairs = sorted(
+def _format_evidence(matches, surface_field: str, morphology_field: str | None = None) -> str:
+    """Pair each retained axis with its own surface code, deduplicated and sorted.
+
+    ``morphology_field`` also cites each axis's ``MORF``: unpaved and conflict
+    verdicts can rest on ``MORF`` alone, so their evidence must show it. The
+    paved format is left unchanged.
+    """
+
+    def text(code):
+        return "unknown" if code is None else str(code)
+
+    triples = sorted(
         {
-            (axis_id, "unknown" if code is None else str(code))
-            for _, axis_id, code, _morf, _length in matches
+            (axis_id, text(code), text(morf) if morphology_field else "")
+            for _, axis_id, code, morf, _length in matches
         }
     )
-    return ",".join(f"{axis_id}:{surface_field}={code}" for axis_id, code in pairs)
+    return ",".join(
+        f"{axis_id}:{surface_field}={code}"
+        + (f":{morphology_field}={morf}" if morphology_field else "")
+        for axis_id, code, morf in triples
+    )
 
 
 def classify_grb_faces(
@@ -188,6 +244,7 @@ def classify_grb_faces(
     axis_surface_field: str = "VERH",
     axis_status_field: str = "STATUS",
     axis_morphology_field: str = "MORF",
+    dienstweg_unpaved_evidence: bool = False,
 ) -> tuple[gpd.GeoDataFrame, dict]:
     """Label candidate faces from upstream GRB axis evidence, defaulting to ``unmapped``.
 
@@ -195,29 +252,45 @@ def classify_grb_faces(
     corridor is rebuilt as the union of its resolved (``partitioned`` or
     ``unsplit``) faces. For each resolved face, every Wegsegment axis with
     ``STATUS=4`` (in service) whose length inside the corridor is at least
-    ``axis_min_extent_m`` and whose share of that length falls inside this
-    face is at least ``axis_coverage_ratio_min`` becomes a candidate; among
-    candidates, only those whose ``MORF`` is a motor-traffic code count as
-    motorized (see the module docstring). In priority order:
+    ``axis_min_extent_m`` and that has some length inside this face is a
+    *candidate*; a candidate whose share of that length falling inside this
+    face is at least ``axis_coverage_ratio_min`` is a *match*. Only matches
+    decide a class; every candidate can veto one. A match is *paved* evidence
+    when motorized (``MORF`` 101–112) with ``VERH`` 1 or 12, and *unpaved*
+    evidence when motorized with ``VERH=2``, when its ``MORF`` is 125 with
+    ``VERH`` 2/-8/-9/missing, or — only with
+    ``dienstweg_unpaved_evidence=True`` — when its ``MORF`` is 120 with
+    ``VERH=2``. In priority order:
 
-    - motorized candidates split between paved and unpaved: ``unmapped``,
-      reason ``contradictory_axis_surface`` — an in-service axis disagreeing
-      with itself on ``VERH`` is a data conflict, not resolved by picking a
-      side;
-    - motorized candidates all paved (``VERH`` 1 or 12): ``carriageway_paved``
-      — unless the face's ``topology_status`` is ``unsplit`` (no internal WGO
-      line at all, so the whole corridor was taken as one face) and its area
-      divided by the longest paved axis's covered length exceeds
-      ``unsplit_max_width_m``, in which case the axis alone cannot vouch for
-      the full width of the corridor and the face stays ``unmapped``, reason
+    - paved evidence vetoed by unpaved evidence that is matched or runs,
+      inside the face, at least ``axis_min_extent_m`` and half the longest
+      paved match; unpaved evidence vetoed by any candidate coded ``VERH`` 1
+      or 12, whatever its ``MORF``; or a matched ``MORF=125`` axis coded
+      ``VERH`` 1 or 12: ``unmapped``, reason ``axis_surface_conflict`` — the
+      sources disagree, and picking a side would be an undocumented
+      inference;
+    - unpaved evidence with a motor-traffic candidate of unknown surface on
+      the face: ``unmapped``, reason ``axis_surface_unknown``;
+    - unpaved evidence with any other candidate on the face that is not
+      itself unpaved evidence: ``unmapped``, reason
+      ``axis_not_motorized_carriageway``;
+    - paved evidence: ``carriageway_paved``, reason
+      ``in_service_paved_axis`` — unless the face's ``topology_status`` is
+      ``unsplit`` (no internal WGO line at all, so the whole corridor was
+      taken as one face) and its area divided by the longest paved axis's
+      covered length exceeds ``unsplit_max_width_m``, in which case the axis
+      alone cannot vouch for the full width of the corridor and the face
+      stays ``unmapped``, reason
       ``unsplit_corridor_too_wide_for_single_carriageway``;
-    - motorized candidates all unpaved (``VERH`` 2): ``unmapped``, reason
-      ``axis_surface_not_paved``;
+    - unpaved evidence: ``carriageway_unpaved``, reason
+      ``in_service_unpaved_axis``, under the same unsplit width guard
+      (measured on the longest unpaved axis);
     - motorized candidates all of unknown/not-applicable ``VERH``:
       ``unmapped``, reason ``axis_surface_unknown``;
-    - candidates present but none motorized (pedestrian/cycling/tram/service/
-      unpaved-track/ferry ``MORF``): ``unmapped``, reason
-      ``axis_not_motorized_carriageway``;
+    - matches present but none motorized nor unpaved evidence (pedestrian/
+      cycling/tram/ferry/unknown ``MORF``, a dienstweg not opted in or not
+      coded ``VERH=2``, an aardeweg with an undocumented ``VERH``):
+      ``unmapped``, reason ``axis_not_motorized_carriageway``;
     - no usable candidate at all: ``unmapped``, reason
       ``no_in_service_axis_evidence``.
 
@@ -226,9 +299,11 @@ def classify_grb_faces(
     ``wrb_boundary_ratio``/``woz_boundary_ratio`` — the share of its own
     perimeter carried by each WGO type — as diagnostic-only measurements, and
     ``axis_coverage_ratio`` reports the strongest candidate actually behind
-    the verdict, or (when no class-deciding evidence exists) the strongest
-    candidate measured at all, purely for diagnosis. Every threshold is an
-    explicit argument.
+    the verdict (for a conflict, possibly a vetoing candidate below the
+    threshold), or (when no class-deciding evidence exists) the strongest
+    candidate measured at all, purely for diagnosis. Evidence cites
+    ``WS_OIDN:VERH`` per axis, plus ``:MORF`` whenever unpaved evidence or a
+    conflict is involved. Every threshold is an explicit argument.
     """
     if (
         faces.crs is None
@@ -240,6 +315,9 @@ def classify_grb_faces(
         raise ValueError("GRB_CLASSIFY_CRS_INVALID: identical projected metre CRS required")
     if not math.isfinite(axis_coverage_ratio_min) or not 0.0 <= axis_coverage_ratio_min <= 1.0:
         raise ValueError("GRB_CLASSIFY_RATIO_INVALID: coverage ratio required within [0, 1]")
+    if not isinstance(dienstweg_unpaved_evidence, bool):
+        # TypeError on purpose: a caller mistake, never a degradable data defect.
+        raise TypeError("GRB_CLASSIFY_OPTION_INVALID: dienstweg_unpaved_evidence must be a bool")
     if (
         any(
             not math.isfinite(v) or v < 0
@@ -292,6 +370,22 @@ def classify_grb_faces(
     axis_ids = [str(v) for v in axis_id_column]
     axis_surfaces = [_code(v) for v in in_service[axis_surface_field]]
     axis_morphologies = [_code(v) for v in in_service[axis_morphology_field]]
+
+    def is_unpaved_evidence(candidate) -> bool:
+        surface, morphology = candidate[2], candidate[3]
+        return (
+            (morphology in _MOTORIZED_MORF and surface in _UNPAVED)
+            or (morphology == _EARTHEN_TRACK_MORF and surface in _UNPAVED | _UNKNOWN_SURFACE)
+            or (
+                dienstweg_unpaved_evidence
+                and morphology == _SERVICE_ROAD_MORF
+                and surface in _UNPAVED
+            )
+        )
+
+    def is_self_contradicting(candidate) -> bool:
+        # An aardeweg coded paved: it vetoes either verdict, never produces one.
+        return candidate[3] == _EARTHEN_TRACK_MORF and candidate[2] in _PAVED
 
     boundary_codes = boundaries[boundary_type_field].map(_code)
     boundary_trees = {
@@ -352,42 +446,92 @@ def classify_grb_faces(
         motorized = [c for c in matches if c[3] in _MOTORIZED_MORF]
         non_motorized = [c for c in matches if c[3] not in _MOTORIZED_MORF]
         paved = [c for c in motorized if c[2] in _PAVED]
-        unpaved = [c for c in motorized if c[2] in _UNPAVED]
+        unpaved = [c for c in matches if is_unpaved_evidence(c)]
+        self_contradicting = [c for c in matches if is_self_contradicting(c)]
+        # Vetoes come from every candidate, not only matches: an axis merely
+        # crossing the face below the coverage threshold still contradicts a
+        # verdict, provided its length inside this face exceeds
+        # length_tolerance_m. The newer unpaved class is only granted when
+        # every such axis is itself unpaved evidence. The validated paved class
+        # is vetoed only by unpaved evidence that is matched or runs, inside
+        # this very face, at least axis_min_extent_m and half the deciding
+        # paved axis's length, so a gravel side road joining the axis at any
+        # angle cannot demote a long carriageway (see module docstring).
+        in_face = [c for c in candidates if c[4] > length_tolerance_m]
+        blockers = [c for c in in_face if not is_unpaved_evidence(c)]
+        paved_vetoes = [c for c in blockers if c[2] in _PAVED]
+        unknown_vetoes = [
+            c
+            for c in blockers
+            if c[3] in _MOTORIZED_MORF and c[2] not in _PAVED and c[2] not in _UNPAVED
+        ]
+        veto_length = max(axis_min_extent_m, 0.5 * max((c[4] for c in paved), default=0.0))
+        unpaved_vetoes = [
+            c
+            for c in in_face
+            if is_unpaved_evidence(c) and (c[0] >= axis_coverage_ratio_min or c[4] >= veto_length)
+        ]
         unknown_surface = [c for c in motorized if c[2] not in _PAVED and c[2] not in _UNPAVED]
         ratios = _boundary_ratios(face, boundary_trees, boundary_tolerance_m)
+        cite_morphology = True
 
-        if paved and unpaved:
-            functional_class, reason, evidence_set = (
-                "unmapped",
-                "contradictory_axis_surface",
-                paved + unpaved,
-            )
-        elif paved:
-            longest_covered = max(c[4] for c in paved)
+        if paved and unpaved_vetoes:
+            functional_class, reason = "unmapped", "axis_surface_conflict"
+            evidence_set = paved + unpaved_vetoes
+        elif unpaved and paved_vetoes:
+            functional_class, reason = "unmapped", "axis_surface_conflict"
+            evidence_set = paved_vetoes + unpaved
+        elif self_contradicting:
+            functional_class, reason = "unmapped", "axis_surface_conflict"
+            evidence_set = paved + self_contradicting
+        elif unpaved and unknown_vetoes:
+            # A motor-traffic axis of unknown surface on the face may be the
+            # road the face really belongs to, the unpaved axis only crossing it.
+            functional_class, reason = "unmapped", "axis_surface_unknown"
+            evidence_set = unknown_vetoes + unpaved
+        elif unpaved and blockers:
+            # Any other in-service axis on the face (a path, a service road, a
+            # code outside the documented set) may be what the face really is.
+            functional_class, reason = "unmapped", "axis_not_motorized_carriageway"
+            evidence_set = blockers + unpaved
+        elif paved or unpaved:
+            evidence_set = paved or unpaved
+            longest_covered = max(c[4] for c in evidence_set)
             estimated_width = face.area / longest_covered
             if status == "unsplit" and estimated_width > unsplit_max_width_m:
                 functional_class = "unmapped"
                 reason = "unsplit_corridor_too_wide_for_single_carriageway"
-            else:
+            elif paved:
                 functional_class = "carriageway_paved"
                 reason = "in_service_paved_axis"
-            evidence_set = paved
-        elif unpaved:
-            functional_class, reason, evidence_set = "unmapped", "axis_surface_not_paved", unpaved
+            else:
+                functional_class = "carriageway_unpaved"
+                reason = "in_service_unpaved_axis"
+            cite_morphology = not paved
         elif unknown_surface:
             functional_class, reason, evidence_set = (
                 "unmapped",
                 "axis_surface_unknown",
                 unknown_surface,
             )
+            cite_morphology = False
         elif non_motorized:
             functional_class = "unmapped"
             reason = "axis_not_motorized_carriageway"
             evidence_set = non_motorized
+            cite_morphology = False
         else:
             functional_class, reason, evidence_set = "unmapped", "no_in_service_axis_evidence", []
 
-        evidence = _format_evidence(evidence_set, axis_surface_field) if evidence_set else ""
+        evidence = (
+            _format_evidence(
+                evidence_set,
+                axis_surface_field,
+                axis_morphology_field if cite_morphology else None,
+            )
+            if evidence_set
+            else ""
+        )
         axis_coverage_ratio = (
             max(c[0] for c in evidence_set)
             if evidence_set
@@ -440,6 +584,7 @@ def classify_grb_faces(
             "boundary_tolerance_m": float(boundary_tolerance_m),
             "length_tolerance_m": float(length_tolerance_m),
         },
+        "options": {"dienstweg_unpaved_evidence": dienstweg_unpaved_evidence},
         "inference": False,
     }
     return result, report
