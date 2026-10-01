@@ -53,13 +53,16 @@ def _blob(kind: str, payload: bytes) -> bytes:
     return struct.pack(">I", len(header)) + header + blob
 
 
+def _to_nano(deg: float) -> int:
+    return round(deg * 1e7)  # default PBF granularity: 100 nanodegrees
+
+
 def _node_block(nodes: Mapping[int, tuple[float, float]]) -> bytes:
     ids = sorted(nodes)
-    to_nano = lambda deg: round(deg * 1e7)  # noqa: E731 - granularity 100 nm
     dense = (
         _field_bytes(1, _packed_sint64_delta(ids))
-        + _field_bytes(8, _packed_sint64_delta([to_nano(nodes[i][1]) for i in ids]))
-        + _field_bytes(9, _packed_sint64_delta([to_nano(nodes[i][0]) for i in ids]))
+        + _field_bytes(8, _packed_sint64_delta([_to_nano(nodes[i][1]) for i in ids]))
+        + _field_bytes(9, _packed_sint64_delta([_to_nano(nodes[i][0]) for i in ids]))
     )
     return _field_bytes(1, _field_bytes(1, b"")) + _field_bytes(2, _field_bytes(2, dense))
 

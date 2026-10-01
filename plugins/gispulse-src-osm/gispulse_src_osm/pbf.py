@@ -261,12 +261,14 @@ def _build_hash_on_refs(conn: Any) -> Iterator[None]:
     right after the query; DuckDB versions without that optimizer just run the query
     unchanged (correct, but hungrier).
     """
+    import duckdb
+
     previous: str | None = None
     try:
         previous = str(conn.execute("SELECT current_setting('disabled_optimizers')").fetchone()[0])
         disabled = ",".join(filter(None, [previous, "build_side_probe_side"]))
         conn.execute(f"SET disabled_optimizers = '{_sql_string(disabled)}'")
-    except Exception:
+    except duckdb.Error:  # optimizer unknown to this DuckDB version
         previous = None
     try:
         yield
@@ -274,7 +276,7 @@ def _build_hash_on_refs(conn: Any) -> Iterator[None]:
         if previous is not None:
             try:
                 conn.execute(f"SET disabled_optimizers = '{_sql_string(previous)}'")
-            except Exception:  # e.g. aborted caller transaction: keep the original error
+            except duckdb.Error:  # e.g. aborted caller transaction: keep the original error
                 log.warning(
                     "could not restore DuckDB disabled_optimizers=%r; "
                     "build_side_probe_side stays disabled on this database",

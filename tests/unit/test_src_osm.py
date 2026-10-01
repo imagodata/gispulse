@@ -181,7 +181,7 @@ def duckdb_spatial() -> None:
     conn = duckdb.connect(":memory:")
     try:
         conn.execute("INSTALL spatial; LOAD spatial")
-    except Exception as exc:  # offline CI without a cached extension
+    except duckdb.Error as exc:  # offline CI without a cached extension
         pytest.skip(f"DuckDB spatial extension unavailable: {exc}")
     finally:
         conn.close()
@@ -426,7 +426,7 @@ def test_read_pbf_roads_ignores_caller_default_order_and_tables(synthetic_pbf: P
     gdf = read_pbf_roads(synthetic_pbf, target_crs=None, connection_factory=lambda: conn)
 
     assert list(gdf["id"]) == [100, 101, 102]
-    assert list(gdf.set_index("id").loc[100].geometry.coords)[0] == pytest.approx((4.36, 50.86))
+    assert gdf.set_index("id").loc[100].geometry.coords[0] == pytest.approx((4.36, 50.86))
     assert conn.execute("SELECT owner FROM main._gp_pbf_ways").fetchall() == [("mine",)]
     conn.close()
 
