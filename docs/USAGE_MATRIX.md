@@ -7,7 +7,7 @@ Complète [INTEGRATION_MATRIX.md](INTEGRATION_MATRIX.md) (échange de données) 
 > **2026-05-20 — manifeste ELT `version: 3` (ADR 0005)** : pour les personas « pipeline-as-code » (Géomaticien collectivité, Chef de projet ZAN, Bureau d'études environnement, Géomaticien SDIS, Analyste foncier), le manifeste v3 unifie sources / triggers / modèles dans **un seul fichier déclaratif**. Voir [`docs-site/guide/elt-manifest.md`](../docs-site/guide/elt-manifest.md) et le guide de migration [`elt-migration.md`](../docs-site/guide/elt-migration.md). Les formats v1 / v2 restent supportés (dépréciés v1.10.1 → supprimés v2.0.0).
 
 Légende :
-- **Tier** : C = Community (AGPL, gratuit), P = Pro (paid features : isochrone réseau, raster lourd, ESB triggers)
+- **Tier** : C = Community (AGPL, gratuit), P = Pro (paid features : PostGIS, ESB triggers cluster, DAG, monitoring, cron)
 - **Canal** : CLI, Portal (SPA web), QGIS (plugin), ArcGIS (OGC API), MVT (web map), Webhook (sortie événementielle), SDK (Python/JS)
 - **Boucle** : One-shot (1×), Planifié (cron), DML (déclencheur sur changement)
 
@@ -23,17 +23,17 @@ Quatorze personas représentatifs des deals déjà signés ou en discussion. Le 
 |---|---|---|---|---|---|
 | **Géomaticien collectivité (DDT, EPCI)** | Instruction PC, conformité PLU, livrables CNIG | `validation_plu_cnig`, `urbanisme_permis_conformite` | QGIS plugin (drag GPKG) | Manuel | C |
 | **Chef de projet ZAN** | Bilan trajectoire artificialisation T1/T2/2031 | `urbanisme_zan_bilan` | Portal + export GPKG vers QGIS | Planifié (annuel) | C |
-| **Opérateur FTTH (BE déploiement)** | Priorisation NRO, hotspots demande, taux de couverture | `ftth_demande_hotspots`, `ftth_network_analysis` | CLI batch + MVT pour dashboard | Planifié (hebdo) | P (isochrone) |
-| **Géomaticien SDIS** | SDACR, zones blanches secours, Voronoi CIS | `securite_sdis_couverture`, `securite_sdis_thiessen` | QGIS plugin + webhook DML | DML (nouvelle ZA) | P (isochrone) |
+| **Opérateur FTTH (BE déploiement)** | Priorisation NRO, hotspots demande, taux de couverture | `ftth_demande_hotspots`, `ftth_network_analysis` | CLI batch + MVT pour dashboard | Planifié (hebdo) | C |
+| **Géomaticien SDIS** | SDACR, zones blanches secours, Voronoi CIS | `securite_sdis_couverture`, `securite_sdis_thiessen` | QGIS plugin + webhook DML | DML (nouvelle ZA) | C |
 | **Analyste foncier (EPF, promoteur)** | Détection friches, marché DVF par IRIS | `foncier_parcelles_vacantes`, `foncier_dvf_marche` | Portal + SDK Python | Planifié (mensuel) | C |
 | **Bureau d'études environnement** | TVB ruptures corridors, IOTA loi sur l'eau | `environnement_tvb_ruptures`, `environnement_iota_loi_eau` | CLI + GPKG sortie pour QGIS | One-shot (étude) | C |
 | **Agent État (préfecture risques)** | Bâti / pop / ERP exposés PPRI, alertes nouvelles autorisations | `risques_ppri_exposition` | Webhook + dashboard MapLibre | DML (nouveau permis) | C |
-| **Géomaticien santé publique (ARS)** | Déserts médicaux APL méthode DREES | `sante_apl_deserts` | Portal + export FileGDB ArcGIS | Planifié (trimestriel) | P (isochrone) |
+| **Géomaticien santé publique (ARS)** | Déserts médicaux APL méthode DREES | `sante_apl_deserts` | Portal + export FileGDB ArcGIS | Planifié (trimestriel) | C |
 | **Agriculteur / OPA / DRAAF** | Contrôle conformité BCAE 1/8/9 | `agriculture_rpg_bcae` | CLI + GPKG vers Telepac/QGIS | One-shot (avant déclaration PAC) | C |
-| **Bureau d'études énergie** | Potentiel solaire toiture par bâtiment | `energie_solaire_toiture` | SDK Python (notebook) | One-shot | P (raster) |
-| **Mobilité / AOM** | Accessibilité 15/30 min services BPE, zones blanches | `mobilite_accessibilite_services` | Portal + MVT public | Planifié | P (isochrone) |
+| **Bureau d'études énergie** | Potentiel solaire toiture par bâtiment | `energie_solaire_toiture` | SDK Python (notebook) | One-shot | C |
+| **Mobilité / AOM** | Accessibilité 15/30 min services BPE, zones blanches | `mobilite_accessibilite_services` | Portal + MVT public | Planifié | C |
 | **Service rénovation énergétique (ANAH/PIG)** | Priorisation passoires DPE × précarité | `batiment_dpe_priorisation` | Portal + export Excel/GPKG | Planifié (annuel) | C |
-| **Géomarketing retail** | Modèle Huff, parts de marché, whitespace | `retail_huff_chalandise` | SDK Python + dashboard interne | One-shot (étude implantation) | P (isochrone) |
+| **Géomarketing retail** | Modèle Huff, parts de marché, whitespace | `retail_huff_chalandise` | SDK Python + dashboard interne | One-shot (étude implantation) | C |
 | **Topographe / cadastreur** | Nettoyage géométrique avant analyse stricte | `cadastre_topology_cleanup`, `reseau_topology_prep` | CLI pre-flight + QGIS | Manuel (data prep) | C |
 
 ---
@@ -52,19 +52,19 @@ Inverse de la matrice 1 : pour chaque preset, qu'est-ce qui le rend possible et 
 | `risques_ppri_exposition` | `spatial_join`, `spatial_aggregate`, `reproject` | C | GPKG bâti exposé + alerte webhook | ✅ DML INSERT permis OU UPDATE PPRI |
 | `environnement_tvb_ruptures` | `buffer`, `intersects`, `dissolve`, `connectivity_check` | C | GPKG corridors + ruptures | sur INSERT infrastructure |
 | `environnement_iota_loi_eau` | `buffer`, `intersects`, `clip`, `area_length` | C | rapport IOTA | sur INSERT projet |
-| `mobilite_accessibilite_services` | `isochrone`, `spatial_aggregate` | P | MVT zones blanches | planifié |
+| `mobilite_accessibilite_services` | `isochrone`, `spatial_aggregate` | C | MVT zones blanches | planifié |
 | `foncier_dvf_marche` | `spatial_aggregate` (médiane/m²) | C | GPKG par IRIS | planifié (DVF semestriel) |
 | `foncier_parcelles_vacantes` | `spatial_join` cadastre×MAJIC×PLU×DVF, score | C | GPKG friches scorées | planifié + DML mutation MAJIC |
 | `agriculture_rpg_bcae` | `buffer`, `intersects`, `spatial_join` | C | rapport conformité BCAE | one-shot annuel |
-| `energie_solaire_toiture` | `zonal_stats` raster MNS, `area_length` | P | GPKG potentiel kWh/an/bât | one-shot |
-| `securite_sdis_couverture` | `isochrone` 10/20 min, zones blanches | P | GPKG couverture + MVT | sur INSERT route inondable |
+| `energie_solaire_toiture` | `zonal_stats` raster MNS, `area_length` | C | GPKG potentiel kWh/an/bât | one-shot |
+| `securite_sdis_couverture` | `isochrone` 10/20 min, zones blanches | C | GPKG couverture + MVT | sur INSERT route inondable |
 | `securite_sdis_thiessen` | `voronoi_polygons`, `spatial_aggregate` | C | GPKG zones premier appel | sur UPDATE CIS (ouverture/fermeture) |
-| `sante_apl_deserts` | `isochrone` 20 min, agrégation ETP/pop | P | GPKG APL par commune | planifié |
+| `sante_apl_deserts` | `isochrone` 20 min, agrégation ETP/pop | C | GPKG APL par commune | planifié |
 | `batiment_dpe_priorisation` | `spatial_join` BDNB×FILOSOFI×OPAH | C | GPKG priorisation | planifié |
-| `retail_huff_chalandise` | `isochrone`, modèle Huff, `centroid` | P | GPKG parts de marché par IRIS | one-shot étude |
-| `ftth_network_analysis` | `connectivity_check`, isochrone NRO, `spatial_aggregate` | P | GPKG taux couverture par NRO | planifié |
+| `retail_huff_chalandise` | `isochrone`, modèle Huff, `centroid` | C | GPKG parts de marché par IRIS | one-shot étude |
+| `ftth_network_analysis` | `connectivity_check`, isochrone NRO, `spatial_aggregate` | C | GPKG taux couverture par NRO | planifié |
 | `ftth_demande_hotspots` | `cluster_hdbscan`, `concave_hull`, `nearest_neighbor` | C | GPKG hotspots scorés | planifié |
-| `environmental_monitoring` | `zonal_stats` NDVI Sentinel-2, détection changement | P (raster) | GPKG diff temporel | planifié saison |
+| `environmental_monitoring` | `zonal_stats` NDVI Sentinel-2, détection changement | C | GPKG diff temporel | planifié saison |
 
 ---
 
@@ -110,7 +110,7 @@ Pour la communication big-launch et les démos, quatre histoires complètes qui 
 
 1. Pre-flight : `reseau_topology_prep` sur le graphe routier (data prep).
 2. Preset `securite_sdis_thiessen` (théorique Community).
-3. Si tier Pro disponible : `securite_sdis_couverture` (réseau réel).
+3. `securite_sdis_couverture` (réseau réel).
 4. Comparaison Voronoi vs réseau dans QGIS plugin.
 5. Boucle : One-shot puis DML sur `UPDATE cis` (ouverture/fermeture caserne).
 
@@ -126,7 +126,7 @@ Pour la communication big-launch et les démos, quatre histoires complètes qui 
 
 ## Voir aussi
 
-- [`templates/INDEX.md`](../templates/INDEX.md) — catalogue détaillé des 21 presets, format JSON
+- [`templates/INDEX.md`](../templates/INDEX.md) — catalogue détaillé des 22 presets, format JSON
 - [`docs/INTEGRATION_MATRIX.md`](INTEGRATION_MATRIX.md) — matrice clients GIS × modes d'échange
 - [`docs/CLI_PORTAL_PARITY_AUDIT.md`](CLI_PORTAL_PARITY_AUDIT.md) — état de la dette de symétrie CLI ↔ Portal (5 P0 ouverts au 2026-05-03)
 - [`docs/TRIGGERS_GUIDE.md`](TRIGGERS_GUIDE.md) — sémantique des triggers DML / contrat webhook

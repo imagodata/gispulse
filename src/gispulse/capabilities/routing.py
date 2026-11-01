@@ -12,7 +12,7 @@ Unlike the :mod:`gispulse.capabilities.network` family, which routes *inside
 a line layer you provide*, ``route_pairs`` asks an external road model for
 the path between two points — no network layer needed.
 
-Requires ``tier="pro"`` like the rest of the routing/network family.
+Available in the Community tier like the rest of the routing/network family.
 """
 
 from __future__ import annotations
@@ -37,7 +37,6 @@ from gispulse.core.routing_providers import (
     TortuosityProvider,
     straight_distance,
 )
-from gispulse.persistence.tier import check_tier
 
 # Column contract of the emitted routed pairs. Module constant so the
 # empty-result branches and the populated branch stay in sync.
@@ -175,7 +174,6 @@ class RoutePairsCapability(Capability):
             RoutingError: échec de routage (code machine-readable) — sauf
                 paires sans itinéraire quand ``on_no_route="skip"``.
         """
-        check_tier("pro")
 
         if provider not in ("tortuosity", "osrm", "cached"):
             raise ValueError(
@@ -419,7 +417,6 @@ class CalibrateDetourBandsCapability(Capability):
         aligne les deux sur la règle inclusive du provider (une observation à
         exactement ``max_straight_m`` calibre le palier qu'elle utiliserait).
         """
-        check_tier("pro")
 
         parsed_bands = _parse_bands(bands)
         for col in (straight_col, routed_col):

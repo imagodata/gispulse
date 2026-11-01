@@ -9,7 +9,7 @@ Requires optional dependencies:
 These capabilities work in offline/session mode (no PostGIS required).
 For production routing on large networks, prefer pgRouting via PostGISSQLCapability.
 
-All capabilities in this module require tier="pro".
+All capabilities in this module are available in the Community tier.
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ from gispulse.capabilities.base import Capability
 from gispulse.capabilities.registry import register
 from gispulse.core.crs import is_angular
 from gispulse.core.network_graph_handle import NetworkGraph
-from gispulse.persistence.tier import check_tier
 
 
 @register
@@ -64,7 +63,6 @@ class ShortestPathCapability(Capability):
             GeoDataFrame des arcs constituant le chemin, avec colonne
             ``path_order``, reprojeté vers la CRS d'origine du ``gdf``.
         """
-        check_tier("pro")
 
         try:
             import networkx as nx
@@ -203,7 +201,6 @@ class IsochroneCapability(Capability):
             Avec ``cost_budgets``, une feature par budget avec la colonne
             ``cost_budget``. Toujours reprojeté vers la CRS d'origine.
         """
-        check_tier("pro")
 
         try:
             import networkx as nx
@@ -413,7 +410,6 @@ class NetworkAllocationCapability(Capability):
               (ou unité de ``weight_col``).
             - ``allocated``        : booléen — True si un hub a été trouvé dans le budget.
         """
-        check_tier("pro")
 
         try:
             import networkx as nx
@@ -583,7 +579,6 @@ class ConnectivityCheckCapability(Capability):
             Si return_components=True, une ligne par composante avec ``component_id``,
             ``n_edges``, et la géométrie (convex hull des arcs de la composante).
         """
-        check_tier("pro")
 
         try:
             import networkx as nx
@@ -763,7 +758,6 @@ class ODMatrixCapability(Capability):
             GeoDataFrame with columns origin_id, destination_id, cost, n_edges,
             geometry (path LineString or origin Point).
         """
-        check_tier("pro")
 
         if ref_gdf is None or ref_gdf.empty:
             raise ValueError("od_matrix requires an origins layer (ref_layer).")
@@ -882,7 +876,6 @@ class MinimumSpanningTreeCapability(Capability):
             gdf:        Input network layer (LineStrings).
             weight_col: Arc weight column. Defaults to geometric length.
         """
-        check_tier("pro")
 
         try:
             import networkx as nx
@@ -960,7 +953,6 @@ class SteinerTreeCapability(Capability):
             ``geometry``), reprojected to the network's original CRS. Empty
             when fewer than two distinct terminals snap onto the graph.
         """
-        check_tier("pro")
 
         try:
             import networkx as nx
@@ -1114,7 +1106,6 @@ class CommunityDetectionCapability(Capability):
             An edge whose endpoints fall in two different communities gets
             ``-1`` (community boundary).
         """
-        check_tier("pro")
 
         try:
             from networkx.algorithms import community as nx_comm

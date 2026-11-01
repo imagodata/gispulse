@@ -21,7 +21,6 @@ from gispulse.capabilities.network import (
     NetworkAllocationCapability,
     ShortestPathCapability,
 )
-from gispulse.persistence.tier import TierError
 
 
 # ---------------------------------------------------------------------------
@@ -68,47 +67,47 @@ def _community_env(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tier gating — all network capabilities require Pro
+# Tier gating — network capabilities are available in Community
 # ---------------------------------------------------------------------------
 
 
 class TestNetworkTierGating:
-    def test_shortest_path_blocked_in_community(self, monkeypatch):
+    def test_shortest_path_allowed_in_community(self, monkeypatch):
         _community_env(monkeypatch)
         gdf = _grid_network()
         cap = ShortestPathCapability()
-        with pytest.raises(TierError):
-            cap.execute(gdf, start_x=0, start_y=0, end_x=2, end_y=1)
+        result = cap.execute(gdf, start_x=0, start_y=0, end_x=2, end_y=1)
+        assert result is not None
 
-    def test_isochrone_blocked_in_community(self, monkeypatch):
+    def test_isochrone_allowed_in_community(self, monkeypatch):
         _community_env(monkeypatch)
         gdf = _grid_network()
         cap = IsochroneCapability()
-        with pytest.raises(TierError):
-            cap.execute(gdf, start_x=0, start_y=0, cost_budget=1.5)
+        result = cap.execute(gdf, start_x=0, start_y=0, cost_budget=1.5)
+        assert result is not None
 
-    def test_network_allocation_blocked_in_community(self, monkeypatch):
+    def test_network_allocation_allowed_in_community(self, monkeypatch):
         _community_env(monkeypatch)
         gdf = _grid_network()
         hubs = gpd.GeoDataFrame(
             [{"id": "H1", "geometry": Point(0, 0)}], crs="EPSG:4326"
         )
         cap = NetworkAllocationCapability()
-        with pytest.raises(TierError):
-            cap.execute(
-                gpd.GeoDataFrame(
-                    [{"geometry": Point(2, 1)}], geometry="geometry", crs="EPSG:4326"
-                ),
-                network_gdf=gdf,
-                hubs_gdf=hubs,
-            )
+        result = cap.execute(
+            gpd.GeoDataFrame(
+                [{"geometry": Point(2, 1)}], geometry="geometry", crs="EPSG:4326"
+            ),
+            network_gdf=gdf,
+            hubs_gdf=hubs,
+        )
+        assert result is not None
 
-    def test_connectivity_check_blocked_in_community(self, monkeypatch):
+    def test_connectivity_check_allowed_in_community(self, monkeypatch):
         _community_env(monkeypatch)
         gdf = _grid_network()
         cap = ConnectivityCheckCapability()
-        with pytest.raises(TierError):
-            cap.execute(gdf)
+        result = cap.execute(gdf)
+        assert result is not None
 
 
 # ---------------------------------------------------------------------------

@@ -221,9 +221,9 @@ gispulse capabilities
     centroid, area_length, dissolve, union, calculate, spatial_aggregate
   Validation (Community):
     topology_check, duplicate_geometry, attribute_validation, completeness_check
-  Raster (Pro):
+  Raster (Community):
     zonal_stats, raster_clip, ndvi, raster_reproject, raster_merge, change_detection
-  Network (Pro):
+  Network (Community):
     shortest_path, isochrone, network_allocation, connectivity_check
   SQL (Pro):
     postgis_sql

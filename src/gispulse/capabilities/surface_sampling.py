@@ -17,7 +17,7 @@ or by an explicit priority list; consecutive same-class segments are merged.
 No costs, no domain assumptions — converting segments to €/m (or anything
 else) is the consumer's job.
 
-Requires ``tier="pro"`` like the rest of the routing/network family it
+Available in the Community tier like the rest of the routing/network family it
 composes with.
 """
 
@@ -36,7 +36,6 @@ from shapely.ops import substring
 from gispulse.capabilities.base import Capability
 from gispulse.capabilities.registry import register
 from gispulse.core.crs import is_angular
-from gispulse.persistence.tier import check_tier
 
 # Length tolerance (m) below which a sub-segment is ignored: swallows the
 # numeric slivers produced by intersections at polygon borders.
@@ -228,7 +227,6 @@ class SampleSurfaceAlongLinesCapability(Capability):
         Raises:
             ValueError: couche surfacique absente ou ``class_col`` inconnue.
         """
-        check_tier("pro")
 
         if ref_gdf is None:
             raise ValueError(

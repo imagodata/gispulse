@@ -31,7 +31,7 @@ REGISTRY.get("buffer")().get_schema()
 ```
 :::
 
-**Total registered capabilities: 118** — across 18 categories.
+**Total registered capabilities: 144** — across 20+ families.
 
 [[toc]]
 
@@ -619,13 +619,9 @@ Loading and processing of LAS / LAZ pointclouds (ASPRS). Requires `laspy` (and `
 
 ---
 
-## Raster (Pro — `pip install "gispulse[raster]"`)
+## Raster (Community — `pip install "gispulse[raster]"`)
 
-Requires `rasterio` + `rasterstats` and a Pro license (`GISPULSE_TIER=pro`).
-
-::: info Pro tier
-Raster capabilities call `check_tier("pro")` at runtime.
-:::
+Requires `rasterio` + `rasterstats`. Available in the Community tier, no license needed.
 
 | Capability | Description | Key parameters |
 |-----------|-------------|----------------|
@@ -648,9 +644,9 @@ Raster capabilities call `check_tier("pro")` at runtime.
 
 ---
 
-## Network analysis (Pro — `pip install "gispulse[network]"`)
+## Network analysis (Community — `pip install "gispulse[network]"`)
 
-Requires `networkx` and a Pro license.
+Requires `networkx`. Available in the Community tier, no license needed.
 
 | Capability | Description | Key parameters |
 |-----------|-------------|----------------|
@@ -730,10 +726,13 @@ The DSN is never read from `config` — it is resolved from `GISPULSE_POSTGIS_DS
 | Line-network topology | 5 | Community | — |
 | Polygon topology | 4 | Community | — |
 | 3D Pointcloud | 4 | Community | `gispulse[pointcloud]` (`laspy`, `lazrs`) |
-| Raster | 6 | **Pro** | `gispulse[raster]` (`rasterio`, `rasterstats`) |
-| Network analysis | 13 | **Pro** | `gispulse[network]` (`networkx`) |
+| Raster | 6 | Community | `gispulse[raster]` (`rasterio`, `rasterstats`) |
+| Network analysis | 13 | Community | `gispulse[network]` (`networkx`) |
 | PostGIS SQL | 1 | **Pro** | `gispulse[postgis]` + DSN |
-| **Total** | **118** | | |
+| Other families (see the coverage matrix) | 18 | Community | — |
+| **Total** | **144** | | |
+
+Every capability is usable in Community, raster and network included. `postgis_sql` assumes a PostGIS engine (Pro tier): Pro is scoped to operations (PostGIS, cluster triggers, DAG, monitoring, cron).
 
 ---
 
