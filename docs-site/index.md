@@ -2,7 +2,7 @@
 layout: home
 title: GISPulse — Open data geospatial FR & BE, pret a l'emploi
 titleTemplate: false
-description: "22 sources open data FR/BE, 22 workflows metier, 144 capabilities spatiales, DuckDB embarque — aucun serveur requis. Open source AGPL-3.0."
+description: "22 sources open data FR/BE, 20+ workflows metier, 144 capabilities spatiales, DuckDB embarque — aucun serveur requis. Open source AGPL-3.0."
 
 head:
   - - meta
@@ -13,7 +13,7 @@ head:
       content: "GISPulse — Open data geospatial FR & BE, pret a l'emploi"
   - - meta
     - property: og:description
-      content: "22 sources open data FR/BE, 22 workflows metier, 144 capabilities, DuckDB embarque. Sauvegardez dans QGIS, vos regles se declenchent."
+      content: "22 sources open data FR/BE, 20+ workflows metier, 144 capabilities, DuckDB embarque. Sauvegardez dans QGIS, vos regles se declenchent."
   - - meta
     - property: og:type
       content: website
@@ -22,12 +22,12 @@ head:
       content: "GISPulse — Open data geospatial FR & BE, pret a l'emploi"
   - - meta
     - name: twitter:description
-      content: "22 sources open data FR/BE, 22 workflows metier, 144 capabilities. Open source, DuckDB embarque."
+      content: "22 sources open data FR/BE, 20+ workflows metier, 144 capabilities. Open source, DuckDB embarque."
 
 hero:
   name: GISPulse
   text: "L'open data geospatial FR & BE, pret a l'emploi."
-  tagline: "22 sources (cadastre, DVF, PLU/GPU, BAN, Georisques, INSEE, IGN, RNB, BDNB… et GRB / PICC / UrbIS / Statbel pour la Belgique), 22 workflows metier (ZAN, validation PLU/CNIG, exposition inondation, marche DVF, hotspots FTTH, couverture SDIS…), 144 capabilities spatiales, DuckDB embarque — aucun serveur requis. Sauvegardez dans QGIS, vos regles se declenchent. v2.5.1."
+  tagline: "22 sources (cadastre, DVF, PLU/GPU, BAN, Georisques, INSEE, IGN, RNB, BDNB… et GRB / PICC / UrbIS / Statbel pour la Belgique), 20+ workflows metier (ZAN, validation PLU/CNIG, exposition inondation, marche DVF, hotspots FTTH, couverture SDIS…), 144 capabilities spatiales, DuckDB embarque — aucun serveur requis. Sauvegardez dans QGIS, vos regles se declenchent. v2.5.1."
   image:
     light: /logo.svg
     dark: /logo-dark.svg
@@ -48,7 +48,7 @@ features:
     linkText: Sources de donnees
 
   - icon: "🧩"
-    title: 22 workflows metier
+    title: 20+ workflows metier
     details: "ZAN, validation PLU/CNIG, exposition inondation, marche DVF, hotspots FTTH, couverture SDIS… des pipelines JSON prets a lancer."
     link: /templates
     linkText: Catalogue des workflows
@@ -99,7 +99,7 @@ features:
 <section class="gp-section gp-coming-soon-banner">
 <div class="gp-coming-soon">
   <span class="gp-coming-soon-badge">v2.5.1</span>
-  <p>GISPulse v2.5.1 est disponible. Depuis la 2.0 : sources belges GRB / PICC / UrbIS (preuve de niveau des traversees de voirie en Flandre, Wallonie et Bruxelles), expansion et resilience de reseau (<code>network_greedy_expansion</code>, <code>network_bridges</code>, <code>network_redundancy</code>, <code>disjoint_paths</code>), fournisseurs de routage (<code>route_pairs</code>), cartes sauvegardees, durcissement securite, ecriture CSV/XLSX, 22 workflows metier et 144 capabilities, toutes gratuites (raster et reseau inclus).</p>
+  <p>GISPulse v2.5.1 est disponible. Depuis la 2.0 : sources belges GRB / PICC / UrbIS (preuve de niveau des traversees de voirie en Flandre, Wallonie et Bruxelles), expansion et resilience de reseau (<code>network_greedy_expansion</code>, <code>network_bridges</code>, <code>network_redundancy</code>, <code>disjoint_paths</code>), fournisseurs de routage (<code>route_pairs</code>), cartes sauvegardees, durcissement securite, ecriture CSV/XLSX, 20+ workflows metier et 144 capabilities, toutes gratuites (raster et reseau inclus).</p>
   <a href="/gispulse/getting-started/installation" class="gp-coming-soon-cta">Installer maintenant</a>
 </div>
 </section>

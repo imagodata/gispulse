@@ -2,7 +2,7 @@
 layout: home
 title: GISPulse — French & Belgian open geodata, ready to run
 titleTemplate: false
-description: "22 FR/BE open-data sources, 22 business workflows, 144 spatial capabilities, DuckDB inside — no server needed. Open source AGPL-3.0."
+description: "22 FR/BE open-data sources, 20+ business workflows, 144 spatial capabilities, DuckDB inside — no server needed. Open source AGPL-3.0."
 
 head:
   - - meta
@@ -13,7 +13,7 @@ head:
       content: "GISPulse — French & Belgian open geodata, ready to run"
   - - meta
     - property: og:description
-      content: "22 FR/BE open-data sources, 22 business workflows, 144 capabilities, DuckDB inside. Save in QGIS, your rules fire."
+      content: "22 FR/BE open-data sources, 20+ business workflows, 144 capabilities, DuckDB inside. Save in QGIS, your rules fire."
   - - meta
     - property: og:type
       content: website
@@ -22,12 +22,12 @@ head:
       content: "GISPulse — French & Belgian open geodata, ready to run"
   - - meta
     - name: twitter:description
-      content: "22 FR/BE open-data sources, 22 business workflows, 144 capabilities. Open source, DuckDB inside."
+      content: "22 FR/BE open-data sources, 20+ business workflows, 144 capabilities. Open source, DuckDB inside."
 
 hero:
   name: GISPulse
   text: "French & Belgian open geodata, ready to run."
-  tagline: "22 sources (cadastre, DVF, PLU/GPU, BAN, Géorisques, INSEE, IGN, RNB, BDNB… and GRB / PICC / UrbIS / Statbel for Belgium), 22 ready-made business workflows (ZAN land-take, PLU/CNIG validation, flood-risk exposure, DVF market, FTTH hotspots, SDIS coverage…), 144 spatial capabilities, DuckDB inside — no server needed. Save in QGIS, your rules fire. v2.5.1."
+  tagline: "22 sources (cadastre, DVF, PLU/GPU, BAN, Géorisques, INSEE, IGN, RNB, BDNB… and GRB / PICC / UrbIS / Statbel for Belgium), 20+ ready-made business workflows (ZAN land-take, PLU/CNIG validation, flood-risk exposure, DVF market, FTTH hotspots, SDIS coverage…), 144 spatial capabilities, DuckDB inside — no server needed. Save in QGIS, your rules fire. v2.5.1."
   image:
     light: /logo.svg
     dark: /logo-dark.svg
@@ -48,7 +48,7 @@ features:
     linkText: Data sources
 
   - icon: "🧩"
-    title: 22 business workflows
+    title: 20+ business workflows
     details: "ZAN land-take, PLU/CNIG validation, flood-risk exposure, DVF market, FTTH hotspots, SDIS coverage… ready-to-run JSON pipelines."
     link: /en/templates
     linkText: Workflow catalogue
@@ -99,7 +99,7 @@ features:
 <section class="gp-section gp-coming-soon-banner">
 <div class="gp-coming-soon">
   <span class="gp-coming-soon-badge">v2.5.1</span>
-  <p>GISPulse v2.5.1 is available. Since 2.0: Belgian GRB / PICC / UrbIS sources (road-crossings level evidence for Flanders, Wallonia and Brussels), network expansion and resilience (<code>network_greedy_expansion</code>, <code>network_bridges</code>, <code>network_redundancy</code>, <code>disjoint_paths</code>), routing providers (<code>route_pairs</code>), saved maps, security hardening, CSV/XLSX write, 22 business workflows and 144 capabilities, all free (raster and network included).</p>
+  <p>GISPulse v2.5.1 is available. Since 2.0: Belgian GRB / PICC / UrbIS sources (road-crossings level evidence for Flanders, Wallonia and Brussels), network expansion and resilience (<code>network_greedy_expansion</code>, <code>network_bridges</code>, <code>network_redundancy</code>, <code>disjoint_paths</code>), routing providers (<code>route_pairs</code>), saved maps, security hardening, CSV/XLSX write, 20+ business workflows and 144 capabilities, all free (raster and network included).</p>
   <a href="/gispulse/en/getting-started/installation" class="gp-coming-soon-cta">Install now</a>
 </div>
 </section>

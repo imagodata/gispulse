@@ -5,7 +5,7 @@
 <h1 align="center">GISPulse — French &amp; Belgian open geodata, ready to run.</h1>
 
 <p align="center">
-  <strong>22 open-data sources (cadastre, DVF, PLU/GPU, BAN, Géorisques, INSEE, IGN, RNB, BDNB… and GRB/PICC/UrbIS/Statbel for Belgium), 22 ready-made business workflows (ZAN land-take, PLU/CNIG validation, flood-risk exposure, DVF market, FTTH hotspots, SDIS coverage…), 144 spatial capabilities, DuckDB inside — no server needed.<br>Save in QGIS, your rules fire.</strong>
+  <strong>22 open-data sources (cadastre, DVF, PLU/GPU, BAN, Géorisques, INSEE, IGN, RNB, BDNB… and GRB/PICC/UrbIS/Statbel for Belgium), 20+ ready-made business workflows (ZAN land-take, PLU/CNIG validation, flood-risk exposure, DVF market, FTTH hotspots, SDIS coverage…), 144 spatial capabilities, DuckDB inside — no server needed.<br>Save in QGIS, your rules fire.</strong>
 </p>
 
 [![PyPI version](https://img.shields.io/pypi/v/gispulse.svg)](https://pypi.org/project/gispulse/)
@@ -53,7 +53,7 @@ The GRB/PICC/UrbIS road-crossings evidence builders (grade-separated vs ground, 
 
 ### Ready-made business workflows
 
-22 pipeline templates in [`templates/`](templates/) (index: [`templates/INDEX.md`](templates/INDEX.md)). List them with `gispulse template list`, copy one with `gispulse template use <name>`.
+20+ pipeline templates in [`templates/`](templates/) (index: [`templates/INDEX.md`](templates/INDEX.md)). List them with `gispulse template list`, copy one with `gispulse template use <name>`.
 
 | Domain | Workflows |
 |---|---|
@@ -348,7 +348,7 @@ gispulse/
     catalog/        # GIS data catalog
     tiling/         # PMTiles / MVT writers
   plugins/          # 6 capability plugins + 23 data-source plugins (FR, BE, OSM)
-  templates/        # 22 business pipeline templates
+  templates/        # 20+ business pipeline templates
   qgis_plugin/      # QGIS companion plugin
   sdk/              # Python SDK client library (httpx + pydantic)
   deploy/           # Production VPS: docker-compose, Caddy, Prometheus, Grafana, backups

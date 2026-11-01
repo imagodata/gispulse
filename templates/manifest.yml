@@ -127,7 +127,7 @@ entries:
           size: 245760
       # connectivity_check is a Pro capability on 2.5.x builds: the demo stops
       # there with a readable message until network capabilities are Community.
-      note: "Muret (31): 319 troncons de voirie OSM (Pro)"
+      note: "Muret (31): 319 troncons de voirie OSM"
   - name: retail_huff_chalandise
     title: "retail_huff_chalandise"
     description: "Modele de Huff de zones de chalandise — isochrones drive-time depuis magasins, calcul des parts de marche par IRIS selon attractivite (surface commerciale / distance^beta) et identification des whitespace."

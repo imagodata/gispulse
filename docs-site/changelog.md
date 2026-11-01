@@ -11,12 +11,22 @@ La source de vérité de ce fichier est [`CHANGELOG.md`](https://github.com/imag
 
 ## [Unreleased]
 
+### Ajouté
+
+- `gispulse demo list|run` : démos hors-ligne sur les échantillons bundlés (`cadastre_topology_cleanup`, `risques_inondation_parcelles`, `services_aires_influence`, `reseau_topology_prep`), exécutées par le même moteur que `gispulse run` ; échantillons résolus depuis `examples/`, un cache utilisateur ou le tag de release (SHA-256 vérifié). Deux petits templates Community sur les données de Muret.
+
 ### Modifié
 
+- **Plugin QGIS publiable sur plugins.qgis.org.** Fichier `LICENSE` dans le plugin (obligatoire depuis juin 2024), `experimental=False`, job optionnel `publish-qgis-plugin` dans `release.yml` (secrets `OSGEO_USERNAME` / `OSGEO_PASSWORD`).
 - **Les capabilities raster et réseau passent au tier Community.** Les 144 capabilities sont désormais gratuites ; Pro est réservé à l'exploitation (moteur PostGIS/hybride, triggers ESB cluster, exécuteur DAG, éditeur visuel, monitoring, pipelines cron). Le gate de tier générique est inchangé et bloque toujours les fonctionnalités Pro en Community.
+
+### Corrigé
+
+- Le schéma de pipeline v2 accepte les métadonnées de catalogue des templates (`domain`, `author`, `tags`, …) ; `cadastre_topology_cleanup` et `reseau_topology_prep` ne passent plus de paramètres inconnus à `topology_check` / `connectivity_check`.
 
 ### Documentation
 
+- `server.json` (manifeste du registre MCP) et `docs/distribution/` (publication MCP, fiches de réutilisation data.gouv.fr, feuille de route distribution T4 2026).
 - README et docs-site repositionnés autour de l'open data français et belge ; compteurs alignés sur 2.5.1 et 144 capabilities ; suppression des références à l'add-in ArcGIS et à l'application desktop Tauri, qui n'existent pas.
 
 ---

@@ -33,7 +33,7 @@ AGPL-3.0 license. Open-source.
 **Included:**
 - Full DuckDB engine
 - All 144 capabilities (vector, attributes, classification, stats, topology, network, raster, 3D)
-- 16 FR/BE data sources and 22 business workflows
+- 22 FR/BE data sources and 20+ business workflows
 - CLI — all commands
 - Single-user portal
 - Python SDK, MCP server
@@ -170,7 +170,7 @@ AGPL-3.0 license. Open-source.
 
 ### Is GISPulse Community really free?
 
-Yes, with no time limit and no limit on local data. All 144 capabilities (raster and network included), the 16 FR/BE data sources and the 22 business workflows are included. The code is open under AGPL-3.0 — you can modify and redistribute it under the terms of the license. Pro adds operations: PostGIS, cluster triggers, DAG executor, visual editor, monitoring, cron pipelines.
+Yes, with no time limit and no limit on local data. All 144 capabilities (raster and network included), the 22 FR/BE data sources and the 20+ business workflows are included. The code is open under AGPL-3.0 — you can modify and redistribute it under the terms of the license. Pro adds operations: PostGIS, cluster triggers, DAG executor, visual editor, monitoring, cron pipelines.
 
 ### What is the difference between AGPL-3.0 and the Pro license?
 

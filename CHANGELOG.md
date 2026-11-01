@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `gispulse demo list|run`: bundled offline demos (`cadastre_topology_cleanup`,
+  `risques_inondation_parcelles`, `services_aires_influence`,
+  `reseau_topology_prep`). `demo list` shows which templates ship a sample
+  (`demo:` block in `templates/manifest.yml`, the single source of truth);
+  `demo run <template> [--out DIR] [--param STEP.PARAM=VALUE] [--force]`
+  stages the sample, runs the template through the regular pipeline executor
+  and writes every leaf step as a layer of
+  `./gispulse-demo/<template>/<template>.gpkg`, next to a replayable
+  `pipeline.json`. Samples resolve from `--data-dir`, the repository
+  `examples/`, or a per-user cache (`~/.cache/gispulse/demo`) filled from the
+  release tag on GitHub with SHA-256 verification — neither `examples/` nor
+  `templates/` ships in the wheel.
+- Two small Community templates that run on the bundled Muret samples:
+  `risques_inondation_parcelles` (parcels x flood zoning, surface per risk
+  level) and `services_aires_influence` (Voronoi catchments of OSM amenities).
+- `PipelineResult.step_results` (`SessionManager.run_pipeline_v2`): every
+  step's output, not only the last one.
+- `server.json` (MCP registry manifest for `io.github.imagodata/gispulse`) and
+  `docs/distribution/` (MCP registry publishing, data.gouv.fr reuse sheets,
+  Q4 2026 distribution roadmap in `docs/roadmap-distribution-2026-q4.md`).
+
 ### Changed
 
 - **Raster and network capabilities move to the Community tier.** `raster` and
@@ -18,6 +41,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   executor, visual editor, monitoring, cron pipelines). The generic
   `enforce_feature` / `check_tier` gate is unchanged and still blocks Pro-only
   features in Community.
+- **QGIS plugin ready for plugins.qgis.org.** The plugin folder now ships a
+  `LICENSE` file (mandatory on the QGIS plugin repository since June 2024 —
+  previous ZIPs could not be uploaded), `experimental=False` so it shows in
+  the default plugin catalogue, and `homepage` points to the documentation
+  site. `release.yml` gains an optional `publish-qgis-plugin` job
+  (`scripts/upload_qgis_plugin.py`, XML-RPC `plugin.upload`) that runs when
+  the `OSGEO_USERNAME` / `OSGEO_PASSWORD` secrets are set. Maintainer guide
+  rewritten in `qgis_plugin/PUBLISHING.md`; install docs no longer link to a
+  private issue.
+
+### Fixed
+
+- The pipeline v2 schema accepts the catalogue metadata carried by the bundled
+  templates (`domain`, `author`, `tags`, `inputs_notes`, `requires_pro`,
+  `requires_plugins`); `gispulse run -r templates/<x>.json` no longer fails
+  with "Additional properties are not allowed".
+- `cadastre_topology_cleanup`: `topology_check` has no `tolerance` parameter;
+  `reseau_topology_prep`: `connectivity_check` has no `tolerance`,
+  `check_dangling` or `check_isolated` parameter. The executor rejected both
+  templates at that step.
 
 ### Documentation
 
