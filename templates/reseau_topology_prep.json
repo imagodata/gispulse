@@ -59,11 +59,7 @@
       "id": "connectivite_avant_merge",
       "type": "capability",
       "capability": "connectivity_check",
-      "params": {
-        "tolerance": 0.1,
-        "check_dangling": true,
-        "check_isolated": true
-      },
+      "params": {},
       "input": "dedup_edges"
     },
     {

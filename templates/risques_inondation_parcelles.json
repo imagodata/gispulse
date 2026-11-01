@@ -1,0 +1,62 @@
+{
+  "version": 2,
+  "name": "risques_inondation_parcelles",
+  "description": "Exposition des parcelles au risque inondation — croisement d'une couche parcellaire avec un zonage inondable (PPRI, AZI, TRI), surface exposee par parcelle et emprise exposee dissoute par niveau de risque.",
+  "domain": "risques_naturels",
+  "author": "GISPulse",
+  "tags": ["inondation", "ppri", "parcelles", "exposition", "risques"],
+  "ref_layers": {
+    "zones_inondables": "data/zones_inondables.gpkg"
+  },
+  "inputs_notes": "Entree = couche parcellaire polygonale (cadastre, PLU, RPG...). Ref 'zones_inondables' = zonage inondable polygonal avec un champ risk_level ('high' / 'medium' / 'low') — adapter l'expression du step 'zones_retenues' au vocabulaire de la source (ex. TYPEZONE pour un PPRI Georisques). Sorties : 'indicateurs' = une ligne par couple parcelle x zone retenue avec area_m2 et surface_ha ; 'bilan_zones' = emprise parcellaire exposee, dissoute par niveau de risque. Version allegee de risques_ppri_exposition, sans population ni ERP.",
+  "steps": [
+    {
+      "id": "reprojection",
+      "type": "capability",
+      "capability": "reproject",
+      "params": { "target_crs": "EPSG:2154" }
+    },
+    {
+      "id": "zones_retenues",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "risk_level in ['high', 'medium']" },
+      "input": "zones_inondables"
+    },
+    {
+      "id": "parcelles_exposees",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "zones_retenues",
+        "predicate": "intersects",
+        "how": "inner",
+        "columns": ["risk_level"]
+      },
+      "input": "reprojection"
+    },
+    {
+      "id": "surfaces",
+      "type": "capability",
+      "capability": "area_length",
+      "params": {},
+      "input": "parcelles_exposees"
+    },
+    {
+      "id": "indicateurs",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expressions": { "surface_ha": "round(area_m2 / 10000, 3)" }
+      },
+      "input": "surfaces"
+    },
+    {
+      "id": "bilan_zones",
+      "type": "capability",
+      "capability": "dissolve",
+      "params": { "by": "risk_level" },
+      "input": "surfaces"
+    }
+  ]
+}

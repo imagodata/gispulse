@@ -48,6 +48,10 @@ class PipelineResult:
     features_out: int = 0
     engine_used: str = "python"
     layers_loaded: list[str] = field(default_factory=list)
+    #: ``step_id → GeoDataFrame`` for every step that produced output
+    #: (v2 pipelines only). ``gdf`` is the last of them; callers that need
+    #: every DAG leaf (e.g. ``gispulse demo run``) read this instead.
+    step_results: dict[str, gpd.GeoDataFrame] = field(default_factory=dict)
 
 
 @dataclass
@@ -314,6 +318,7 @@ class SessionManager:
         if out_str:
             log.info("pipeline_v2_output_written", path=out_str, features=features_out)
 
+        step_ids = {s.id for s in spec.steps}
         return PipelineResult(
             gdf=result_gdf,
             output_path=out_str,
@@ -322,6 +327,7 @@ class SessionManager:
             features_out=features_out,
             engine_used=engine_used,
             layers_loaded=layers_loaded,
+            step_results={k: v for k, v in results.items() if k in step_ids},
         )
 
     @staticmethod
