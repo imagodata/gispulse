@@ -192,6 +192,38 @@ jobs:
             --notes-file release-notes.md \
             dist/*.whl dist/*.tar.gz dist/gispulse-qgis-plugin-*.zip dist/SHA256SUMS
 
-  # ── 4. Docker image to GHCR (deferred — Dockerfile is engine + viewer
+  # ── 4. Upload the plugin ZIP to plugins.qgis.org (optional) ─────────
+  #      Runs only when the OSGEO_USERNAME / OSGEO_PASSWORD repository
+  #      secrets are set (an OSGeo user id, not a GitHub account). Same
+  #      XML-RPC call as the Plugin Builder's plugin_upload.py — see
+  #      qgis_plugin/PUBLISHING.md. Skipped, not failed, without secrets.
+  publish-qgis-plugin:
+    name: Publish QGIS plugin to plugins.qgis.org
+    needs: [build-plugin-zip, github-release]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      OSGEO_USERNAME: ${{ secrets.OSGEO_USERNAME }}
+      OSGEO_PASSWORD: ${{ secrets.OSGEO_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Download plugin ZIP from build-plugin-zip job
+        if: env.OSGEO_PASSWORD != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: qgis-plugin-zip
+          path: dist/
+
+      - name: Upload to plugins.qgis.org
+        if: env.OSGEO_PASSWORD != ''
+        run: python3 scripts/upload_qgis_plugin.py dist/gispulse-qgis-plugin-*.zip
+
+      - name: Skipped — no OSGeo credentials configured
+        if: env.OSGEO_PASSWORD == ''
+        run: echo "OSGEO_USERNAME / OSGEO_PASSWORD secrets not set; upload to plugins.qgis.org skipped (manual fallback in qgis_plugin/PUBLISHING.md)."
+
+  # ── 5. Docker image to GHCR (deferred — Dockerfile is engine + viewer
   #      only since the portal/ split. Push job will be reinstated as a
   #      follow-up once the GHCR creds + tagging policy are agreed.)

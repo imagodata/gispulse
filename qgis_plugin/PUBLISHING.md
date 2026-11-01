@@ -1,94 +1,106 @@
 # Publishing the GISPulse QGIS plugin
 
-Maintainer workflow for shipping the plugin to the official
-[QGIS Plugin Repository](https://plugins.qgis.org/).
+Maintainer workflow for the official
+[QGIS Plugin Repository](https://plugins.qgis.org/). This file is
+excluded from the user-facing ZIP by `scripts/build_qgis_plugin_zip.py`.
+
+## What the repository validates
+
+Checks performed by `qgis-app/plugins/validator.py` on every upload:
+
+- ZIP ≤ 25 MB with exactly one top-level folder (`gispulse/`), no `.pyc`,
+  no `__pycache__`, `.git` or `__MACOSX` entries.
+- `gispulse/metadata.txt` with the required keys `name`, `description`,
+  `version`, `qgisMinimumVersion`, `author`, `email`, `about`, `tracker`,
+  `repository`.
+- **`gispulse/LICENSE` present** — mandatory since 3 June 2024
+  (QGIS-Enhancement-Proposals #279). `qgis_plugin/LICENSE` is a copy of the
+  repository's AGPL-3.0 licence and `tests/unit/test_qgis_plugin_scaffold.py`
+  asserts it lands in the ZIP. ZIPs built before this file existed were
+  rejected by the upload form.
+- `homepage`, `tracker` and `repository` URLs must resolve: the validator
+  follows them. `homepage` points to the documentation site
+  (`https://imagodata.github.io/gispulse/`) for as long as `gispulse.dev`
+  is not served.
+- `experimental=False`. Experimental plugins are hidden by default in the
+  QGIS plugin manager ("Show also experimental plugins" is off), which is
+  why the 1.5–2.5.1 metadata would have made the plugin invisible to most
+  users even once listed.
 
 ## Prerequisites
 
-1. An OSGeo / QGIS account with maintainer rights on the `GISPulse`
-   plugin once it exists (the first upload creates the entry under
-   the uploader's account; transfer to `imagodata` org is a follow-up
-   request to the QGIS plugin admins).
-2. A tagged release on this repo (`v*.*.*`) — the
-   [release workflow](../.github/workflows/release.yml) builds the
-   ZIP and attaches it to the GitHub Release.
+1. An OSGeo user id
+   (<https://www.osgeo.org/community/getting-started-osgeo/osgeo_userid/>).
+   The first upload creates the plugin entry under that account; ask the
+   plugin approvers to add co-maintainers afterwards.
+2. A tagged release `vX.Y.Z` — the
+   [release workflow](../.github/workflows/release.yml) builds
+   `dist/gispulse-qgis-plugin-X.Y.Z.zip` and attaches it to the GitHub
+   Release. Never upload a dirty local build.
 
-## First-time submission
+## First submission (manual, once)
 
-Done **once** for the lifetime of the plugin entry on plugins.qgis.org.
+1. `make plugin-zip-check && make plugin-zip`.
+2. Install the ZIP in a fresh QGIS profile (**Extensions → Install from
+   ZIP**), then **Extensions → GISPulse → Check gispulse install…**.
+3. Sign in at <https://plugins.qgis.org/> and upload the ZIP at
+   <https://plugins.qgis.org/plugins/add/>. The form prints validator
+   errors verbatim, which is why the first upload is done by hand.
+4. The plugin is reviewed by the QGIS plugin approvers (days to a few
+   weeks). Until approval it is installable only through its direct page;
+   after approval it appears in the default catalogue.
+5. Reviewer feedback: edit `metadata.txt` (and whatever it points at), bump
+   `version=` to the next patch and re-upload. **Never** edit a published
+   version in place — QGIS caches by version number.
 
-1. Confirm `qgis_plugin/metadata.txt` is up to date — see the field
-   inventory below.
-2. Run `make plugin-zip-check` to enforce the
-   `metadata.txt` ↔ `pyproject.toml` lockstep.
-3. Run `make plugin-zip` and verify the resulting ZIP installs cleanly
-   in a fresh QGIS profile via Extensions → Install from ZIP.
-4. Sign in to <https://plugins.qgis.org/> and open
-   <https://plugins.qgis.org/plugins/add/>.
-5. Upload `dist/gispulse-qgis-plugin-<version>.zip` from a tagged
-   release (do **not** upload a dirty local build). The form parses
-   `metadata.txt` to populate the listing.
-6. The plugin lands as `experimental` (because `experimental=True` in
-   metadata) — it's installable immediately for users who tick "Show
-   experimental plugins" in QGIS, but won't appear in the default
-   plugin list until a reviewer approves the entry.
-7. Reviewer turnaround is typically 1–4 weeks. While waiting, the
-   GitHub Release ZIP remains the canonical install path; both routes
-   point at the same artefact.
+## Subsequent releases (automated)
 
-## Subsequent releases
+The `publish-qgis-plugin` job of `release.yml` uploads the freshly built ZIP
+through the repository's XML-RPC endpoint
+(`scripts/upload_qgis_plugin.py`, the same `plugin.upload` call as the
+Plugin Builder's `plugin_upload.py`) whenever the repository secrets
+`OSGEO_USERNAME` and `OSGEO_PASSWORD` are set. Without them the job is
+skipped, not failed.
 
-Once the plugin entry exists, every new tagged release should bump it.
+Manual fallback: <https://plugins.qgis.org/plugins/GISPulse/> → **Manage
+versions → Upload new version**.
 
-1. Bump `qgis_plugin/metadata.txt` `version=` and prepend a new
-   `changelog=` entry. Keep the version in lockstep with
-   `pyproject.toml` — `make plugin-zip-check` enforces this.
-2. Push a tag `v*.*.*` — CI builds + attaches the ZIP to the GitHub
-   Release ([`build-plugin-zip` job](../.github/workflows/release.yml)).
-3. From <https://plugins.qgis.org/plugins/GISPulse/>, click **Manage
-   versions → Upload new version** and pick the freshly tagged ZIP.
-4. Publishing a new version retains the `experimental` flag from
-   metadata; flip it to `False` only after a beta cycle (target:
-   v1.6.x).
+Per-release checklist for the plugin:
+
+1. Bump `version=` in `qgis_plugin/metadata.txt` (lockstep with
+   `pyproject.toml`, enforced by `make plugin-zip-check` and by CI).
+2. Rename the top `changelog=` entry to the released version and describe
+   the user-visible change (or "no behaviour change; lockstep bump").
+3. Keep `experimental=False` and `deprecated=False`.
 
 ## metadata.txt field inventory
 
 | Field | Status | Notes |
 |---|---|---|
-| `name` | required | Free-form, must be unique in the QGIS repo |
-| `qgisMinimumVersion` | required | We pin `3.28` (LTR) |
-| `qgisMaximumVersion` | recommended | We pin `3.99` to allow 3.x bumps |
+| `name` | required | Free-form, unique in the QGIS repo |
+| `qgisMinimumVersion` | required | `3.28` (LTR) |
+| `qgisMaximumVersion` | optional | `3.99` to allow 3.x bumps |
 | `description` | required | ≤ 512 chars, single line |
 | `about` | required | Multiline, used as the listing body |
 | `version` | required | semver, **must** match the wheel version |
 | `author` | required | Display name |
 | `email` | required | Public — visible on the listing |
-| `homepage` | recommended | <https://gispulse.dev> |
-| `tracker` | recommended | GitHub issues URL |
-| `repository` | recommended | GitHub repo URL |
-| `icon` | recommended | 24×24 PNG, path relative to `metadata.txt` |
-| `category` | recommended | `Vector` for us |
-| `tags` | recommended | CSV, used for search ranking |
-| `experimental` | recommended | `True` until v1.6.x |
-| `deprecated` | recommended | `False` |
-| `hasProcessingProvider` | recommended | `no` (no processing algorithms exposed) |
-| `server` | recommended | `False` (no server-side plugin) |
+| `homepage` | optional | Docs site (validator follows the URL) |
+| `tracker` | required | GitHub issues URL |
+| `repository` | required | GitHub repo URL |
+| `icon` | optional | PNG, path relative to `metadata.txt` |
+| `category` | optional | `Vector` |
+| `tags` | optional | CSV, used for search ranking |
+| `experimental` | optional | `False` since 2.5.2 |
+| `deprecated` | optional | `False` |
+| `hasProcessingProvider` | optional | `no` |
+| `server` | optional | `False` |
 | `plugin_dependencies` | optional | none |
-| `changelog` | recommended | Multiline; QGIS renders it on the version page |
-
-## Reviewer feedback
-
-If the OSGeo reviewer asks for changes, edit `metadata.txt` (and any
-referenced files), bump `version` to the next patch (e.g. 1.5.1 →
-1.5.2), and re-upload via the standard release workflow above.
-**Do not** edit a published version in place — the QGIS plugin manager
-caches by version number and won't re-fetch.
+| `changelog` | optional | Multiline; QGIS renders it on the version page |
+| `LICENSE` file | required | Not a metadata key: a file next to `metadata.txt` |
 
 ## Post-approval comms
 
-Out of scope for this repo, but the planned channels are:
-
-- A short `Mastodon @foss4g.org` toot
-- A LinkedIn post on the company page
-- A note in the next release announcement on
-  [`docs.gispulse.dev/changelog`](https://docs.gispulse.dev/changelog)
+Out of scope for this repo; planned channels are a toot on
+`@foss4g.org`, a LinkedIn post, and a note in the next release
+announcement on the documentation changelog.
