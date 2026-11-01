@@ -5,7 +5,7 @@
   "domain": "mobilite",
   "author": "GISPulse",
   "tags": ["isochrone", "accessibilite", "insee", "gtfs", "services"],
-  "requires_pro": true,
+  "requires_pro": false,
   "ref_layers": {
     "reseau_routier": "data/bd_topo_tronçons.gpkg",
     "poi_origine": "data/gares_centres_bourgs.gpkg",

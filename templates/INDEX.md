@@ -17,7 +17,7 @@ Bibliothèque de workflows métier prêts à l'emploi. Chaque preset est un fich
 | Preset | Format | Complexité | Notes |
 |--------|--------|------------|-------|
 | [cadastre_topology_cleanup.json](cadastre_topology_cleanup.json) | v2 | ★★ | **[démo]** Nettoyage coverage polygonale : make_valid → snap_to_grid → polygon_snap_borders → polygon_fix_gaps → polygon_fix_overlaps → polygon_remove_slivers. Data prep avant analyse stricte |
-| [reseau_topology_prep.json](reseau_topology_prep.json) | v2 | ★★ | **[démo]** Nettoyage graphe linéaire : network_snap_endpoints → extend_dangles → node_lines → remove_duplicates → connectivity_check → remove_pseudo_nodes. Prérequis `shortest_path`/`isochrone` (connectivity_check = PRO sur les builds 2.5.x) |
+| [reseau_topology_prep.json](reseau_topology_prep.json) | v2 | ★★ | **[démo]** Nettoyage graphe linéaire : network_snap_endpoints → extend_dangles → node_lines → remove_duplicates → connectivity_check → remove_pseudo_nodes. Prérequis `shortest_path`/`isochrone`. Extra `gispulse[network]` (networkx) |
 
 ### Télécom / FTTH
 
@@ -39,7 +39,7 @@ Bibliothèque de workflows métier prêts à l'emploi. Chaque preset est un fich
 
 | Preset | Format | Complexité | Notes |
 |--------|--------|------------|-------|
-| [risques_inondation_parcelles.json](risques_inondation_parcelles.json) | v2 | ★ | **[démo]** Parcelles × zonage inondable : filtre des zones retenues → spatial_join → area_length → surface_ha, plus emprise exposée dissoute par niveau de risque |
+| [risques_inondation_parcelles.json](risques_inondation_parcelles.json) | v2 | ★★ | **[démo]** Parcelles × zonage inondable : filtre des zones retenues → overlay_intersection (découpe géométrique) → area_length EPSG:2154 → `indicateurs` (partie exposée de chaque parcelle par niveau, `surface_ha`) ; dissolve par niveau → area_length → `bilan_zones` (emprise exposée par niveau, `surface_ha`) |
 | [risques_ppri_exposition.json](risques_ppri_exposition.json) | v2 | ★★★ | Bâti + pop + ERP sensibles exposés aux PPRI, avec trigger DML auto-flag |
 
 ### Environnement / Biodiversité / Eau
@@ -54,7 +54,7 @@ Bibliothèque de workflows métier prêts à l'emploi. Chaque preset est un fich
 
 | Preset | Format | Complexité | Notes |
 |--------|--------|------------|-------|
-| [mobilite_accessibilite_services.json](mobilite_accessibilite_services.json) | v2 | ★★★ | Isochrones 15/30 min + pop INSEE + services BPE + zones blanches (PRO) |
+| [mobilite_accessibilite_services.json](mobilite_accessibilite_services.json) | v2 | ★★★ | Isochrones 15/30 min + pop INSEE + services BPE + zones blanches |
 
 ### Services / Équipements de proximité
 
@@ -79,20 +79,20 @@ Bibliothèque de workflows métier prêts à l'emploi. Chaque preset est un fich
 
 | Preset | Format | Complexité | Notes |
 |--------|--------|------------|-------|
-| [energie_solaire_toiture.json](energie_solaire_toiture.json) | v2 | ★★★★ | Potentiel solaire PV toiture : irradiation × pente × orientation × puissance × ABF (PRO + rasters requis) |
+| [energie_solaire_toiture.json](energie_solaire_toiture.json) | v2 | ★★★★ | Potentiel solaire PV toiture : irradiation × pente × orientation × puissance × ABF (rasters requis, extra `gispulse[raster]`) |
 
 ### Sécurité civile / SDIS
 
 | Preset | Format | Complexité | Notes |
 |--------|--------|------------|-------|
-| [securite_sdis_couverture.json](securite_sdis_couverture.json) | v2 | ★★★ | SDACR : isochrones C1 10min / C2 20min + zones blanches + routes inondables (PRO) |
+| [securite_sdis_couverture.json](securite_sdis_couverture.json) | v2 | ★★★ | SDACR : isochrones C1 10min / C2 20min + zones blanches + routes inondables |
 | [securite_sdis_thiessen.json](securite_sdis_thiessen.json) | v2 | ★★ | Zones de premier appel Voronoï autour des CIS + pop INSEE + ERP sensibles + niveau de tension effectif |
 
 ### Santé publique
 
 | Preset | Format | Complexité | Notes |
 |--------|--------|------------|-------|
-| [sante_apl_deserts.json](sante_apl_deserts.json) | v2 | ★★★★ | APL méthode DREES : offre ETP / pop dans isochrone 20 min + double peine précarité (PRO) |
+| [sante_apl_deserts.json](sante_apl_deserts.json) | v2 | ★★★★ | APL méthode DREES : offre ETP / pop dans isochrone 20 min + double peine précarité |
 
 ### Bâtiment / Rénovation
 
@@ -104,7 +104,7 @@ Bibliothèque de workflows métier prêts à l'emploi. Chaque preset est un fich
 
 | Preset | Format | Complexité | Notes |
 |--------|--------|------------|-------|
-| [retail_huff_chalandise.json](retail_huff_chalandise.json) | v2 | ★★★★ | Modèle Huff : parts de marché par IRIS + whitespace + potentiel CA zones blanches (PRO) |
+| [retail_huff_chalandise.json](retail_huff_chalandise.json) | v2 | ★★★★ | Modèle Huff : parts de marché par IRIS + whitespace + potentiel CA zones blanches |
 
 ---
 
@@ -137,10 +137,10 @@ curl -X POST http://localhost:8000/pipelines/run \
   -d @templates/urbanisme_zan_bilan.json
 ```
 
-### Tiers et pré-requis
+### Pré-requis
 
-- **Community (default)** : tous les presets non marqués `requires_pro`
-- **PRO** : presets nécessitant `isochrone`, `network_allocation`, `zonal_stats`, plugins raster
+- **Capabilities** : toutes les capabilities du registre sont Community — aucun preset n'exige de licence (`requires_pro` vaut `false` partout).
+- **Extras Python** : les capabilities réseau (`connectivity_check`, `shortest_path`, `isochrone`, `network_*`) demandent `pip install "gispulse[network]"` (networkx) ; les capabilities raster (`zonal_stats`) demandent `pip install "gispulse[raster]"` (rasterio). Pour les démos, le bloc `demo.requires_extras` du manifest le déclare et `gispulse demo run` le vérifie avant de lancer.
 - **Plugins additionnels** : indiqués dans le champ `requires_plugins` du JSON
 
 ---
@@ -157,8 +157,10 @@ Pour retrouver rapidement un preset utilisant une capability précise :
 | `intersects` | environnement_tvb_ruptures, agriculture_rpg_bcae, environnement_iota_loi_eau |
 | `clip` | urbanisme_zan_bilan, environnement_iota_loi_eau, services_aires_influence |
 | `dissolve` | environnement_tvb_ruptures, risques_inondation_parcelles |
+| `overlay_intersection` | risques_inondation_parcelles |
+| `select_columns` | risques_inondation_parcelles |
 | `centroid` | retail_huff_chalandise |
-| `area_length` | urbanisme_zan_bilan, risques_ppri, urbanisme_permis, foncier_parcelles_vacantes, environnement_iota_loi_eau, batiment_dpe, energie_solaire_toiture |
+| `area_length` | urbanisme_zan_bilan, risques_ppri, urbanisme_permis, foncier_parcelles_vacantes, environnement_iota_loi_eau, batiment_dpe, energie_solaire_toiture, risques_inondation_parcelles, services_aires_influence |
 | `calculate` | tous |
 | `spatial_aggregate` | urbanisme_zan_bilan, risques_ppri, mobilite_accessibilite, foncier_dvf, sante_apl_deserts, retail_huff, batiment_dpe, environnement_tvb_ruptures, agriculture_rpg_bcae |
 | `reproject` | risques_ppri, agriculture_rpg_bcae, energie_solaire_toiture, securite_sdis, mobilite_accessibilite, urbanisme_permis, batiment_dpe |

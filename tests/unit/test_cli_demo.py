@@ -170,10 +170,27 @@ class TestSampleResolver:
         data_dir = tmp_path / "flat"
         data_dir.mkdir()
         (data_dir / "x.gpkg").write_bytes(self.PAYLOAD)
+        (data_dir / "manifest.yml").write_bytes(b"entries: []\n")
         resolver = SampleResolver(
             data_dir=data_dir, cache_dir=tmp_path / "cache", fetcher=self._boom, repo_roots=[]
         )
         assert resolver.resolve(self.REL) == data_dir / "x.gpkg"
+        assert resolver.resolve("templates/manifest.yml") == data_dir / "manifest.yml"
+
+    def test_data_dir_is_a_repo_like_root_for_samples_and_templates(self, tmp_path: Path) -> None:
+        """``--data-dir`` serves ``examples/…`` AND ``templates/…`` — no checkout, cache or network."""
+        data_dir = tmp_path / "copy-of-repo"
+        (data_dir / "examples" / "datasets").mkdir(parents=True)
+        (data_dir / "templates").mkdir()
+        (data_dir / "examples" / "datasets" / "x.gpkg").write_bytes(self.PAYLOAD)
+        (data_dir / "templates" / "manifest.yml").write_bytes(b"entries: []\n")
+        (data_dir / "templates" / "t.json").write_bytes(b"{}")
+        resolver = SampleResolver(
+            data_dir=data_dir, cache_dir=tmp_path / "cache", fetcher=self._boom, repo_roots=[]
+        )
+        assert resolver.resolve(self.REL, sha256=self.SHA) == data_dir / self.REL
+        assert resolver.resolve("templates/manifest.yml") == data_dir / "templates" / "manifest.yml"
+        assert resolver.resolve("templates/t.json") == data_dir / "templates" / "t.json"
 
     def test_checkout_hit(self, tmp_path: Path) -> None:
         root = tmp_path / "repo"
@@ -184,15 +201,15 @@ class TestSampleResolver:
 
     def test_cache_hit_when_hash_matches(self, tmp_path: Path) -> None:
         cache = tmp_path / "cache"
-        cached = cache / self.REL
+        cached = cache / "v1.2.3" / self.REL
         cached.parent.mkdir(parents=True)
         cached.write_bytes(self.PAYLOAD)
-        resolver = SampleResolver(cache_dir=cache, fetcher=self._boom, repo_roots=[])
+        resolver = SampleResolver(cache_dir=cache, fetcher=self._boom, repo_roots=[], ref="v1.2.3")
         assert resolver.resolve(self.REL, sha256=self.SHA) == cached
 
     def test_stale_cache_is_redownloaded(self, tmp_path: Path) -> None:
         cache = tmp_path / "cache"
-        cached = cache / self.REL
+        cached = cache / "v9.9.9" / self.REL
         cached.parent.mkdir(parents=True)
         cached.write_bytes(b"stale")
         calls: list[str] = []
@@ -216,12 +233,31 @@ class TestSampleResolver:
 
         resolver = SampleResolver(cache_dir=cache, fetcher=fetch, repo_roots=[], ref="v1.2.3")
         path = resolver.resolve(self.REL, sha256=self.SHA)
-        assert path == cache / self.REL
+        assert path == cache / "v1.2.3" / self.REL
         assert path.read_bytes() == self.PAYLOAD
         assert calls == [f"{_RAW_BASE}/v1.2.3/{self.REL}"]
         # Second call: served from the cache, no download.
         resolver.fetcher = self._boom
         assert resolver.resolve(self.REL, sha256=self.SHA) == path
+
+    def test_cache_is_keyed_on_the_download_ref(self, tmp_path: Path) -> None:
+        """An upgrade (new ref) never serves the manifest cached by the previous version."""
+        cache = tmp_path / "cache"
+        old = cache / "v1.0.0" / "templates" / "manifest.yml"
+        old.parent.mkdir(parents=True)
+        old.write_bytes(b"entries: [old]\n")
+        calls: list[str] = []
+
+        def fetch(url: str) -> bytes:
+            calls.append(url)
+            return b"entries: [new]\n"
+
+        resolver = SampleResolver(cache_dir=cache, fetcher=fetch, repo_roots=[], ref="v2.0.0")
+        path = resolver.resolve("templates/manifest.yml")
+        assert path == cache / "v2.0.0" / "templates" / "manifest.yml"
+        assert path.read_bytes() == b"entries: [new]\n"
+        assert calls == [f"{_RAW_BASE}/v2.0.0/templates/manifest.yml"]
+        assert old.read_bytes() == b"entries: [old]\n"  # untouched
 
     def test_sha256_mismatch_is_an_error_and_nothing_is_cached(self, tmp_path: Path) -> None:
         cache = tmp_path / "cache"
@@ -230,7 +266,7 @@ class TestSampleResolver:
         )
         with pytest.raises(DemoError, match="SHA-256 mismatch"):
             resolver.resolve(self.REL, sha256=self.SHA)
-        assert not (cache / self.REL).exists()
+        assert not (cache / "v1.2.3" / self.REL).exists()
         assert not list(cache.rglob("*.part")) if cache.exists() else True
 
     def test_path_traversal_is_rejected(self, tmp_path: Path) -> None:
@@ -328,15 +364,109 @@ class TestDemoRunFakeRepo:
 
     def test_existing_out_dir_needs_force(self, fake_repo: Path, tmp_path: Path) -> None:
         out = tmp_path / "out"
-        out.mkdir()
+        result = runner.invoke(app, ["demo", "run", "tiny_buffer", "--out", str(out)])
+        assert result.exit_code == 0, result.output
+        assert (out / cli_demo._MARKER).is_file()
         (out / "stale.txt").write_text("x")
         result = runner.invoke(app, ["demo", "run", "tiny_buffer", "--out", str(out)])
         assert result.exit_code == 1
         assert "already exists" in result.output
+        assert (out / "stale.txt").exists()
         result = runner.invoke(app, ["demo", "run", "tiny_buffer", "--out", str(out), "--force"])
         assert result.exit_code == 0, result.output
         assert not (out / "stale.txt").exists()
         assert (out / "tiny_buffer.gpkg").is_file()
+        assert (out / cli_demo._MARKER).is_file()
+
+    def test_force_refuses_a_directory_without_the_marker(self, fake_repo: Path, tmp_path: Path) -> None:
+        """``--out ~/Documents --force`` must not wipe a folder the demo did not write."""
+        documents = tmp_path / "Documents"
+        documents.mkdir()
+        (documents / "thesis.docx").write_text("precious")
+        result = runner.invoke(
+            app, ["demo", "run", "tiny_buffer", "--out", str(documents), "--force"]
+        )
+        assert result.exit_code == 1
+        assert "not a gispulse demo output directory" in result.output
+        assert (documents / "thesis.docx").read_text() == "precious"
+        assert not (documents / "tiny_buffer.gpkg").exists()
+
+    def test_empty_existing_out_dir_is_reused(self, fake_repo: Path, tmp_path: Path) -> None:
+        out = tmp_path / "empty"
+        out.mkdir()
+        result = runner.invoke(app, ["demo", "run", "tiny_buffer", "--out", str(out)])
+        assert result.exit_code == 0, result.output
+        assert (out / "tiny_buffer.gpkg").is_file()
+
+    def test_offline_with_data_dir_and_no_checkout(
+        self, fake_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A wheel-only install, offline, with a copy of the repo tree passed as --data-dir."""
+        monkeypatch.setattr(cli_demo, "_REPO_ROOT", tmp_path / "no-checkout")
+        monkeypatch.setattr(cli_demo, "_default_cache_dir", lambda: tmp_path / "empty-cache")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        def no_network(url: str) -> bytes:
+            raise DemoError(f"offline: {url}")
+
+        monkeypatch.setattr(cli_demo, "_http_fetch", no_network)
+
+        # Without --data-dir nothing can be found and the message says what to do.
+        result = runner.invoke(app, ["demo", "list"])
+        assert result.exit_code == 1
+        assert "cannot find templates/manifest.yml" in result.output
+        assert "--data-dir" in result.output
+
+        result = runner.invoke(app, ["demo", "list", "--data-dir", str(fake_repo)])
+        assert result.exit_code == 0, result.output
+        assert "tiny_buffer" in result.output
+        out = tmp_path / "out"
+        result = runner.invoke(
+            app, ["demo", "run", "tiny_buffer", "--data-dir", str(fake_repo), "--out", str(out)]
+        )
+        assert result.exit_code == 0, result.output
+        assert (out / "tiny_buffer.gpkg").is_file()
+        assert not (tmp_path / "empty-cache").exists()
+
+    def test_missing_extra_is_reported_before_staging(
+        self, fake_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        manifest = fake_repo / "templates" / "manifest.yml"
+        text = manifest.read_text(encoding="utf-8")
+        assert "      params:\n" in text
+        manifest.write_text(
+            text.replace("      params:\n", "      requires_extras: [network]\n      params:\n", 1),
+            encoding="utf-8",
+        )
+        out = tmp_path / "out"
+
+        monkeypatch.setattr(cli_demo, "_EXTRA_MODULES", {"network": ("gispulse_no_such_module_xyz",)})
+        result = runner.invoke(app, ["demo", "list"])
+        assert result.exit_code == 0, result.output
+        assert "network" in next(line for line in result.output.splitlines() if "tiny_buffer" in line)
+        result = runner.invoke(app, ["demo", "run", "tiny_buffer", "--out", str(out)])
+        assert result.exit_code == 1
+        assert 'pip install "gispulse[network]"' in result.output
+        assert not out.exists()  # nothing staged
+
+        monkeypatch.setattr(cli_demo, "_EXTRA_MODULES", {"network": ("json",)})
+        result = runner.invoke(app, ["demo", "run", "tiny_buffer", "--out", str(out)])
+        assert result.exit_code == 0, result.output
+
+        monkeypatch.setattr(cli_demo, "_EXTRA_MODULES", {"raster": ("json",)})
+        result = runner.invoke(app, ["demo", "run", "tiny_buffer", "--out", str(out), "--force"])
+        assert result.exit_code == 1
+        assert "unknown extra 'network'" in result.output
+
+    def test_executed_count_matches_the_steps_that_ran(self, fake_repo: Path, tmp_path: Path) -> None:
+        out = tmp_path / "out"
+        result = runner.invoke(app, ["demo", "run", "tiny_buffer", "--out", str(out)])
+        assert result.exit_code == 0, result.output
+        assert "3 step(s) executed" in result.output
+        # Two leaves were written: the replay hint must say `gispulse run` writes one.
+        assert "writes the final step only (surf)" in result.output
 
     def test_unknown_template_and_missing_sample(self, fake_repo: Path, tmp_path: Path) -> None:
         result = runner.invoke(app, ["demo", "run", "nope", "--out", str(tmp_path / "o")])
@@ -388,6 +518,24 @@ def test_real_manifest_has_at_least_three_demos_with_valid_templates() -> None:
         for key in entry.demo.params:
             step_id = key.partition(".")[0]
             assert step_id in {s.id for s in spec.steps}, f"{entry.name}: override {key}"
+        for extra in entry.demo.requires_extras:
+            assert extra in cli_demo._EXTRA_MODULES, f"{entry.name}: unknown extra {extra}"
+    by_name = {e.name: e for e in entries}
+    assert by_name["reseau_topology_prep"].demo is not None
+    assert by_name["reseau_topology_prep"].demo.requires_extras == ["network"]
+
+
+def test_real_templates_declare_no_pro_requirement() -> None:
+    """Every capability is Community on this branch: no template may still flag requires_pro."""
+    _real_demo_entries()
+    for path in sorted((REPO_ROOT / "templates").glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            assert not payload.get("requires_pro"), f"{path.name} still flags requires_pro"
+    index = (REPO_ROOT / "templates" / "INDEX.md").read_text(encoding="utf-8")
+    assert "(PRO" not in index
+    manifest = (REPO_ROOT / "templates" / "manifest.yml").read_text(encoding="utf-8")
+    assert "Pro capability" not in manifest
 
 
 def test_real_manifest_hashes_match_the_bundled_samples() -> None:
@@ -419,7 +567,61 @@ def test_demo_run_fast_bundled_demos(template: str, expected_layers: set[str], t
     gpkg = out / f"{template}.gpkg"
     assert set(list_layers(str(gpkg))) == expected_layers
     for layer in expected_layers:
-        assert len(read_vector(str(gpkg), layer=layer)) > 0
+        gdf = read_vector(str(gpkg), layer=layer)
+        assert len(gdf) > 0
+        # Surfaces are measured in the layer's own metric CRS (EPSG:2154), not
+        # in the area_length default EPSG:3857 (which was off by ~1.9x here).
+        assert gdf.crs is not None and gdf.crs.to_epsg() == 2154
+        assert "area_m2" in gdf.columns
+        assert gdf["area_m2"].to_numpy() == pytest.approx(gdf.geometry.area.to_numpy(), rel=1e-6)
+
+
+def test_flood_demo_exposed_surfaces_are_true(tmp_path: Path) -> None:
+    """indicateurs = exposed part of each parcel per level; bilan_zones = dissolved footprint per level."""
+    from gispulse.persistence.io import read_vector
+
+    _real_demo_entries()
+    out = tmp_path / "flood"
+    result = runner.invoke(app, ["demo", "run", "risques_inondation_parcelles", "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    gpkg = out / "risques_inondation_parcelles.gpkg"
+    indicateurs = read_vector(str(gpkg), layer="indicateurs")
+    bilan = read_vector(str(gpkg), layer="bilan_zones")
+    zones = read_vector(str(REPO_ROOT / "examples" / "datasets" / "muret_flood_zones.gpkg")).to_crs(2154)
+    zone_ha = zones.set_index("risk_level").geometry.area / 10_000
+
+    assert set(indicateurs["risk_level"]) == {"high", "medium"}
+    # One row per parcel x zone: no parcel listed twice within a level.
+    assert not indicateurs.duplicated(["parcelle_id", "risk_level"]).any()
+    # The exposed part of a parcel never exceeds the parcel's own (geometric) area.
+    parcels = read_vector(str(out / "inputs" / "muret_parcels.gpkg"), layer="parcels").to_crs(2154)
+    parcel_m2 = parcels.assign(m2=parcels.geometry.area).groupby("parcelle_id")["m2"].max()
+    whole = parcel_m2.reindex(indicateurs["parcelle_id"]).to_numpy()
+    assert (indicateurs["area_m2"].to_numpy() <= whole * (1 + 1e-6) + 1e-3).all()
+    assert set(bilan.columns) == {"risk_level", "area_m2", "surface_ha", "geometry"}
+    assert list(bilan["risk_level"]) == ["high", "medium"]
+    for level, group in indicateurs.groupby("risk_level"):
+        exposed = float(group["surface_ha"].sum())
+        footprint = float(bilan.loc[bilan["risk_level"] == level, "surface_ha"].iloc[0])
+        assert exposed <= zone_ha[level], level
+        assert footprint <= zone_ha[level], level
+        # Dissolving counts parcel overlaps once: footprint <= sum, and close to it.
+        assert footprint <= exposed + 1e-3, level
+        assert footprint == pytest.approx(exposed, rel=1e-3), level
+
+
+def test_services_demo_every_cell_has_its_school(tmp_path: Path) -> None:
+    from gispulse.persistence.io import read_vector
+
+    _real_demo_entries()
+    out = tmp_path / "services"
+    result = runner.invoke(app, ["demo", "run", "services_aires_influence", "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    cells = read_vector(str(out / "services_aires_influence.gpkg"), layer="indicateurs")
+    assert len(cells) == 10
+    assert cells["name"].notna().all(), cells["name"].tolist()
+    assert cells["name"].is_unique
+    assert set(cells["amenity"]) == {"school", "kindergarten"}
 
 
 @pytest.mark.slow

@@ -112,6 +112,29 @@ class TestRunPipelineV2:
         # All features pass filter (value > 20: 25, 50, 75, 100)
         assert result.features_out == 4
 
+    def test_step_results_are_opt_in(self, input_gpkg):
+        """Intermediate frames are only kept when a caller asks for them."""
+        spec = PipelineSpec(
+            version=2,
+            name="test_keep",
+            steps=[
+                StepSpec(id="filter", capability="filter",
+                         params={"expression": "value > 20"}),
+                StepSpec(id="centroid", capability="centroid",
+                         params={}, input="filter"),
+            ],
+        )
+        sm = SessionManager(engine="python")
+
+        default = sm.run_pipeline_v2(input_path=input_gpkg, spec=spec)
+        assert default.step_results == {}
+        assert default.rules_applied == 2  # the DAG executor's input node is not a step
+
+        kept = sm.run_pipeline_v2(input_path=input_gpkg, spec=spec, keep_step_results=True)
+        assert set(kept.step_results) == {"filter", "centroid"}
+        assert len(kept.step_results["filter"]) == 4
+        assert kept.rules_applied == 2
+
     def test_empty_pipeline(self, input_gpkg):
         """Pipeline with no enabled steps returns original data."""
         spec = PipelineSpec(

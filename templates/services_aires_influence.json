@@ -5,7 +5,7 @@
   "domain": "services",
   "author": "GISPulse",
   "tags": ["voronoi", "thiessen", "equipements", "services", "accessibilite", "osm"],
-  "inputs_notes": "Entree = couche de points d'equipements avec un champ amenity (tags OSM : school, pharmacy, doctors...) et un champ name. Adapter l'expression du step 'selection' au type d'equipement etudie. L'emprise de travail est l'enveloppe concave de tous les points en entree ; pour une decoupe administrative, remplacer 'emprise' par un ref_layer (commune, EPCI). Approche a vol d'oiseau : pour des aires reseau, voir la capability isochrone (securite_sdis_couverture).",
+  "inputs_notes": "Entree = couche de points d'equipements avec un champ amenity (tags OSM : school, pharmacy, doctors...) et un champ name. Adapter l'expression du step 'selection' au type d'equipement etudie. L'emprise de travail est l'enveloppe concave de tous les points en entree ; pour une decoupe administrative, remplacer 'emprise' par un ref_layer (commune, EPCI). Le rattachement du nom utilise le predicat 'intersects' : un equipement situe sur le bord de l'enveloppe (donc sur le bord de sa cellule decoupee) est tout de meme rattache. Les surfaces sont calculees en EPSG:2154 (Lambert-93) : changer 'target_crs' et 'crs_meters' hors France metropolitaine. Approche a vol d'oiseau : pour des aires reseau, voir la capability isochrone (securite_sdis_couverture).",
   "steps": [
     {
       "id": "reprojection",
@@ -47,7 +47,7 @@
       "capability": "spatial_join",
       "params": {
         "ref_layer": "selection",
-        "predicate": "contains",
+        "predicate": "intersects",
         "how": "left",
         "columns": ["name", "amenity"]
       },
@@ -57,7 +57,7 @@
       "id": "surfaces",
       "type": "capability",
       "capability": "area_length",
-      "params": {},
+      "params": { "crs_meters": "EPSG:2154", "compute_length": false },
       "input": "rattache"
     },
     {

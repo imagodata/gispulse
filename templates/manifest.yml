@@ -11,13 +11,18 @@
 # to examples/; `ref_layers` values may pin a container layer with
 # `path#layer`; `params` are "<step_id>.<param>": value overrides applied
 # in memory (the template file itself is never edited); `files` pins the
-# SHA-256 and size of every sample file so the download path can verify it.
+# SHA-256 and size of every sample file so the download path can verify it;
+# `requires_extras` lists the optional dependency groups of pyproject.toml
+# (`network`, `raster`, ...) a step needs — `gispulse demo run` checks they
+# are importable before staging anything and prints the `pip install
+# "gispulse[<extra>]"` to run otherwise.
 #
 #   demo:
 #     input: datasets/muret_parcels.gpkg
 #     layer: parcels
 #     ref_layers: {zones_inondables: datasets/muret_flood_zones.gpkg#flood_zones}
 #     params: {}
+#     requires_extras: []
 #     files:
 #       datasets/muret_parcels.gpkg: {sha256: "<hex>", size: 7249920}
 #     note: "Muret (31): 17 212 parcelles cadastrales"
@@ -121,12 +126,12 @@ entries:
     demo:
       input: datasets/muret_osm.gpkg
       layer: roads
+      # connectivity_check builds a networkx graph: pip install "gispulse[network]".
+      requires_extras: [network]
       files:
         datasets/muret_osm.gpkg:
           sha256: "0b894f127caea71c5e118c23f4563eb5f87cca5afa316eb86d70bf3dfb1761cf"
           size: 245760
-      # connectivity_check is a Pro capability on 2.5.x builds: the demo stops
-      # there with a readable message until network capabilities are Community.
       note: "Muret (31): 319 troncons de voirie OSM"
   - name: retail_huff_chalandise
     title: "retail_huff_chalandise"
@@ -136,8 +141,8 @@ entries:
     file: retail_huff_chalandise.json
   - name: risques_inondation_parcelles
     title: "risques_inondation_parcelles"
-    description: "Exposition des parcelles au risque inondation — croisement d'une couche parcellaire avec un zonage inondable (PPRI, AZI, TRI), surface exposee par parcelle et emprise exposee dissoute par niveau de risque."
-    steps: 6
+    description: "Exposition des parcelles au risque inondation — decoupe geometrique (overlay) d'une couche parcellaire par un zonage inondable (PPRI, AZI, TRI) : surface reellement exposee de chaque parcelle par niveau de risque ('indicateurs'), puis emprise exposee dissoute par niveau avec sa surface ('bilan_zones')."
+    steps: 10
     domain: "risques_naturels"
     file: risques_inondation_parcelles.json
     demo:
@@ -152,7 +157,10 @@ entries:
         datasets/muret_flood_zones.gpkg:
           sha256: "1c7aacadcc3156364c436787edbc576390d70d5b32e1ccf4c04edfa638e4218e"
           size: 110592
-      note: "Muret (31): parcelles x 3 zones PPRi Garonne"
+      # Zones 'high' and 'medium' are kept (filter step); 'indicateurs' holds
+      # the part of each parcel inside a zone with its surface, 'bilan_zones'
+      # the dissolved exposed footprint per level with its surface.
+      note: "Muret (31): parcelles x zones PPRi Garonne (high, medium)"
   - name: risques_ppri_exposition
     title: "risques_ppri_exposition"
     description: "Diagnostic d'exposition au risque inondation — croisement du bati et de la population avec les zonages PPRI (rouge/bleu), calcul du nombre de logements, habitants et etablissements sensibles exposes."

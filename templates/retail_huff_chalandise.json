@@ -5,7 +5,7 @@
   "domain": "retail_geomarketing",
   "author": "GISPulse",
   "tags": ["huff", "retail", "chalandise", "geomarketing", "whitespace"],
-  "requires_pro": true,
+  "requires_pro": false,
   "ref_layers": {
     "magasins": "data/magasins_enseigne.gpkg",
     "reseau_routier": "data/bd_topo_tronçons.gpkg",
