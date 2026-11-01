@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs
+
+- `server.json` (MCP registry manifest) and `docs/distribution/` (MCP registry, data.gouv reuses, Q4 2026 distribution roadmap)
+
 ## [2.5.1] - 2026-10-01
 
 The PICC and UrbIS source plugins move to 0.2.0 and now declare
