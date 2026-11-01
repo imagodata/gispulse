@@ -35,7 +35,7 @@ gispulse demo run cadastre_topology_cleanup    # fetches the 7 MB Muret sample o
 
 ### Open-data sources (France and Belgium)
 
-Each source is a plugin that knows where the data lives, how to page through it, and how to turn it into a clean GeoParquet/GeoPackage layer. Sources live in [`plugins/`](plugins/) and are installed on demand, e.g. `pip install "gispulse-src-dvf @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-dvf"`. List what is installed with `gispulse source catalog`.
+Each source is a plugin that knows where the data lives, how to page through it, and how to turn it into a clean GeoParquet/GeoPackage layer. Sources live in [`plugins/`](plugins/) and are installed on demand, e.g. `pip install "gispulse-src-dvf @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-dvf"`. List what is installed with `gispulse source catalog`.
 
 | Country | Domain | Plugins |
 |---|---|---|

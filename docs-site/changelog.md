@@ -11,6 +11,8 @@ La source de vérité de ce fichier est [`CHANGELOG.md`](https://github.com/imag
 
 ## [Unreleased]
 
+## [2.6.0] — 2026-11-01
+
 ### Ajouté
 
 - `gispulse demo list|run` : démos sur les échantillons de Muret (lus depuis `examples/` dans un checkout, sinon téléchargés une fois depuis le tag de release) (`cadastre_topology_cleanup`, `risques_inondation_parcelles`, `services_aires_influence`, `reseau_topology_prep`), exécutées par le même moteur que `gispulse run` ; échantillons résolus depuis `examples/`, un cache utilisateur ou le tag de release (SHA-256 vérifié). Deux petits templates Community sur les données de Muret.

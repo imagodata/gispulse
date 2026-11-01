@@ -125,11 +125,11 @@ gispulse run data.gpkg --rules rules.json -o output.gpkg --engine duckdb
 
 ## GISPulse est-il pret pour la production ?
 
-Oui. **GISPulse v2.5.1** est la version stable courante : 144 capabilities, 22 sources de donnees FR/BE, 20+ workflows metier, 3 600+ tests, moteur multi-backend DuckDB / PostGIS, metriques Prometheus, RBAC, SSO (OIDC / SAML), audit log et stockage S3. La CLI, l'API REST, le SDK Python, le plugin QGIS et le serveur MCP sont livres ; ArcGIS Pro consomme GISPulse via OGC API Features. La v2.0.0 a ajoute l'ExtensionHub a 2 regimes (code plugins + data packs), l'agregateur geo mondial (4 fetchers) et le serveur MCP.
+Oui. **GISPulse v2.6.0** est la version stable courante : 144 capabilities, 22 sources de donnees FR/BE, 20+ workflows metier, 3 600+ tests, moteur multi-backend DuckDB / PostGIS, metriques Prometheus, RBAC, SSO (OIDC / SAML), audit log et stockage S3. La CLI, l'API REST, le SDK Python, le plugin QGIS et le serveur MCP sont livres ; ArcGIS Pro consomme GISPulse via OGC API Features. La v2.0.0 a ajoute l'ExtensionHub a 2 regimes (code plugins + data packs), l'agregateur geo mondial (4 fetchers) et le serveur MCP.
 
 | Composant | Statut |
 |-----------|--------|
-| Moteur (DuckDB / PostGIS / GPKG portable) | **Stable — v2.5.1** |
+| Moteur (DuckDB / PostGIS / GPKG portable) | **Stable — v2.6.0** |
 | CLI | **Stable** |
 | API REST + SDK Python | **Stable** |
 | 144 capabilities (vecteur, attributs, classification, stats, topologie, 3D pointcloud, raster, reseau, routage, PostGIS SQL) | **Stable** |

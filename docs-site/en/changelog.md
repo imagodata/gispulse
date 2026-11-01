@@ -11,6 +11,8 @@ The authoritative version of this file lives at [`CHANGELOG.md`](https://github.
 
 ## [Unreleased]
 
+## [2.6.0] — 2026-11-01
+
 ### Added
 
 - `gispulse demo list|run`: demos on the Muret samples (read from `examples/` in a checkout, otherwise fetched once from the release tag) (`cadastre_topology_cleanup`, `risques_inondation_parcelles`, `services_aires_influence`, `reseau_topology_prep`) run by the same executor as `gispulse run`; samples resolve from `examples/`, a per-user cache or the release tag (SHA-256 verified). Two small Community templates on the Muret samples.

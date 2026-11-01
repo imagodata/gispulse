@@ -27,7 +27,7 @@ head:
 hero:
   name: GISPulse
   text: "L'open data geospatial FR & BE, pret a l'emploi."
-  tagline: "22 sources (cadastre, DVF, PLU/GPU, BAN, Georisques, INSEE, IGN, RNB, BDNB… et GRB / PICC / UrbIS / Statbel pour la Belgique), 20+ workflows metier (ZAN, validation PLU/CNIG, exposition inondation, marche DVF, hotspots FTTH, couverture SDIS…), 144 capabilities spatiales, DuckDB embarque — aucun serveur requis. Sauvegardez dans QGIS, vos regles se declenchent. v2.5.1."
+  tagline: "22 sources (cadastre, DVF, PLU/GPU, BAN, Georisques, INSEE, IGN, RNB, BDNB… et GRB / PICC / UrbIS / Statbel pour la Belgique), 20+ workflows metier (ZAN, validation PLU/CNIG, exposition inondation, marche DVF, hotspots FTTH, couverture SDIS…), 144 capabilities spatiales, DuckDB embarque — aucun serveur requis. Sauvegardez dans QGIS, vos regles se declenchent. v2.6.0."
   image:
     light: /logo.svg
     dark: /logo-dark.svg
@@ -98,8 +98,8 @@ features:
 
 <section class="gp-section gp-coming-soon-banner">
 <div class="gp-coming-soon">
-  <span class="gp-coming-soon-badge">v2.5.1</span>
-  <p>GISPulse v2.5.1 est disponible. Depuis la 2.0 : sources belges GRB / PICC / UrbIS (preuve de niveau des traversees de voirie en Flandre, Wallonie et Bruxelles), expansion et resilience de reseau (<code>network_greedy_expansion</code>, <code>network_bridges</code>, <code>network_redundancy</code>, <code>disjoint_paths</code>), fournisseurs de routage (<code>route_pairs</code>), cartes sauvegardees, durcissement securite, ecriture CSV/XLSX, 20+ workflows metier et 144 capabilities, toutes gratuites (raster et reseau inclus).</p>
+  <span class="gp-coming-soon-badge">v2.6.0</span>
+  <p>GISPulse v2.6.0 est disponible. Depuis la 2.0 : sources belges GRB / PICC / UrbIS (preuve de niveau des traversees de voirie en Flandre, Wallonie et Bruxelles), expansion et resilience de reseau (<code>network_greedy_expansion</code>, <code>network_bridges</code>, <code>network_redundancy</code>, <code>disjoint_paths</code>), fournisseurs de routage (<code>route_pairs</code>), cartes sauvegardees, durcissement securite, ecriture CSV/XLSX, 20+ workflows metier et 144 capabilities, toutes gratuites (raster et reseau inclus).</p>
   <a href="/gispulse/getting-started/installation" class="gp-coming-soon-cta">Installer maintenant</a>
 </div>
 </section>
@@ -422,7 +422,7 @@ FME reste un excellent outil pour des workflows graphiques complexes. GISPulse c
 
 <section class="gp-footer-cta-big">
 
-<h2>GISPulse v2.5.1 est disponible</h2>
+<h2>GISPulse v2.6.0 est disponible</h2>
 <p>Installez GISPulse et lancez votre premier pipeline spatial en 5 minutes.</p>
 
 <div class="gp-footer-cta-actions">

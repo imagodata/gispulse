@@ -15,7 +15,7 @@ alors en vigueur ; les sources consultées sont listées en fin de document.
 |---|---|
 | Commande | `gispulse mcp` (transport **stdio** uniquement, voir `src/gispulse/cli_mcp.py`) |
 | Extra PyPI requis | `gispulse[mcp]` (`fastmcp>=2.14.2,<4.0`, `fiona`) |
-| Paquet PyPI | `gispulse` 2.5.1 |
+| Paquet PyPI | `gispulse` 2.6.0 |
 | Nom dans le registre | `io.github.imagodata/gispulse` |
 | Manifeste | `server.json` à la racine du dépôt |
 | Variable d'environnement lue | `GISPULSE_MCP_WORKDIR` (répertoire auquel tous les chemins d'outils sont confinés ; défaut : répertoire courant du processus) |
@@ -32,11 +32,11 @@ uvx --from "gispulse[mcp]" gispulse mcp
 ```
 
 Le `server.json` exprime cela avec `runtimeHint: uvx`, un `runtimeArguments`
-`--with gispulse[mcp]==2.5.1` (extra installé dans le même environnement que le
+`--with gispulse[mcp]==2.6.0` (extra installé dans le même environnement que le
 paquet), puis `packageArguments: [mcp]`. C'est le même schéma que d'autres
 serveurs PyPI déjà présents dans le registre (par exemple `codenib`, qui utilise
 `--with codenib[mcp]==x.y.z` suivi de l'argument positionnel `mcp`). La
-commande résultante est `uvx --with "gispulse[mcp]==2.5.1" gispulse==2.5.1 mcp` ;
+commande résultante est `uvx --with "gispulse[mcp]==2.6.0" gispulse==2.6.0 mcp` ;
 la syntaxe exacte de la ligne de commande finale dépend du client MCP, qui
 assemble `runtimeHint` + `runtimeArguments` + identifiant + `packageArguments`.
 Valider le comportement dans au moins un client (Claude Desktop) après publication.
