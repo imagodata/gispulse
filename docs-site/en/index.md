@@ -27,7 +27,7 @@ head:
 hero:
   name: GISPulse
   text: "French & Belgian open geodata, ready to run."
-  tagline: "22 sources (cadastre, DVF, PLU/GPU, BAN, Géorisques, INSEE, IGN, RNB, BDNB… and GRB / PICC / UrbIS / Statbel for Belgium), 20+ ready-made business workflows (ZAN land-take, PLU/CNIG validation, flood-risk exposure, DVF market, FTTH hotspots, SDIS coverage…), 144 spatial capabilities, DuckDB inside — no server needed. Save in QGIS, your rules fire. v2.5.1."
+  tagline: "22 sources (cadastre, DVF, PLU/GPU, BAN, Géorisques, INSEE, IGN, RNB, BDNB… and GRB / PICC / UrbIS / Statbel for Belgium), 20+ business workflow templates (ZAN land-take, PLU/CNIG validation, flood-risk exposure, DVF market, FTTH hotspots, SDIS coverage…), 144 spatial capabilities, DuckDB inside — no server needed. Save in QGIS, your rules fire. v2.6.0."
   image:
     light: /logo.svg
     dark: /logo-dark.svg
@@ -98,8 +98,8 @@ features:
 
 <section class="gp-section gp-coming-soon-banner">
 <div class="gp-coming-soon">
-  <span class="gp-coming-soon-badge">v2.5.1</span>
-  <p>GISPulse v2.5.1 is available. Since 2.0: Belgian GRB / PICC / UrbIS sources (road-crossings level evidence for Flanders, Wallonia and Brussels), network expansion and resilience (<code>network_greedy_expansion</code>, <code>network_bridges</code>, <code>network_redundancy</code>, <code>disjoint_paths</code>), routing providers (<code>route_pairs</code>), saved maps, security hardening, CSV/XLSX write, 20+ business workflows and 144 capabilities, all free (raster and network included).</p>
+  <span class="gp-coming-soon-badge">v2.6.0</span>
+  <p>GISPulse v2.6.0 is available. Since 2.0: Belgian GRB / PICC / UrbIS sources (road-crossings level evidence for Flanders, Wallonia and Brussels), network expansion and resilience (<code>network_greedy_expansion</code>, <code>network_bridges</code>, <code>network_redundancy</code>, <code>disjoint_paths</code>), routing providers (<code>route_pairs</code>), saved maps, security hardening, CSV/XLSX write, 20+ business workflows and 144 capabilities, all free (raster and network included).</p>
   <a href="/gispulse/en/getting-started/installation" class="gp-coming-soon-cta">Install now</a>
 </div>
 </section>
@@ -422,7 +422,7 @@ FME remains an excellent tool for complex graphical workflows. GISPulse targets 
 
 <section class="gp-footer-cta-big">
 
-<h2>GISPulse v2.5.1 is available</h2>
+<h2>GISPulse v2.6.0 is available</h2>
 <p>Install GISPulse and run your first spatial pipeline in 5 minutes.</p>
 
 <div class="gp-footer-cta-actions">

@@ -40,10 +40,10 @@ Ligne d'installation commune (le plugin est dans le dépôt, pas dans le wheel
 
 ```bash
 pipx install gispulse
-pipx inject gispulse "gispulse-src-<nom> @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-<nom>"
+pipx inject gispulse "gispulse-src-<nom> @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-<nom>"
 ```
 
-Équivalent `pip` : `pip install "gispulse-src-<nom> @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-<nom>"`
+Équivalent `pip` : `pip install "gispulse-src-<nom> @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-<nom>"`
 (motif identique à celui des notes de version).
 
 URL : les pages `https://imagodata.github.io/gispulse/plugins/...` existent pour
@@ -72,7 +72,7 @@ Templates : `ftth_demande_hotspots` (hotspots de demande FTTH).
 
 ```
 pipx install gispulse
-pipx inject gispulse "gispulse-src-ban @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-ban"
+pipx inject gispulse "gispulse-src-ban @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-ban"
 ```
 Docs : https://github.com/imagodata/gispulse/tree/main/plugins/gispulse-src-ban
 ````
@@ -95,7 +95,7 @@ Templates : `batiment_dpe_priorisation` (priorisation rénovation énergétique)
 
 ```
 pipx install gispulse
-pipx inject gispulse "gispulse-src-bdnb @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-bdnb"
+pipx inject gispulse "gispulse-src-bdnb @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-bdnb"
 ```
 Docs : https://github.com/imagodata/gispulse/tree/main/plugins/gispulse-src-bdnb
 ````
@@ -119,7 +119,7 @@ Templates : aucun template embarqué à ce jour (source disponible via le catalo
 
 ```
 pipx install gispulse
-pipx inject gispulse "gispulse-src-bodacc @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-bodacc"
+pipx inject gispulse "gispulse-src-bodacc @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-bodacc"
 ```
 Docs : https://github.com/imagodata/gispulse/tree/main/plugins/gispulse-src-bodacc
 ````
@@ -145,7 +145,7 @@ Templates : `cadastre_topology_cleanup` (nettoyage topologique de la couverture)
 
 ```
 pipx install gispulse
-pipx inject gispulse "gispulse-src-cadastre @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-cadastre"
+pipx inject gispulse "gispulse-src-cadastre @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-cadastre"
 ```
 Docs : https://imagodata.github.io/gispulse/plugins/src-cadastre
 ````
@@ -170,7 +170,7 @@ Templates : `foncier_dvf_marche` (prix médians et tension par IRIS), `foncier_p
 
 ```
 pipx install gispulse
-pipx inject gispulse "gispulse-src-dvf @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-dvf"
+pipx inject gispulse "gispulse-src-dvf @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-dvf"
 ```
 Docs : https://imagodata.github.io/gispulse/plugins/src-dvf
 ````
@@ -199,7 +199,7 @@ Templates : `risques_ppri_exposition` (bâti, population et ERP exposés aux PPR
 
 ```
 pipx install gispulse
-pipx inject gispulse "gispulse-src-georisques @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-georisques"
+pipx inject gispulse "gispulse-src-georisques @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-georisques"
 ```
 Docs : https://github.com/imagodata/gispulse/tree/main/plugins/gispulse-src-georisques
 ````
@@ -224,7 +224,7 @@ Templates : `validation_plu_cnig` (topologie et attributs CNIG), `urbanisme_zan_
 
 ```
 pipx install gispulse
-pipx inject gispulse "gispulse-src-gpu @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-gpu"
+pipx inject gispulse "gispulse-src-gpu @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-gpu"
 ```
 Docs : https://imagodata.github.io/gispulse/plugins/src-gpu
 ````
@@ -249,7 +249,7 @@ Templates : `agriculture_rpg_bcae`, `securite_sdis_couverture`, `energie_solaire
 
 ```
 pipx install gispulse
-pipx inject gispulse "gispulse-src-ign @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-ign"
+pipx inject gispulse "gispulse-src-ign @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-ign"
 ```
 Docs : https://imagodata.github.io/gispulse/plugins/src-ign
 ````
@@ -279,7 +279,7 @@ Templates : `foncier_dvf_marche`, `mobilite_accessibilite_services`, `retail_huf
 
 ```
 pipx install gispulse
-pipx inject gispulse "gispulse-src-insee @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-insee"
+pipx inject gispulse "gispulse-src-insee @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-insee"
 ```
 Docs : https://github.com/imagodata/gispulse/tree/main/plugins/gispulse-src-insee
 ````
@@ -303,7 +303,7 @@ Templates : aucun template embarqué à ce jour (source disponible via le catalo
 
 ```
 pipx install gispulse
-pipx inject gispulse "gispulse-src-loyers @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-loyers"
+pipx inject gispulse "gispulse-src-loyers @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-loyers"
 ```
 Docs : https://github.com/imagodata/gispulse/tree/main/plugins/gispulse-src-loyers
 ````
@@ -328,7 +328,7 @@ Templates : `environnement_tvb_ruptures` (Trame Verte et Bleue), `environnement_
 
 ```
 pipx install gispulse
-pipx inject gispulse "gispulse-src-nature @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-nature"
+pipx inject gispulse "gispulse-src-nature @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-nature"
 ```
 Docs : https://github.com/imagodata/gispulse/tree/main/plugins/gispulse-src-nature
 ````
@@ -352,7 +352,7 @@ Templates : aucun template embarqué à ce jour (source disponible via le catalo
 
 ```
 pipx install gispulse
-pipx inject gispulse "gispulse-src-rnb @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-rnb"
+pipx inject gispulse "gispulse-src-rnb @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-rnb"
 ```
 Docs : https://github.com/imagodata/gispulse/tree/main/plugins/gispulse-src-rnb
 ````
@@ -377,7 +377,7 @@ Templates : `urbanisme_permis_conformite` (instruction PC : zonage, servitudes, 
 
 ```
 pipx install gispulse
-pipx inject gispulse "gispulse-src-sup @ git+https://github.com/imagodata/gispulse@v2.5.1#subdirectory=plugins/gispulse-src-sup"
+pipx inject gispulse "gispulse-src-sup @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-sup"
 ```
 Docs : https://github.com/imagodata/gispulse/tree/main/plugins/gispulse-src-sup
 ````
@@ -421,7 +421,7 @@ Texte réutilisable (FR/EN à adapter, ≤ 600 caractères) :
 > sources belges lisent les données ouvertes régionales (GRB, PICC, UrbIS, GIPOD,
 > Statbel) et calculent, par exemple, des traversées de voirie avec niveau relatif
 > (sol, tunnel, pont). Installation : `pipx install gispulse`, puis le plugin voulu
-> depuis `https://github.com/imagodata/gispulse` (tag v2.5.1). Source ouverte,
+> depuis `https://github.com/imagodata/gispulse` (tag v2.6.0). Source ouverte,
 > sans client SIG, reproductible en ligne de commande.
 
 | Source | Plugin | Producteur / portail | Mécanisme de référencement des réutilisations | Contact / URL à utiliser |

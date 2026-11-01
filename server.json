@@ -9,19 +9,19 @@
     "id": "1220795399"
   },
   "websiteUrl": "https://imagodata.github.io/gispulse/",
-  "version": "2.5.1",
+  "version": "2.6.0",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "gispulse",
-      "version": "2.5.1",
+      "version": "2.6.0",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {
           "type": "named",
           "name": "--with",
-          "value": "gispulse[mcp]==2.5.1",
+          "value": "gispulse[mcp]==2.6.0",
           "description": "Installe l'extra 'mcp' (FastMCP) de la meme version que le paquet."
         }
       ],

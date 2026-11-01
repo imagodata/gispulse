@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-11-01
+
+First release of the Q4 2026 distribution plan (`docs/roadmap-distribution-2026-q4.md`).
+All 144 capabilities are now Community — raster and network included — and Pro
+is scoped to operations. `gispulse demo list|run` runs four business templates on
+bundled samples in under a minute, the QGIS plugin can finally be uploaded to
+plugins.qgis.org, and the MCP server has its registry manifest. The source
+plugins are unchanged: their `gispulse>=2.5.x` floors remain valid, install them
+from this tag, e.g.
+`pip install "gispulse-src-dvf @ git+https://github.com/imagodata/gispulse@v2.6.0#subdirectory=plugins/gispulse-src-dvf"`.
+
 ### Added
 
 - `gispulse demo list|run`: demos on the bundled Muret samples (`cadastre_topology_cleanup`,
