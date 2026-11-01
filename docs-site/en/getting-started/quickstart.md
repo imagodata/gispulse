@@ -30,6 +30,29 @@ Verify:
 gispulse --help
 ```
 
+## Try it in 60 seconds
+
+Before writing a single rule, run a bundled demo: GISPulse copies a sample (the cadastral parcels of Muret, 7 MB), runs the `cadastre_topology_cleanup` preset and writes a result GeoPackage — offline, no configuration.
+
+```bash
+gispulse demo list                            # presets that ship a sample dataset
+gispulse demo run cadastre_topology_cleanup   # ~20 s
+```
+
+```
+Demo: cadastre_topology_cleanup — Pipeline de nettoyage topologique d'une coverage polygonale …
+Sample: Muret (31): 17 212 parcelles cadastrales
+Running 8 step(s) [engine: python]:
+  [make_valid] repare_geoms
+  …
+Done in 19.2 s — 17 212 feature(s) in, 8 step(s) executed.
+Output layers (gispulse-demo/cadastre_topology_cleanup/cadastre_topology_cleanup.gpkg):
+  issues_report          44 feature(s)
+  surfaces_finales   17 158 feature(s)
+```
+
+Open the GPKG in QGIS (or launch `gispulse portal`), then replay the pipeline with the regular runner from the `pipeline.json` written next to the result. The other demos (`risques_inondation_parcelles`, `services_aires_influence`) run in under a second. From a `pip install`, the samples are downloaded once (SHA-256 verified) into `~/.cache/gispulse/demo/`.
+
 ## Step 2 — Grab a sample GeoPackage
 
 For this demo, download a cadastral parcels sample (~7 MB):

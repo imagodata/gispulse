@@ -74,8 +74,7 @@
       "params": {
         "check_overlaps": true,
         "check_self_intersections": true,
-        "check_validity": true,
-        "tolerance": 0.01
+        "check_validity": true
       },
       "input": "remove_slivers"
     },

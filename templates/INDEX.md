@@ -6,6 +6,8 @@ Bibliothèque de workflows métier prêts à l'emploi. Chaque preset est un fich
 **Format des rules** : [docs/RULES_GUIDE.md](../docs/RULES_GUIDE.md)
 **Triggers** : [docs/TRIGGERS_GUIDE.md](../docs/TRIGGERS_GUIDE.md)
 
+**[démo]** = échantillon embarqué (bloc `demo:` dans [manifest.yml](manifest.yml)) : `gispulse demo run <preset>` l'exécute hors ligne en moins d'une minute. `gispulse demo list` donne la liste.
+
 ---
 
 ## Presets par domaine
@@ -14,8 +16,8 @@ Bibliothèque de workflows métier prêts à l'emploi. Chaque preset est un fich
 
 | Preset | Format | Complexité | Notes |
 |--------|--------|------------|-------|
-| [cadastre_topology_cleanup.json](cadastre_topology_cleanup.json) | v2 | ★★ | Nettoyage coverage polygonale : make_valid → snap_to_grid → polygon_snap_borders → polygon_fix_gaps → polygon_fix_overlaps → polygon_remove_slivers. Data prep avant analyse stricte |
-| [reseau_topology_prep.json](reseau_topology_prep.json) | v2 | ★★ | Nettoyage graphe linéaire : network_snap_endpoints → extend_dangles → node_lines → remove_duplicates → connectivity_check → remove_pseudo_nodes. Prérequis `shortest_path`/`isochrone` |
+| [cadastre_topology_cleanup.json](cadastre_topology_cleanup.json) | v2 | ★★ | **[démo]** Nettoyage coverage polygonale : make_valid → snap_to_grid → polygon_snap_borders → polygon_fix_gaps → polygon_fix_overlaps → polygon_remove_slivers. Data prep avant analyse stricte |
+| [reseau_topology_prep.json](reseau_topology_prep.json) | v2 | ★★ | **[démo]** Nettoyage graphe linéaire : network_snap_endpoints → extend_dangles → node_lines → remove_duplicates → connectivity_check → remove_pseudo_nodes. Prérequis `shortest_path`/`isochrone` (connectivity_check = PRO sur les builds 2.5.x) |
 
 ### Télécom / FTTH
 
@@ -37,6 +39,7 @@ Bibliothèque de workflows métier prêts à l'emploi. Chaque preset est un fich
 
 | Preset | Format | Complexité | Notes |
 |--------|--------|------------|-------|
+| [risques_inondation_parcelles.json](risques_inondation_parcelles.json) | v2 | ★ | **[démo]** Parcelles × zonage inondable : filtre des zones retenues → spatial_join → area_length → surface_ha, plus emprise exposée dissoute par niveau de risque |
 | [risques_ppri_exposition.json](risques_ppri_exposition.json) | v2 | ★★★ | Bâti + pop + ERP sensibles exposés aux PPRI, avec trigger DML auto-flag |
 
 ### Environnement / Biodiversité / Eau
@@ -52,6 +55,12 @@ Bibliothèque de workflows métier prêts à l'emploi. Chaque preset est un fich
 | Preset | Format | Complexité | Notes |
 |--------|--------|------------|-------|
 | [mobilite_accessibilite_services.json](mobilite_accessibilite_services.json) | v2 | ★★★ | Isochrones 15/30 min + pop INSEE + services BPE + zones blanches (PRO) |
+
+### Services / Équipements de proximité
+
+| Preset | Format | Complexité | Notes |
+|--------|--------|------------|-------|
+| [services_aires_influence.json](services_aires_influence.json) | v2 | ★ | **[démo]** Aires d'influence Voronoï d'équipements (points OSM `amenity`) : filtre → voronoi_polygons → clip sur l'enveloppe concave des points → spatial_join du nom → surface desservie. Complément à vol d'oiseau des isochrones |
 
 ### Foncier / DVF / Cadastre
 
@@ -146,8 +155,8 @@ Pour retrouver rapidement un preset utilisant une capability précise :
 | `buffer` | environnement_tvb_ruptures, agriculture_rpg_bcae, environnement_iota_loi_eau |
 | `spatial_join` | risques_ppri, urbanisme_zan_bilan, foncier_*, agriculture_rpg_bcae, sante_apl_deserts, batiment_dpe, mobilite_accessibilite, retail_huff, urbanisme_permis |
 | `intersects` | environnement_tvb_ruptures, agriculture_rpg_bcae, environnement_iota_loi_eau |
-| `clip` | urbanisme_zan_bilan, environnement_iota_loi_eau |
-| `dissolve` | environnement_tvb_ruptures |
+| `clip` | urbanisme_zan_bilan, environnement_iota_loi_eau, services_aires_influence |
+| `dissolve` | environnement_tvb_ruptures, risques_inondation_parcelles |
 | `centroid` | retail_huff_chalandise |
 | `area_length` | urbanisme_zan_bilan, risques_ppri, urbanisme_permis, foncier_parcelles_vacantes, environnement_iota_loi_eau, batiment_dpe, energie_solaire_toiture |
 | `calculate` | tous |
@@ -161,9 +170,9 @@ Pour retrouver rapidement un preset utilisant une capability précise :
 | `polygon_fix_gaps` / `polygon_fix_overlaps` / `polygon_remove_slivers` / `polygon_snap_borders` | cadastre_topology_cleanup |
 | `network_snap_endpoints` / `network_extend_dangles` / `network_node_lines` / `network_remove_duplicates` / `network_remove_pseudo_nodes` | reseau_topology_prep |
 | `cluster_hdbscan` | ftth_demande_hotspots |
-| `concave_hull` | ftth_demande_hotspots |
+| `concave_hull` | ftth_demande_hotspots, services_aires_influence |
 | `nearest_neighbor` | ftth_demande_hotspots |
-| `voronoi_polygons` | securite_sdis_thiessen |
+| `voronoi_polygons` | securite_sdis_thiessen, services_aires_influence |
 
 ---
 

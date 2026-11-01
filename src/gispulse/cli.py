@@ -14,6 +14,7 @@ Usage::
     gispulse capabilities                           # list capabilities
     gispulse doctor                                 # check environment health
     gispulse update [--check] [--force]             # check for updates / self-update
+    gispulse demo list | run <template>             # bundled offline demos on sample data
 """
 
 from __future__ import annotations
@@ -799,6 +800,15 @@ app.command(name="portal")(cmd_portal)
 from gispulse.cli_mcp import cmd_mcp  # noqa: E402
 
 app.command(name="mcp")(cmd_mcp)
+
+
+# ---------------------------------------------------------------------------
+# demo — bundled offline demos on sample data (see gispulse/cli_demo.py)
+# ---------------------------------------------------------------------------
+
+from gispulse.cli_demo import demo_app  # noqa: E402
+
+app.add_typer(demo_app, name="demo")
 
 
 # ---------------------------------------------------------------------------

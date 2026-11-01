@@ -5,6 +5,22 @@
 # declares the built-in pipeline templates so the ExtensionHub can
 # inventory them as a first-class DATA_PACK record. The template JSON
 # files live next to this manifest in templates/.
+#
+# An entry may carry an optional `demo:` block — the source of truth for
+# `gispulse demo list|run` (src/gispulse/cli_demo.py). Paths are relative
+# to examples/; `ref_layers` values may pin a container layer with
+# `path#layer`; `params` are "<step_id>.<param>": value overrides applied
+# in memory (the template file itself is never edited); `files` pins the
+# SHA-256 and size of every sample file so the download path can verify it.
+#
+#   demo:
+#     input: datasets/muret_parcels.gpkg
+#     layer: parcels
+#     ref_layers: {zones_inondables: datasets/muret_flood_zones.gpkg#flood_zones}
+#     params: {}
+#     files:
+#       datasets/muret_parcels.gpkg: {sha256: "<hex>", size: 7249920}
+#     note: "Muret (31): 17 212 parcelles cadastrales"
 
 name: gispulse-templates
 content: template-pack
@@ -31,6 +47,14 @@ entries:
     steps: 8
     domain: "preparation"
     file: cadastre_topology_cleanup.json
+    demo:
+      input: datasets/muret_parcels.gpkg
+      layer: parcels
+      files:
+        datasets/muret_parcels.gpkg:
+          sha256: "9de8914bb25f181c71a356d7a21f825d666f231e488c248f6577035092421ca2"
+          size: 7249920
+      note: "Muret (31): 17 212 parcelles cadastrales"
   - name: energie_solaire_toiture
     title: "energie_solaire_toiture"
     description: "Estimation du potentiel solaire photovoltaique des toitures — statistiques zonales d'irradiation raster PVGIS sur emprises bati, filtrage par orientation/pente, calcul de puissance et production annuelles."
@@ -94,12 +118,41 @@ entries:
     steps: 8
     domain: "preparation"
     file: reseau_topology_prep.json
+    demo:
+      input: datasets/muret_osm.gpkg
+      layer: roads
+      files:
+        datasets/muret_osm.gpkg:
+          sha256: "0b894f127caea71c5e118c23f4563eb5f87cca5afa316eb86d70bf3dfb1761cf"
+          size: 245760
+      # connectivity_check is a Pro capability on 2.5.x builds: the demo stops
+      # there with a readable message until network capabilities are Community.
+      note: "Muret (31): 319 troncons de voirie OSM (Pro)"
   - name: retail_huff_chalandise
     title: "retail_huff_chalandise"
     description: "Modele de Huff de zones de chalandise — isochrones drive-time depuis magasins, calcul des parts de marche par IRIS selon attractivite (surface commerciale / distance^beta) et identification des whitespace."
     steps: 13
     domain: "retail_geomarketing"
     file: retail_huff_chalandise.json
+  - name: risques_inondation_parcelles
+    title: "risques_inondation_parcelles"
+    description: "Exposition des parcelles au risque inondation — croisement d'une couche parcellaire avec un zonage inondable (PPRI, AZI, TRI), surface exposee par parcelle et emprise exposee dissoute par niveau de risque."
+    steps: 6
+    domain: "risques_naturels"
+    file: risques_inondation_parcelles.json
+    demo:
+      input: datasets/muret_parcels.gpkg
+      layer: parcels
+      ref_layers:
+        zones_inondables: datasets/muret_flood_zones.gpkg#flood_zones
+      files:
+        datasets/muret_parcels.gpkg:
+          sha256: "9de8914bb25f181c71a356d7a21f825d666f231e488c248f6577035092421ca2"
+          size: 7249920
+        datasets/muret_flood_zones.gpkg:
+          sha256: "1c7aacadcc3156364c436787edbc576390d70d5b32e1ccf4c04edfa638e4218e"
+          size: 110592
+      note: "Muret (31): parcelles x 3 zones PPRi Garonne"
   - name: risques_ppri_exposition
     title: "risques_ppri_exposition"
     description: "Diagnostic d'exposition au risque inondation — croisement du bati et de la population avec les zonages PPRI (rouge/bleu), calcul du nombre de logements, habitants et etablissements sensibles exposes."
@@ -124,6 +177,20 @@ entries:
     steps: 10
     domain: "securite_civile"
     file: securite_sdis_thiessen.json
+  - name: services_aires_influence
+    title: "services_aires_influence"
+    description: "Aires d'influence theoriques (Voronoi / Thiessen) d'equipements ou de services de proximite — selection des equipements cibles dans une couche de points, partition de l'emprise par equipement le plus proche a vol d'oiseau, rattachement du nom de l'equipement et surface desservie."
+    steps: 8
+    domain: "services"
+    file: services_aires_influence.json
+    demo:
+      input: datasets/muret_osm.gpkg
+      layer: pois
+      files:
+        datasets/muret_osm.gpkg:
+          sha256: "0b894f127caea71c5e118c23f4563eb5f87cca5afa316eb86d70bf3dfb1761cf"
+          size: 245760
+      note: "Muret (31): 427 POI OSM, aires des ecoles"
   - name: urbanisme_permis_conformite
     title: "urbanisme_permis_conformite"
     description: "Instruction rapide d'un permis de construire — croisement de la parcelle du petitionnaire avec le zonage PLU applicable, les servitudes, les risques et les perimetres ABF pour fiche d'analyse automatique."

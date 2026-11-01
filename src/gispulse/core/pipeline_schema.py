@@ -148,6 +148,15 @@ SCHEMA_V2: dict[str, Any] = {
             "additionalProperties": {"type": "string"},
             "description": "Named reference layers: alias -> source path.",
         },
+        # Catalogue metadata carried by the bundled templates (templates/*.json)
+        # and by pipelines copied from them — informational, ignored by the
+        # executor.
+        "domain": {"type": "string"},
+        "author": {"type": "string"},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "inputs_notes": {"type": "string"},
+        "requires_pro": {"type": "boolean"},
+        "requires_plugins": {"type": "array", "items": {"type": "string"}},
     },
     "additionalProperties": False,
     "$defs": {
