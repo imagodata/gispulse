@@ -20,7 +20,7 @@ How this differs from its siblings in :mod:`gispulse.capabilities.network`:
   of the edge weight.
 
 Pure ``heapq`` implementation (no numba / JIT). Like every capability in
-:mod:`gispulse.capabilities.network` it requires ``tier="pro"``.
+:mod:`gispulse.capabilities.network` it is available in the Community tier.
 
 Ported faithfully from the ``expand()`` oil-slick kernel of an internal
 fibre-network project: multi-source binary-heap Prim on a CSR graph, with a
@@ -45,7 +45,6 @@ from gispulse.capabilities.base import Capability
 from gispulse.capabilities.registry import register
 from gispulse.core.crs import is_angular
 from gispulse.core.network_graph_handle import NetworkGraph
-from gispulse.persistence.tier import check_tier
 
 # Column contract of the emitted absorption-tree edges. Kept as a module
 # constant so the empty-result branches and the populated branch stay in sync.
@@ -146,7 +145,6 @@ class NetworkGreedyExpansionCapability(Capability):
                 cost (rejected up front as a data-quality guard; ``inf`` is
                 allowed).
         """
-        check_tier("pro")
 
         # Resolve the frontier and (optional) activation-cost layers from the
         # several injection paths. The plural ref_layers carries

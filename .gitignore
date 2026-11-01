@@ -41,3 +41,6 @@ viewer/dist/
 # Local scratchpad GPKG at repo root (examples/datasets/*.gpkg stay tracked)
 /project.gpkg
 /*.gpkg-journal
+
+# `gispulse demo run` output when launched from a checkout
+/gispulse-demo/

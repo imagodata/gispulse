@@ -5,7 +5,7 @@
   "domain": "sante",
   "author": "GISPulse",
   "tags": ["apl", "sante", "desert-medical", "rpps", "ars"],
-  "requires_pro": true,
+  "requires_pro": false,
   "ref_layers": {
     "medecins": "data/rpps_medecins.gpkg",
     "reseau_routier": "data/bd_topo_tronçons.gpkg",

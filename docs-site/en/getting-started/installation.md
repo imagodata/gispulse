@@ -132,18 +132,6 @@ gispulse --version
 The binary includes a `gispulse update` command to check for and apply updates.
 :::
 
-## Mode 4 — Desktop Application (Tauri)
-
-Standalone React + MapLibre GL JS application for non-technical users. Downloadable from GitHub releases (.dmg, .exe, .AppImage).
-
-| Platform | Format |
-|----------|--------|
-| macOS    | .dmg   |
-| Windows  | .exe (NSIS) |
-| Linux    | .AppImage |
-
-The desktop application embeds the GISPulse engine and does not require a Python installation.
-
 ## Initial setup
 
 After installation, initialize a project:

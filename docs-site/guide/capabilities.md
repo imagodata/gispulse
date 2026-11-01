@@ -31,7 +31,7 @@ REGISTRY.get("buffer")().get_schema()
 ```
 :::
 
-**Nombre total de capabilities enregistrées : 118** — réparties en 18 catégories.
+**Nombre total de capabilities enregistrées : 144** — réparties en plus de 20 familles.
 
 [[toc]]
 
@@ -619,13 +619,9 @@ Chargement et exploitation de nuages de points LAS / LAZ (ASPRS). Nécessite `la
 
 ---
 
-## Raster (Pro — `pip install "gispulse[raster]"`)
+## Raster (Community — `pip install "gispulse[raster]"`)
 
-Nécessite `rasterio` + `rasterstats` et une licence Pro (`GISPULSE_TIER=pro`).
-
-::: info Disponible en Pro
-Les capabilities raster appellent `check_tier("pro")` à l'exécution.
-:::
+Nécessite `rasterio` + `rasterstats`. Disponible dans le tier Community, sans licence.
 
 | Capability | Description | Paramètres clés |
 |-----------|-------------|-----------------|
@@ -648,9 +644,9 @@ Les capabilities raster appellent `check_tier("pro")` à l'exécution.
 
 ---
 
-## Réseau — analyse (Pro — `pip install "gispulse[network]"`)
+## Réseau — analyse (Community — `pip install "gispulse[network]"`)
 
-Nécessite `networkx` et une licence Pro.
+Nécessite `networkx`. Disponible dans le tier Community, sans licence.
 
 | Capability | Description | Paramètres clés |
 |-----------|-------------|-----------------|
@@ -730,10 +726,13 @@ Le DSN n'est jamais lu depuis `config` — il est résolu depuis `GISPULSE_POSTG
 | Topologie — lignes | 5 | Community | — |
 | Topologie — polygones | 4 | Community | — |
 | 3D Pointcloud | 4 | Community | `gispulse[pointcloud]` (`laspy`, `lazrs`) |
-| Raster | 6 | **Pro** | `gispulse[raster]` (`rasterio`, `rasterstats`) |
-| Réseau — analyse | 13 | **Pro** | `gispulse[network]` (`networkx`) |
+| Raster | 6 | Community | `gispulse[raster]` (`rasterio`, `rasterstats`) |
+| Réseau — analyse | 13 | Community | `gispulse[network]` (`networkx`) |
 | PostGIS SQL | 1 | **Pro** | `gispulse[postgis]` + DSN |
-| **Total** | **118** | | |
+| Autres familles (voir la matrice de couverture) | 18 | Community | — |
+| **Total** | **144** | | |
+
+Toutes les capabilities sont utilisables en Community, y compris raster et réseau. `postgis_sql` suppose un moteur PostGIS (tier Pro) : Pro est réservé à l'exploitation (PostGIS, triggers cluster, DAG, monitoring, cron).
 
 ---
 

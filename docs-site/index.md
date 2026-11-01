@@ -1,8 +1,8 @@
 ---
 layout: home
-title: GISPulse — Le moteur geospatial declaratif
+title: GISPulse — Open data geospatial FR & BE, pret a l'emploi
 titleTemplate: false
-description: "Rules-as-config pour vos donnees spatiales. Ce que dbt est a la data, GISPulse l'est au GIS. Open source AGPL-3.0, multi-engine, 16+ formats."
+description: "22 sources open data FR/BE, 20+ workflows metier, 144 capabilities spatiales, DuckDB embarque — aucun serveur requis. Open source AGPL-3.0."
 
 head:
   - - meta
@@ -10,24 +10,24 @@ head:
       content: "moteur geospatial, rules-as-config, spatial ETL, PostGIS, DuckDB, GeoJSON, GPKG, alternative FME, workflow spatial, open source GIS"
   - - meta
     - property: og:title
-      content: "GISPulse — Le moteur geospatial declaratif"
+      content: "GISPulse — Open data geospatial FR & BE, pret a l'emploi"
   - - meta
     - property: og:description
-      content: "Rules-as-config pour vos donnees spatiales. Ce que dbt est a la data, GISPulse l'est au GIS. Open source AGPL-3.0."
+      content: "22 sources open data FR/BE, 20+ workflows metier, 144 capabilities, DuckDB embarque. Sauvegardez dans QGIS, vos regles se declenchent."
   - - meta
     - property: og:type
       content: website
   - - meta
     - name: twitter:title
-      content: "GISPulse — Le moteur geospatial declaratif"
+      content: "GISPulse — Open data geospatial FR & BE, pret a l'emploi"
   - - meta
     - name: twitter:description
-      content: "Rules-as-config pour vos donnees spatiales. Open source, multi-engine, 16+ formats."
+      content: "22 sources open data FR/BE, 20+ workflows metier, 144 capabilities. Open source, DuckDB embarque."
 
 hero:
   name: GISPulse
-  text: Le moteur geospatial declaratif
-  tagline: "Rules-as-config pour vos donnees spatiales. Ce que dbt est a la data, GISPulse l'est au GIS. v2.0.0 disponible — 118 capabilities."
+  text: "L'open data geospatial FR & BE, pret a l'emploi."
+  tagline: "22 sources (cadastre, DVF, PLU/GPU, BAN, Georisques, INSEE, IGN, RNB, BDNB… et GRB / PICC / UrbIS / Statbel pour la Belgique), 20+ workflows metier (ZAN, validation PLU/CNIG, exposition inondation, marche DVF, hotspots FTTH, couverture SDIS…), 144 capabilities spatiales, DuckDB embarque — aucun serveur requis. Sauvegardez dans QGIS, vos regles se declenchent. v2.5.1."
   image:
     light: /logo.svg
     dark: /logo-dark.svg
@@ -41,9 +41,21 @@ hero:
       link: /community
 
 features:
+  - icon: "🇫🇷"
+    title: 22 sources FR / BE
+    details: "Cadastre, DVF, PLU/GPU, BAN, Georisques, INSEE, IGN, RNB, BDNB… et GRB, PICC, UrbIS, Statbel pour la Belgique. Chaque source est un plugin pret a ingerer."
+    link: /plugins/src-cadastre
+    linkText: Sources de donnees
+
+  - icon: "🧩"
+    title: 20+ workflows metier
+    details: "ZAN, validation PLU/CNIG, exposition inondation, marche DVF, hotspots FTTH, couverture SDIS… des pipelines JSON prets a lancer."
+    link: /templates
+    linkText: Catalogue des workflows
+
   - icon: "📋"
-    title: Declaratif
-    details: "Des regles JSON, pas du code. Reproductible, versionnable sous Git, lisible par votre equipe SIG sans connaitre Python."
+    title: Moteur declaratif (rules-as-config)
+    details: "Des workflows en JSON/YAML, pas du code : versionnes sous Git, lances depuis la CLI, l'API REST, QGIS ou un agent LLM (MCP). Ce que dbt a fait pour l'analytique, GISPulse le fait pour le SIG."
     link: /guide/rules
     linkText: Ecrire des regles
 
@@ -61,7 +73,7 @@ features:
 
   - icon: "🔌"
     title: Embeddable
-    details: "CLI pour les scripts et CI/CD. API REST incluse. SDK Python. Plugins QGIS et ArcGIS. Vous choisissez le point d'entree."
+    details: "CLI pour les scripts et CI/CD. API REST, serveur MCP pour agents LLM, SDK Python, plugin QGIS. ArcGIS Pro consomme GISPulse via OGC API Features."
     link: /api/sdk
     linkText: Integrations
 
@@ -86,8 +98,8 @@ features:
 
 <section class="gp-section gp-coming-soon-banner">
 <div class="gp-coming-soon">
-  <span class="gp-coming-soon-badge">v2.0.0</span>
-  <p>GISPulse v2.0.0 est disponible. 118 capabilities (vecteur, attributs, classification, statistiques spatiales, clustering, 3D pointcloud, raster, reseau, PostGIS SQL), 3 600+ tests, moteur multi-backend DuckDB/PostGIS, Prometheus metrics, ExtensionHub avec régime data-packs, agrégateur géo mondial et serveur MCP.</p>
+  <span class="gp-coming-soon-badge">v2.5.1</span>
+  <p>GISPulse v2.5.1 est disponible. Depuis la 2.0 : sources belges GRB / PICC / UrbIS (preuve de niveau des traversees de voirie en Flandre, Wallonie et Bruxelles), expansion et resilience de reseau (<code>network_greedy_expansion</code>, <code>network_bridges</code>, <code>network_redundancy</code>, <code>disjoint_paths</code>), fournisseurs de routage (<code>route_pairs</code>), cartes sauvegardees, durcissement securite, ecriture CSV/XLSX, 20+ workflows metier et 144 capabilities, toutes gratuites (raster et reseau inclus).</p>
   <a href="/gispulse/getting-started/installation" class="gp-coming-soon-cta">Installer maintenant</a>
 </div>
 </section>
@@ -99,12 +111,12 @@ features:
   <span class="gp-badge gp-badge-license">Open source AGPL-3.0</span>
   <span class="gp-badge gp-badge-formats">16+ formats</span>
   <span class="gp-badge gp-badge-tests">3 600+ tests</span>
-  <span class="gp-badge gp-badge-deploy">4 modes de deploiement</span>
-  <span class="gp-badge gp-badge-python">Python 3.10+</span>
+  <span class="gp-badge gp-badge-deploy">3 modes de deploiement</span>
+  <span class="gp-badge gp-badge-python">Python 3.12+</span>
 </div>
 <div class="gp-stats-row">
   <div class="gp-stat">
-    <span class="gp-stat-value">118</span>
+    <span class="gp-stat-value">144</span>
     <span class="gp-stat-label">capabilities spatiales</span>
   </div>
   <div class="gp-stat">
@@ -255,7 +267,7 @@ Meme fichier de regles, trois modes d'execution : CLI locale, API REST, SDK Pyth
 
 <section class="gp-section gp-capabilities-showcase">
 
-## 118 capabilities, pretes a l'emploi
+## 144 capabilities, pretes a l'emploi
 
 <div class="gp-cap-grid">
 <div class="gp-cap-group">
@@ -315,17 +327,18 @@ Meme fichier de regles, trois modes d'execution : CLI locale, API REST, SDK Pyth
 </ul>
 </div>
 <div class="gp-cap-group">
-<h3>Raster & reseau (Pro)</h3>
+<h3>Raster, reseau & routage</h3>
 <ul>
 <li><strong>zonal_stats</strong>, <strong>raster_clip</strong>, <strong>raster_reproject</strong>, <strong>ndvi</strong>, <strong>change_detection</strong></li>
 <li><strong>shortest_path</strong>, <strong>isochrone</strong>, <strong>od_matrix</strong>, <strong>network_allocation</strong>, <strong>connectivity_check</strong></li>
+<li><strong>network_greedy_expansion</strong>, <strong>network_bridges</strong>, <strong>network_redundancy</strong>, <strong>disjoint_paths</strong>, <strong>route_pairs</strong></li>
 <li><strong>postgis_sql</strong> — requete SQL parametree sur PostGIS</li>
 </ul>
 </div>
 </div>
 
 <div class="gp-cap-footer">
-<a href="/gispulse/guide/capabilities">Voir le catalogue complet des 118 capabilities &rarr;</a>
+<a href="/gispulse/guide/capabilities">Voir le catalogue complet des 144 capabilities &rarr;</a>
 </div>
 
 </section>
@@ -409,7 +422,7 @@ FME reste un excellent outil pour des workflows graphiques complexes. GISPulse c
 
 <section class="gp-footer-cta-big">
 
-<h2>GISPulse v2.0.0 est disponible</h2>
+<h2>GISPulse v2.5.1 est disponible</h2>
 <p>Installez GISPulse et lancez votre premier pipeline spatial en 5 minutes.</p>
 
 <div class="gp-footer-cta-actions">
@@ -418,7 +431,7 @@ FME reste un excellent outil pour des workflows graphiques complexes. GISPulse c
 </div>
 
 <div class="gp-footer-meta">
-AGPL-3.0 &nbsp;·&nbsp; Python 3.10+ &nbsp;·&nbsp; DuckDB 1.x / PostGIS 3.x
+AGPL-3.0 &nbsp;·&nbsp; Python 3.12+ &nbsp;·&nbsp; DuckDB 1.x / PostGIS 3.x
 </div>
 
 </section>

@@ -24,6 +24,17 @@ operator handbook.
    ```
 4. **Open a release PR** with the bump + CHANGELOG promotion. Get it merged.
 
+### QGIS plugin (plugins.qgis.org)
+
+- `qgis_plugin/metadata.txt`: `version=` bumped in lockstep (CI enforces it),
+  top `changelog=` entry renamed to the released version, `experimental=False`.
+- `qgis_plugin/LICENSE` present (the plugin repository rejects ZIPs without it).
+- `server.json` (MCP registry manifest): `version` and the `gispulse[mcp]==X.Y.Z`
+  runtime argument bumped to the released version.
+- With the `OSGEO_USERNAME` / `OSGEO_PASSWORD` secrets set, the
+  `publish-qgis-plugin` job uploads the ZIP after the GitHub Release; otherwise
+  upload it by hand — see `qgis_plugin/PUBLISHING.md`.
+
 ## Dry run (recommended on every release)
 
 Before tagging, validate the workflow end-to-end without publishing:

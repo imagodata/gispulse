@@ -5,7 +5,7 @@ description: Compare GISPulse tiers — Community (free), Pro, Team and Enterpri
 
 # Pricing
 
-GISPulse is open-source (AGPL-3.0) with an open-core model. The engine core is free forever.
+GISPulse is open-source (AGPL-3.0) with an open-core model. **All 144 capabilities are free** (Community); Pro is about operations: PostGIS, cluster triggers, orchestration, monitoring.
 
 ## Early Adopter Offer
 
@@ -32,10 +32,13 @@ AGPL-3.0 license. Open-source.
 
 **Included:**
 - Full DuckDB engine
+- All 144 capabilities (vector, attributes, classification, stats, topology, network, raster, 3D)
+- 22 FR/BE data sources and 20+ business workflows
 - CLI — all commands
 - Single-user portal
-- Python SDK
+- Python SDK, MCP server
 - QGIS Plugin
+- Local triggers (5 active max)
 - Docker
 - Unlimited local datasets
 
@@ -65,8 +68,7 @@ AGPL-3.0 license. Open-source.
 - Visual node editor
 - Monitoring / metrics
 - Cron pipelines
-- Raster capabilities
-- Network capabilities
+- Public map publication quotas (coming)
 - 5 API keys
 - 50 datasets
 
@@ -134,18 +136,18 @@ AGPL-3.0 license. Open-source.
 | Web portal | single-user | yes | yes | yes |
 | Python SDK | yes | yes | yes | yes |
 | QGIS Plugin | yes | yes | yes | yes |
-| ArcGIS Add-in | yes | yes | yes | yes |
-| Tauri Desktop | yes | yes | yes | yes |
 | **Capabilities** | | | | |
-| 104 Community capabilities (vector, attributes, classification, stats, topology, 3D pointcloud) | yes | yes | yes | yes |
-| Raster (`rasterio`, 6 caps) | — | yes | yes | yes |
-| Network (`networkx`, 6 caps) | — | yes | yes | yes |
-| `postgis_sql` (parameterised SQL) | — | yes | yes | yes |
+| 144 capabilities (vector, attributes, classification, stats, topology, network, raster, 3D pointcloud) | yes | yes | yes | yes |
+| Raster (`rasterio`, 6 caps) | yes | yes | yes | yes |
+| Network (`networkx`, routing, resilience) | yes | yes | yes | yes |
+| `postgis_sql` (parameterised SQL) | yes | yes | yes | yes |
 | Custom capabilities (entry-points) | — | — | — | yes |
 | **Orchestration** | | | | |
 | DAG executor | — | yes | yes | yes |
 | Cron pipelines | — | yes | yes | yes |
-| ESB Triggers | — | yes | yes | yes |
+| Local triggers (5 active max) | yes | yes | yes | yes |
+| ESB triggers (cluster, pg_notify) | — | yes | yes | yes |
+| Monitoring / metrics | — | yes | yes | yes |
 | Visual node editor | — | yes | yes | yes |
 | **Collaboration** | | | | |
 | Multi-user | — | — | yes | yes |
@@ -168,7 +170,7 @@ AGPL-3.0 license. Open-source.
 
 ### Is GISPulse Community really free?
 
-Yes, with no time limit and no limit on local data. The code is open under AGPL-3.0 — you can modify and redistribute it under the terms of the license.
+Yes, with no time limit and no limit on local data. All 144 capabilities (raster and network included), the 22 FR/BE data sources and the 20+ business workflows are included. The code is open under AGPL-3.0 — you can modify and redistribute it under the terms of the license. Pro adds operations: PostGIS, cluster triggers, DAG executor, visual editor, monitoring, cron pipelines.
 
 ### What is the difference between AGPL-3.0 and the Pro license?
 

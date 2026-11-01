@@ -20,8 +20,8 @@ proofs), stripped of any business logic:
   component (bridge / cut-edge = structural SPOF), iterative Tarjan.
   Parallel lines between the same two nodes are never bridges.
 
-Like every capability in :mod:`gispulse.capabilities.network` both require
-``tier="pro"``.
+Like every capability in :mod:`gispulse.capabilities.network` they are
+available in the Community tier.
 """
 
 from __future__ import annotations
@@ -37,7 +37,6 @@ from gispulse.capabilities.base import Capability
 from gispulse.capabilities.registry import register
 from gispulse.core.crs import is_angular
 from gispulse.core.network_graph_handle import NetworkGraph
-from gispulse.persistence.tier import check_tier
 
 # Column contract of the emitted disjoint-path edges. Module constant so the
 # empty-result branches and the populated branch stay in sync.
@@ -350,7 +349,6 @@ class DisjointPathsCapability(Capability):
             nœuds sont fusionnées (la dernière gagne) — elles n'apportent pas
             de second chemin en mode ``edge``.
         """
-        check_tier("pro")
 
         if k < 1:
             raise ValueError(f"disjoint_paths: k must be >= 1 (got {k}).")
@@ -575,7 +573,6 @@ class NetworkBridgesCapability(Capability):
             des arêtes indépendantes du graphe). Géométrie vide/nulle ou
             boucle sur soi-même => False.
         """
-        check_tier("pro")
 
         node_index: dict[tuple[float, float], int] = {}
         adjacency: list[list[tuple[int, int]]] = []
@@ -688,7 +685,6 @@ class NetworkRedundancyCapability(Capability):
             ValueError: couches réseau/installations absentes, ``k < 1``,
                 ``mode`` inconnu, ou poids d'arc NaN / négatif.
         """
-        check_tier("pro")
 
         if k < 1:
             raise ValueError(f"network_redundancy: k must be >= 1 (got {k}).")

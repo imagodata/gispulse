@@ -5,7 +5,7 @@
   "domain": "securite_civile",
   "author": "GISPulse",
   "tags": ["sdis", "sdacr", "isochrone", "secours", "insee"],
-  "requires_pro": true,
+  "requires_pro": false,
   "ref_layers": {
     "casernes": "data/centres_secours.gpkg",
     "reseau_routier": "data/bd_topo_tronçons.gpkg",

@@ -52,7 +52,7 @@ bdtopo-paris/
 Lister les opérateurs disponibles :
 
 ```bash
-gispulse capabilities    # 118+ capabilities
+gispulse capabilities    # 144 capabilities
 ```
 
 ### 2.2 Bâtiments à moins de 50 m d'une route principale
@@ -391,6 +391,6 @@ Empêche l'altération d'un bâtiment classé monument historique :
 ## Voir aussi
 
 - [TRIGGERS_GUIDE.md](https://github.com/imagodata/gispulse/blob/main/docs/TRIGGERS_GUIDE.md) — DSL prédicats complet, contrat webhook, modèle de sécurité
-- [Capabilities](/guide/capabilities) — les 118 opérateurs disponibles
+- [Capabilities](/guide/capabilities) — les 144 opérateurs disponibles
 - [QGIS sans plugin](./qgis) — consommer les sorties depuis QGIS
 - [Engine modes](/guide/engines) — `python` vs `duckdb`

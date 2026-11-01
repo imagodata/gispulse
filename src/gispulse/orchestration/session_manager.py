@@ -48,6 +48,11 @@ class PipelineResult:
     features_out: int = 0
     engine_used: str = "python"
     layers_loaded: list[str] = field(default_factory=list)
+    #: ``step_id → GeoDataFrame`` for every step that produced output —
+    #: filled only when :meth:`SessionManager.run_pipeline_v2` is called with
+    #: ``keep_step_results=True`` (``gispulse demo run`` needs every DAG
+    #: leaf). Empty otherwise so intermediate frames can be garbage-collected.
+    step_results: dict[str, gpd.GeoDataFrame] = field(default_factory=dict)
 
 
 @dataclass
@@ -202,6 +207,8 @@ class SessionManager:
         output_layer: str | None = None,
         crs: str | None = None,
         ref_sources: dict[str, Path] | None = None,
+        *,
+        keep_step_results: bool = False,
     ) -> PipelineResult:
         """Execute a PipelineSpec v2 natively via PipelineExecutor.
 
@@ -217,6 +224,11 @@ class SessionManager:
             output_layer: Layer name in output file.
             crs:          Force input CRS.
             ref_sources:  External reference layer paths.
+            keep_step_results: Keep every step's GeoDataFrame in
+                          ``PipelineResult.step_results``. Off by default:
+                          holding every intermediate frame alive costs memory
+                          and only callers that write several DAG leaves
+                          (``gispulse demo run``) need it.
 
         Returns:
             PipelineResult with the processed GeoDataFrame and metadata.
@@ -297,7 +309,9 @@ class SessionManager:
         # The last result is the final output
         result_gdf = list(results.values())[-1] if results else gdf
         features_out = len(result_gdf)
-        steps_executed = len(results)
+        # The DAG executor also returns the input datasets: count spec steps only.
+        step_ids = {s.id for s in spec.steps}
+        steps_executed = sum(1 for k in results if k in step_ids)
 
         log.info(
             "pipeline_v2_executed",
@@ -314,6 +328,9 @@ class SessionManager:
         if out_str:
             log.info("pipeline_v2_output_written", path=out_str, features=features_out)
 
+        step_results: dict[str, gpd.GeoDataFrame] = {}
+        if keep_step_results:
+            step_results = {k: v for k, v in results.items() if k in step_ids}
         return PipelineResult(
             gdf=result_gdf,
             output_path=out_str,
@@ -322,6 +339,7 @@ class SessionManager:
             features_out=features_out,
             engine_used=engine_used,
             layers_loaded=layers_loaded,
+            step_results=step_results,
         )
 
     @staticmethod

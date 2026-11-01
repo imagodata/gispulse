@@ -1,0 +1,73 @@
+{
+  "version": 2,
+  "name": "services_aires_influence",
+  "description": "Aires d'influence theoriques (Voronoi / Thiessen) d'equipements ou de services de proximite — selection des equipements cibles dans une couche de points, partition de l'emprise par equipement le plus proche a vol d'oiseau, rattachement du nom de l'equipement et surface desservie.",
+  "domain": "services",
+  "author": "GISPulse",
+  "tags": ["voronoi", "thiessen", "equipements", "services", "accessibilite", "osm"],
+  "inputs_notes": "Entree = couche de points d'equipements avec un champ amenity (tags OSM : school, pharmacy, doctors...) et un champ name. Adapter l'expression du step 'selection' au type d'equipement etudie. L'emprise de travail est l'enveloppe concave de tous les points en entree ; pour une decoupe administrative, remplacer 'emprise' par un ref_layer (commune, EPCI). Le rattachement du nom utilise le predicat 'intersects' : un equipement situe sur le bord de l'enveloppe (donc sur le bord de sa cellule decoupee) est tout de meme rattache. Les surfaces sont calculees en EPSG:2154 (Lambert-93) : changer 'target_crs' et 'crs_meters' hors France metropolitaine. Approche a vol d'oiseau : pour des aires reseau, voir la capability isochrone (securite_sdis_couverture).",
+  "steps": [
+    {
+      "id": "reprojection",
+      "type": "capability",
+      "capability": "reproject",
+      "params": { "target_crs": "EPSG:2154" }
+    },
+    {
+      "id": "emprise",
+      "type": "capability",
+      "capability": "concave_hull",
+      "params": { "ratio": 0.3, "allow_holes": false, "dissolve": true },
+      "input": "reprojection"
+    },
+    {
+      "id": "selection",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "amenity in ['school', 'kindergarten']" },
+      "input": "reprojection"
+    },
+    {
+      "id": "aires",
+      "type": "capability",
+      "capability": "voronoi_polygons",
+      "params": { "tolerance": 0.0, "only_edges": false },
+      "input": "selection"
+    },
+    {
+      "id": "decoupe",
+      "type": "capability",
+      "capability": "clip",
+      "params": { "ref_layer": "emprise" },
+      "input": "aires"
+    },
+    {
+      "id": "rattache",
+      "type": "capability",
+      "capability": "spatial_join",
+      "params": {
+        "ref_layer": "selection",
+        "predicate": "intersects",
+        "how": "left",
+        "columns": ["name", "amenity"]
+      },
+      "input": "decoupe"
+    },
+    {
+      "id": "surfaces",
+      "type": "capability",
+      "capability": "area_length",
+      "params": { "crs_meters": "EPSG:2154", "compute_length": false },
+      "input": "rattache"
+    },
+    {
+      "id": "indicateurs",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expressions": { "surface_ha": "round(area_m2 / 10000, 2)" }
+      },
+      "input": "surfaces"
+    }
+  ]
+}

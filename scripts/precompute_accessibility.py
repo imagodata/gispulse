@@ -23,15 +23,15 @@ Outputs (under docs-site/public/playground/data/accessibility/):
 Pipeline mirror keys must match the rule names in
 docs-site/public/playground/scenario-3-rules.json.
 
-Requires GISPULSE_TIER=pro + a license key (or
-GISPULSE_LICENCE_SKIP_VERIFY=1 for local/CI runs without a real key).
+Needs the ``network`` extra (``pip install "gispulse[network]"``) for the
+isochrone Dijkstra; no licence or tier variable — every capability used here
+is Community.
 """
 
 from __future__ import annotations
 
 import gzip
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -40,16 +40,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import geopandas as gpd  # noqa: E402
-
-# Auto-set dev license if absent so CI / local runs don't need a real key.
-# The signature check is bypassed by GISPULSE_LICENCE_SKIP_VERIFY=1; the
-# payload itself is parsed normally.
-if not os.environ.get("GISPULSE_LICENSE_KEY"):
-    from gispulse.persistence.tier import make_test_license_key  # noqa: E402
-
-    os.environ["GISPULSE_TIER"] = "pro"
-    os.environ["GISPULSE_LICENSE_KEY"] = make_test_license_key("pro")
-    os.environ["GISPULSE_LICENCE_SKIP_VERIFY"] = "1"
 
 from gispulse.capabilities.network import IsochroneCapability  # noqa: E402
 from gispulse.capabilities.vector.classify import ClassifyByRingCapability  # noqa: E402

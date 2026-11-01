@@ -58,7 +58,7 @@ gispulse/
 │   └── cli.py             # Typer CLI entry point
 ├── portal/                # React 19 web portal
 ├── sdk/                   # Python SDK (httpx + pydantic)
-├── clients/               # QGIS plugin, ArcGIS add-in, Tauri desktop
+├── qgis_plugin/           # QGIS plugin (thin bridge to the CLI)
 ├── tests/                 # Unit and integration tests
 ├── deploy/                # Docker, Caddy, monitoring
 └── docs-site/             # VitePress documentation

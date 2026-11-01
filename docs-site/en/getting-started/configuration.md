@@ -267,7 +267,7 @@ Add `.env` to your `.gitignore`. It contains secrets. The `gispulse.toml` file c
 - Python SDK
 - QGIS Plugin
 - Docker
-- 104 Community capabilities: vector, attributes, overlay, classification & styling, spatial statistics, clustering, topology, temporal, 3D pointcloud (LAS/LAZ)
+- All 144 capabilities: vector, attributes, overlay, classification & styling, spatial statistics, clustering, topology, temporal, 3D pointcloud (LAS/LAZ), raster (6) and network / routing / resilience
 - Unlimited local datasets
 
 ### Pro (79 EUR/month or 790 EUR/year)
@@ -283,9 +283,6 @@ All Community features, plus:
 - Monitoring / metrics (Prometheus)
 - Cron pipelines
 - Audit logging
-- 6 raster capabilities (`zonal_stats`, `raster_clip`, `ndvi`, `raster_reproject`, `raster_merge`, `change_detection`)
-- 6 network capabilities (`shortest_path`, `isochrone`, `od_matrix`, `mst`, `network_allocation`, `connectivity_check`)
-- `postgis_sql` capability (parameterised SQL)
 - Up to 5 API keys, 50 datasets, 1 instance
 
 To activate a Pro license:

@@ -29,7 +29,6 @@ from gispulse.capabilities.raster import (
     RasterReprojectCapability,
     ZonalStatsCapability,
 )
-from gispulse.persistence.tier import TierError
 
 
 # ---------------------------------------------------------------------------
@@ -129,66 +128,66 @@ def _community_env(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Tier gating — all raster capabilities require Pro
+# Tier gating — raster capabilities are available in Community
 # ---------------------------------------------------------------------------
 
 
 class TestRasterTierGating:
-    def test_zonal_stats_blocked_in_community(self, monkeypatch, polygon_gdf, uniform_raster):
+    def test_zonal_stats_allowed_in_community(self, monkeypatch, polygon_gdf, uniform_raster):
         _community_env(monkeypatch)
         cap = ZonalStatsCapability()
-        with pytest.raises(TierError):
-            cap.execute(polygon_gdf, raster_path=uniform_raster)
+        result = cap.execute(polygon_gdf, raster_path=uniform_raster)
+        assert result is not None
 
-    def test_raster_clip_blocked_in_community(self, monkeypatch, polygon_gdf, uniform_raster, tmp_dir):
+    def test_raster_clip_allowed_in_community(self, monkeypatch, polygon_gdf, uniform_raster, tmp_dir):
         _community_env(monkeypatch)
         cap = RasterClipCapability()
-        with pytest.raises(TierError):
-            cap.execute(
-                polygon_gdf,
-                raster_path=uniform_raster,
-                output_path=os.path.join(tmp_dir, "out.tif"),
-            )
+        result = cap.execute(
+            polygon_gdf,
+            raster_path=uniform_raster,
+            output_path=os.path.join(tmp_dir, "out.tif"),
+        )
+        assert result is not None
 
-    def test_ndvi_blocked_in_community(self, monkeypatch, multiband_raster, tmp_dir):
+    def test_ndvi_allowed_in_community(self, monkeypatch, multiband_raster, tmp_dir):
         _community_env(monkeypatch)
         cap = NdviCapability()
-        with pytest.raises(TierError):
-            cap.execute(
-                gpd.GeoDataFrame(),
-                raster_path=multiband_raster,
-                output_path=os.path.join(tmp_dir, "ndvi.tif"),
-            )
+        result = cap.execute(
+            gpd.GeoDataFrame(),
+            raster_path=multiband_raster,
+            output_path=os.path.join(tmp_dir, "ndvi.tif"),
+        )
+        assert result is not None
 
-    def test_raster_reproject_blocked_in_community(self, monkeypatch, uniform_raster, tmp_dir):
+    def test_raster_reproject_allowed_in_community(self, monkeypatch, uniform_raster, tmp_dir):
         _community_env(monkeypatch)
         cap = RasterReprojectCapability()
-        with pytest.raises(TierError):
-            cap.execute(
-                gpd.GeoDataFrame(),
-                raster_path=uniform_raster,
-                output_path=os.path.join(tmp_dir, "reproj.tif"),
-            )
+        result = cap.execute(
+            gpd.GeoDataFrame(),
+            raster_path=uniform_raster,
+            output_path=os.path.join(tmp_dir, "reproj.tif"),
+        )
+        assert result is not None
 
-    def test_raster_merge_blocked_in_community(self, monkeypatch, uniform_raster, tmp_dir):
+    def test_raster_merge_allowed_in_community(self, monkeypatch, uniform_raster, tmp_dir):
         _community_env(monkeypatch)
         cap = RasterMergeCapability()
-        with pytest.raises(TierError):
-            cap.execute(
-                gpd.GeoDataFrame(),
-                raster_paths=[uniform_raster, uniform_raster],
-                output_path=os.path.join(tmp_dir, "merged.tif"),
-            )
+        result = cap.execute(
+            gpd.GeoDataFrame(),
+            raster_paths=[uniform_raster, uniform_raster],
+            output_path=os.path.join(tmp_dir, "merged.tif"),
+        )
+        assert result is not None
 
-    def test_change_detection_blocked_in_community(self, monkeypatch, uniform_raster, changed_raster):
+    def test_change_detection_allowed_in_community(self, monkeypatch, uniform_raster, changed_raster):
         _community_env(monkeypatch)
         cap = ChangeDetectionCapability()
-        with pytest.raises(TierError):
-            cap.execute(
-                gpd.GeoDataFrame(),
-                raster_before=uniform_raster,
-                raster_after=changed_raster,
-            )
+        result = cap.execute(
+            gpd.GeoDataFrame(),
+            raster_before=uniform_raster,
+            raster_after=changed_raster,
+        )
+        assert result is not None
 
 
 # ---------------------------------------------------------------------------

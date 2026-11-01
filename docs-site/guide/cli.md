@@ -30,6 +30,7 @@ gispulse --help
 | `jobs` | Gestion des jobs (list, status, cancel) |
 | `marketplace` | Marketplace de capabilities (list, search, install) |
 | `template` | Templates de projets (list, use) |
+| `demo` | Démos sur échantillons bundlés (list, run) |
 | `telemetry` | Télémétrie anonyme opt-in (status / enable / disable) |
 
 ---
@@ -221,11 +222,11 @@ gispulse capabilities
     centroid, area_length, dissolve, union, calculate, spatial_aggregate
   Validation (Community):
     topology_check, duplicate_geometry, attribute_validation, completeness_check
-  Raster (Pro):
+  Raster (Community):
     zonal_stats, raster_clip, ndvi, raster_reproject, raster_merge, change_detection
-  Network (Pro):
+  Network (Community):
     shortest_path, isochrone, network_allocation, connectivity_check
-  SQL (Pro):
+  SQL (Community):
     postgis_sql
 ```
 
@@ -382,6 +383,31 @@ gispulse marketplace uninstall NAME
 # Détails d'un plugin
 gispulse marketplace info NAME
 ```
+
+---
+
+## `gispulse demo`
+
+Exécute un template métier sur un échantillon fourni (Muret, Haute-Garonne) pour voir le moteur tourner en moins d'une minute.
+
+```bash
+# Lister les démos (templates avec un échantillon) et les autres templates
+gispulse demo list
+
+# Lancer une démo ; sorties dans ./gispulse-demo/<template>/<template>.gpkg
+gispulse demo run cadastre_topology_cleanup
+gispulse demo run risques_inondation_parcelles --out /tmp/inondation --force
+gispulse demo run reseau_topology_prep -p "connectivite_avant_merge.return_components=true"   # nécessite pip install "gispulse[network]"
+```
+
+| Option | Description |
+|--------|-------------|
+| `--out`, `-o DIR` | Dossier de sortie (défaut `./gispulse-demo/<template>/`) |
+| `--param`, `-p ETAPE.PARAM=VALEUR` | Surcharge un paramètre d'étape (valeur lue en JSON si possible) |
+| `--force` | Écrase un dossier de sortie créé par une démo précédente |
+| `--data-dir DIR` | Racine locale contenant `examples/` et `templates/` (checkout du dépôt) |
+
+Les échantillons, le manifeste et les templates sont lus depuis `--data-dir`, puis depuis un checkout du dépôt, puis depuis le cache utilisateur `~/.cache/gispulse/demo/<ref>/` alimenté une fois depuis le tag de release sur GitHub (SHA-256 vérifié pour les échantillons). Ni `examples/` ni `templates/` ne sont dans le wheel.
 
 ---
 

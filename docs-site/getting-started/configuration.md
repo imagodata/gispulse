@@ -267,7 +267,7 @@ Ajoutez `.env` a votre `.gitignore`. Il contient des secrets. Le fichier `gispul
 - SDK Python
 - Plugin QGIS
 - Docker
-- 104 capabilities Community : vecteur, attributs, overlay, classification & styling, statistiques spatiales, clustering, topologie, temporel, 3D pointcloud (LAS/LAZ)
+- Les 144 capabilities : vecteur, attributs, overlay, classification & styling, statistiques spatiales, clustering, topologie, temporel, 3D pointcloud (LAS/LAZ), raster (6) et réseau / routage / résilience
 - Datasets locaux illimités
 
 ### Pro (79 €/mois ou 790 €/an)
@@ -283,9 +283,6 @@ Toutes les features Community, plus :
 - Monitoring / métriques (Prometheus)
 - Pipelines cron
 - Logs d'audit
-- 6 capabilities raster (`zonal_stats`, `raster_clip`, `ndvi`, `raster_reproject`, `raster_merge`, `change_detection`)
-- 6 capabilities réseau (`shortest_path`, `isochrone`, `od_matrix`, `mst`, `network_allocation`, `connectivity_check`)
-- Capability `postgis_sql` (SQL paramétré)
 - Jusqu'à 5 clés API, 50 datasets, 1 instance
 
 Pour activer une licence Pro :

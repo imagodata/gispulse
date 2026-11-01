@@ -1,0 +1,47 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.imagodata/gispulse",
+  "title": "GISPulse",
+  "description": "GIS rules engine for agents: 144 capabilities, templates, open-data catalog, triggers dry-run.",
+  "repository": {
+    "url": "https://github.com/imagodata/gispulse",
+    "source": "github",
+    "id": "1220795399"
+  },
+  "websiteUrl": "https://imagodata.github.io/gispulse/",
+  "version": "2.5.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "gispulse",
+      "version": "2.5.1",
+      "runtimeHint": "uvx",
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--with",
+          "value": "gispulse[mcp]==2.5.1",
+          "description": "Installe l'extra 'mcp' (FastMCP) de la meme version que le paquet."
+        }
+      ],
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "GISPULSE_MCP_WORKDIR",
+          "description": "Directory every file path given to the tools is confined to (default: the server process working directory).",
+          "format": "filepath",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

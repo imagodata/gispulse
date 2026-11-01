@@ -57,7 +57,6 @@ const frNav = [
     text: 'Plugins',
     items: [
       { text: 'QGIS', link: '/plugins/qgis' },
-      { text: 'ArcGIS', link: '/plugins/arcgis' },
       { text: 'Développer un plugin', link: '/plugins/developing' },
     ],
   },
@@ -169,7 +168,6 @@ const frSidebar = {
     {
       text: 'Autres plugins',
       items: [
-        { text: 'Add-in ArcGIS', link: '/plugins/arcgis' },
         { text: 'Développer un plugin', link: '/plugins/developing' },
         { text: 'Contribuer des outils MCP', link: '/plugins/mcp-tools' },
       ],
@@ -229,7 +227,6 @@ const enNav = [
     text: 'Plugins',
     items: [
       { text: 'QGIS', link: '/en/plugins/qgis' },
-      { text: 'ArcGIS', link: '/en/plugins/arcgis' },
       { text: 'Develop a plugin', link: '/en/plugins/developing' },
     ],
   },
@@ -326,7 +323,6 @@ const enSidebar = {
     {
       text: 'Other plugins',
       items: [
-        { text: 'ArcGIS Add-in', link: '/en/plugins/arcgis' },
         { text: 'Develop a Plugin', link: '/en/plugins/developing' },
       ],
     },

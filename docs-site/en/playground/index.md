@@ -56,7 +56,7 @@ python examples/prepare_playground_data.py --city versailles
 <ScenarioCard
   title="S3 — Health Facility Accessibility"
   difficulty="avance"
-  description="Clermont-Ferrand — 10-min walking isochrones (833 m) on the BD TOPO network from health facilities (categorie == 'Santé'), multi-source Dijkstra, metric coverage in m². (Pro.)"
+  description="Clermont-Ferrand — 10-min walking isochrones (833 m) on the BD TOPO network from health facilities (categorie == 'Santé'), multi-source Dijkstra, metric coverage in m²."
   :capabilities="['filter', 'isochrone', 'area_length']"
   link="/gispulse/en/playground/road-buffer-poi"
   mode="CLI + Map"

@@ -5,7 +5,7 @@
   "domain": "reseau",
   "author": "GISPulse",
   "tags": ["reseau", "resilience", "spof", "expansion", "suurballe", "prim"],
-  "requires_pro": true,
+  "requires_pro": false,
   "ref_layers": {
     "reseau_lineaire": "data/reseau_troncons.gpkg",
     "sites": "data/sites_a_raccorder.gpkg",

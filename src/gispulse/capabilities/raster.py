@@ -8,7 +8,7 @@ Requires optional dependencies:
                     RasterMergeCapability)
     - numpy        (ChangeDetectionCapability, NdviCapability)
 
-All capabilities except basic Community ones require tier="pro".
+All raster capabilities are available in the Community tier.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ import geopandas as gpd
 
 from gispulse.capabilities.base import Capability
 from gispulse.capabilities.registry import register
-from gispulse.persistence.tier import check_tier
 
 
 @register
@@ -49,7 +48,6 @@ class ZonalStatsCapability(Capability):
             nodata:      Valeur nodata à ignorer (surcharge la valeur du raster).
             band:        Index de bande (1-based, conforme GDAL).
         """
-        check_tier("pro")
 
         try:
             from rasterstats import zonal_stats
@@ -132,7 +130,6 @@ class RasterClipCapability(Capability):
         Returns:
             GeoDataFrame avec le bounding box du raster découpé (1 feature).
         """
-        check_tier("pro")
 
         try:
             import rasterio
@@ -243,7 +240,6 @@ class NdviCapability(Capability):
             GeoDataFrame avec le bounding box du raster NDVI (1 feature) et
             les colonnes ``ndvi_min``, ``ndvi_max``, ``ndvi_mean``.
         """
-        check_tier("pro")
 
         try:
             import numpy as np
@@ -372,7 +368,6 @@ class RasterReprojectCapability(Capability):
         Returns:
             GeoDataFrame avec le bounding box du raster reprojeté (1 feature).
         """
-        check_tier("pro")
 
         try:
             import rasterio
@@ -502,7 +497,6 @@ class RasterMergeCapability(Capability):
             GeoDataFrame avec le bounding box du raster fusionné (1 feature) et
             les colonnes ``n_sources`` et ``output_path``.
         """
-        check_tier("pro")
 
         try:
             import rasterio
@@ -633,7 +627,6 @@ class ChangeDetectionCapability(Capability):
             GeoDataFrame de polygones représentant les zones de changement,
             avec une colonne `diff_mean` (valeur moyenne du diff dans chaque polygone).
         """
-        check_tier("pro")
 
         try:
             import numpy as np

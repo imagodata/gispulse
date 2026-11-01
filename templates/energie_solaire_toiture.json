@@ -5,7 +5,7 @@
   "domain": "energie",
   "author": "GISPulse",
   "tags": ["solaire", "pv", "toiture", "bdnb", "lidar"],
-  "requires_pro": true,
+  "requires_pro": false,
   "requires_plugins": ["gispulse-cap-raster-extras"],
   "ref_layers": {
     "batiments": "data/bd_topo_batiments.gpkg",

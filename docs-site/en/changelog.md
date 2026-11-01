@@ -11,6 +11,24 @@ The authoritative version of this file lives at [`CHANGELOG.md`](https://github.
 
 ## [Unreleased]
 
+### Added
+
+- `gispulse demo list|run`: demos on the Muret samples (read from `examples/` in a checkout, otherwise fetched once from the release tag) (`cadastre_topology_cleanup`, `risques_inondation_parcelles`, `services_aires_influence`, `reseau_topology_prep`) run by the same executor as `gispulse run`; samples resolve from `examples/`, a per-user cache or the release tag (SHA-256 verified). Two small Community templates on the Muret samples.
+
+### Changed
+
+- **QGIS plugin ready for plugins.qgis.org.** `LICENSE` file inside the plugin (mandatory since June 2024), `experimental=False`, optional `publish-qgis-plugin` job in `release.yml` (`OSGEO_USERNAME` / `OSGEO_PASSWORD` secrets).
+- **Raster and network capabilities move to the Community tier.** All 144 capabilities are now free; Pro is scoped to operations (PostGIS/hybrid engine, cluster-grade ESB triggers, DAG executor, visual editor, monitoring, cron pipelines). The generic tier gate is unchanged and still blocks Pro-only features in Community.
+
+### Fixed
+
+- The pipeline v2 schema accepts the catalogue metadata carried by the templates (`domain`, `author`, `tags`, …); `cadastre_topology_cleanup` and `reseau_topology_prep` no longer pass unknown parameters to `topology_check` / `connectivity_check`; `risques_ppri_exposition` is still rejected (non-v2 `triggers` block) and most business templates remain to be made runnable (#507). Six templates lose their Pro badge; surfaces in the two new templates are measured in EPSG:2154 (they were off by 1.9×).
+
+### Documentation
+
+- `server.json` (MCP registry manifest) and `docs/distribution/` (MCP publishing, data.gouv.fr reuse sheets, Q4 2026 distribution roadmap).
+- README and docs-site re-pitched around the French and Belgian open-data wedge; counters aligned to 2.5.1 and 144 capabilities; removed references to the non-existent ArcGIS add-in and Tauri desktop app.
+
 ---
 
 ## [2.5.1] — 2026-10-01

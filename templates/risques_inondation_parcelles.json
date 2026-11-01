@@ -1,0 +1,87 @@
+{
+  "version": 2,
+  "name": "risques_inondation_parcelles",
+  "description": "Exposition des parcelles au risque inondation — decoupe geometrique (overlay) d'une couche parcellaire par un zonage inondable (PPRI, AZI, TRI) : surface reellement exposee de chaque parcelle par niveau de risque, puis emprise exposee dissoute par niveau avec sa surface.",
+  "domain": "risques_naturels",
+  "author": "GISPulse",
+  "tags": ["inondation", "ppri", "parcelles", "exposition", "risques"],
+  "ref_layers": {
+    "zones_inondables": "data/zones_inondables.gpkg"
+  },
+  "inputs_notes": "Entree = couche parcellaire polygonale (cadastre, PLU, RPG...). Ref 'zones_inondables' = zonage inondable polygonal avec un champ risk_level ('high' / 'medium' / 'low') — adapter l'expression du step 'zones_retenues' au vocabulaire de la source (ex. TYPEZONE pour un PPRI Georisques). Les surfaces sont calculees en EPSG:2154 (Lambert-93) : changer 'target_crs' et 'crs_meters' hors France metropolitaine. Sorties : 'indicateurs' = une ligne par couple parcelle x zone retenue, geometrie = la partie de la parcelle situee dans la zone (overlay_intersection), attributs de la parcelle + risk_level + area_m2 / surface_ha de cette partie exposee ; 'bilan_zones' = une ligne par niveau de risque, geometrie = emprise parcellaire exposee dissoute, area_m2 / surface_ha = surface de cette emprise (les chevauchements entre parcelles comptent une fois). Version allegee de risques_ppri_exposition, sans population ni ERP.",
+  "steps": [
+    {
+      "id": "reprojection",
+      "type": "capability",
+      "capability": "reproject",
+      "params": { "target_crs": "EPSG:2154" }
+    },
+    {
+      "id": "zones_retenues",
+      "type": "capability",
+      "capability": "filter",
+      "params": { "expression": "risk_level in ['high', 'medium']" },
+      "input": "zones_inondables"
+    },
+    {
+      "id": "zones_niveau",
+      "type": "capability",
+      "capability": "select_columns",
+      "params": { "fields": ["risk_level"] },
+      "input": "zones_retenues"
+    },
+    {
+      "id": "parcelles_exposees",
+      "type": "capability",
+      "capability": "overlay_intersection",
+      "params": { "ref_layer": "zones_niveau", "keep_geom_type": true },
+      "input": "reprojection"
+    },
+    {
+      "id": "surfaces",
+      "type": "capability",
+      "capability": "area_length",
+      "params": { "crs_meters": "EPSG:2154", "compute_length": false },
+      "input": "parcelles_exposees"
+    },
+    {
+      "id": "indicateurs",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expressions": { "surface_ha": "round(area_m2 / 10000, 3)" }
+      },
+      "input": "surfaces"
+    },
+    {
+      "id": "emprise_niveau",
+      "type": "capability",
+      "capability": "select_columns",
+      "params": { "fields": ["risk_level"] },
+      "input": "parcelles_exposees"
+    },
+    {
+      "id": "emprise_dissoute",
+      "type": "capability",
+      "capability": "dissolve",
+      "params": { "by": "risk_level" },
+      "input": "emprise_niveau"
+    },
+    {
+      "id": "emprise_surfaces",
+      "type": "capability",
+      "capability": "area_length",
+      "params": { "crs_meters": "EPSG:2154", "compute_length": false },
+      "input": "emprise_dissoute"
+    },
+    {
+      "id": "bilan_zones",
+      "type": "capability",
+      "capability": "calculate",
+      "params": {
+        "expressions": { "surface_ha": "round(area_m2 / 10000, 3)" }
+      },
+      "input": "emprise_surfaces"
+    }
+  ]
+}
