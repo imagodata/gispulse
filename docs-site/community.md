@@ -73,10 +73,10 @@ Devenir le moteur geospatial de reference pour les pipelines declaratifs — le 
 | Axe | Statut | Horizon |
 |-----|--------|---------|
 | Moteur DuckDB + PostGIS + GPKG portable | Livre | v1.0 |
-| 118 capabilities (vecteur, attributs, classification, stats, topologie, 3D pointcloud, raster, reseau, PostGIS SQL) | Livre | v1.1 |
+| 144 capabilities (vecteur, attributs, classification, stats, topologie, 3D pointcloud, raster, reseau, routage, PostGIS SQL) | Livre | v2.5 |
 | CLI / API REST / SDK Python | Livre | v1.0 |
-| Plugin QGIS / Add-in ArcGIS / Desktop Tauri | Livre | v1.0 |
-| Templates de pipelines metier (21 presets) | Livre | v1.0 |
+| Plugin QGIS / serveur MCP | Livre | v2.0 |
+| Templates de pipelines metier (22 workflows) | Livre | v1.0 |
 | 6 scenarios playground interactifs | Livre | v1.1 |
 | RBAC, SSO (OIDC/SAML), audit log, S3 storage | Livre | v1.0 |
 | Visual node editor | Beta | v1.2 |

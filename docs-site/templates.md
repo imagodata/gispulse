@@ -1,6 +1,6 @@
 ---
 title: Presets metier
-description: Catalogue de 21 presets GISPulse prets a l'emploi — urbanisme, FTTH, risques, foncier, agriculture, environnement, energie, securite civile, sante, batiment, retail.
+description: Catalogue de 22 presets GISPulse prets a l'emploi — urbanisme, FTTH, risques, foncier, agriculture, environnement, energie, securite civile, sante, batiment, retail.
 ---
 
 # Catalogue de presets
@@ -8,7 +8,7 @@ description: Catalogue de 21 presets GISPulse prets a l'emploi — urbanisme, FT
 Chaque preset est un fichier JSON **directement consommable par le runner GISPulse** (`gispulse run ... --rules templates/<name>.json`). Filtrez par domaine ou capability, previsualisez le pipeline en place, telechargez le JSON.
 
 ::: tip Aucune donnee n'est chargee tant que vous ne cliquez pas sur "Apercu"
-L'index (**~25 kB**) liste les 21 presets. Les corps JSON complets ne sont recuperes qu'a la demande.
+L'index (**~25 kB**) liste les 22 presets. Les corps JSON complets ne sont recuperes qu'a la demande.
 :::
 
 <TemplatesGallery />

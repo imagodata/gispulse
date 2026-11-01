@@ -11,6 +11,14 @@ La source de vérité de ce fichier est [`CHANGELOG.md`](https://github.com/imag
 
 ## [Unreleased]
 
+### Modifié
+
+- **Les capabilities raster et réseau passent au tier Community.** Les 144 capabilities sont désormais gratuites ; Pro est réservé à l'exploitation (moteur PostGIS/hybride, triggers ESB cluster, exécuteur DAG, éditeur visuel, monitoring, pipelines cron). Le gate de tier générique est inchangé et bloque toujours les fonctionnalités Pro en Community.
+
+### Documentation
+
+- README et docs-site repositionnés autour de l'open data français et belge ; compteurs alignés sur 2.5.1 et 144 capabilities ; suppression des références à l'add-in ArcGIS et à l'application desktop Tauri, qui n'existent pas.
+
 ---
 
 ## [2.5.1] — 2026-10-01

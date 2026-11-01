@@ -11,6 +11,14 @@ The authoritative version of this file lives at [`CHANGELOG.md`](https://github.
 
 ## [Unreleased]
 
+### Changed
+
+- **Raster and network capabilities move to the Community tier.** All 144 capabilities are now free; Pro is scoped to operations (PostGIS/hybrid engine, cluster-grade ESB triggers, DAG executor, visual editor, monitoring, cron pipelines). The generic tier gate is unchanged and still blocks Pro-only features in Community.
+
+### Documentation
+
+- README and docs-site re-pitched around the French and Belgian open-data wedge; counters aligned to 2.5.1 and 144 capabilities; removed references to the non-existent ArcGIS add-in and Tauri desktop app.
+
 ---
 
 ## [2.5.1] — 2026-10-01

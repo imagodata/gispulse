@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Raster and network capabilities move to the Community tier.** `raster` and
+  `network` leave `pro.features` in `core/pricing_catalog.yml` and join
+  `community.features`; the per-capability `check_tier("pro")` gates are removed
+  from the raster (6), network, network expansion/resilience, routing and
+  surface-sampling capabilities. All 144 capabilities are now free; Pro is
+  scoped to operations (PostGIS/hybrid engine, cluster-grade ESB triggers, DAG
+  executor, visual editor, monitoring, cron pipelines). The generic
+  `enforce_feature` / `check_tier` gate is unchanged and still blocks Pro-only
+  features in Community.
+
+### Documentation
+
+- README and docs-site re-pitched around the French and Belgian open-data wedge
+  (sources, ready-made business workflows, 144 capabilities, DuckDB inside,
+  "save in QGIS, rules fire"); the declarative-engine story moves below it.
+- Counters aligned to 2.5.1 and 144 capabilities (README, docs-site home pages
+  FR/EN, capabilities guide, FAQ, pricing, configuration guide).
+- Removed references to the non-existent ArcGIS add-in and Tauri desktop app
+  from the README, pricing pages, FAQ and community page. ArcGIS Pro is
+  documented as an OGC API Features consumer.
+- Pricing pages: raster and network are Community; Pro lists operations only.
+
 ## [2.5.1] - 2026-10-01
 
 The PICC and UrbIS source plugins move to 0.2.0 and now declare

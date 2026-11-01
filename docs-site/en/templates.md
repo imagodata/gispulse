@@ -1,6 +1,6 @@
 ---
 title: Preset library
-description: Catalog of 21 ready-to-run GISPulse presets — urban planning, FTTH, risk, land, agriculture, environment, energy, civil safety, health, building, retail.
+description: Catalog of 22 ready-to-run GISPulse presets — urban planning, FTTH, risk, land, agriculture, environment, energy, civil safety, health, building, retail.
 ---
 
 # Preset library
@@ -8,7 +8,7 @@ description: Catalog of 21 ready-to-run GISPulse presets — urban planning, FTT
 Each preset is a JSON file **directly consumable by the GISPulse runner** (`gispulse run ... --rules templates/<name>.json`). Filter by domain or capability, preview the pipeline in place, download the JSON.
 
 ::: tip No data is loaded until you click "Preview"
-The index (**~25 kB**) lists the 21 presets. Full JSON bodies are only fetched on demand.
+The index (**~25 kB**) lists the 22 presets. Full JSON bodies are only fetched on demand.
 :::
 
 <TemplatesGallery />
