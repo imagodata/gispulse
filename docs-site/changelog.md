@@ -13,7 +13,7 @@ La source de vérité de ce fichier est [`CHANGELOG.md`](https://github.com/imag
 
 ### Ajouté
 
-- `gispulse demo list|run` : démos hors-ligne sur les échantillons bundlés (`cadastre_topology_cleanup`, `risques_inondation_parcelles`, `services_aires_influence`, `reseau_topology_prep`), exécutées par le même moteur que `gispulse run` ; échantillons résolus depuis `examples/`, un cache utilisateur ou le tag de release (SHA-256 vérifié). Deux petits templates Community sur les données de Muret.
+- `gispulse demo list|run` : démos sur les échantillons de Muret (lus depuis `examples/` dans un checkout, sinon téléchargés une fois depuis le tag de release) (`cadastre_topology_cleanup`, `risques_inondation_parcelles`, `services_aires_influence`, `reseau_topology_prep`), exécutées par le même moteur que `gispulse run` ; échantillons résolus depuis `examples/`, un cache utilisateur ou le tag de release (SHA-256 vérifié). Deux petits templates Community sur les données de Muret.
 
 ### Modifié
 
@@ -22,7 +22,7 @@ La source de vérité de ce fichier est [`CHANGELOG.md`](https://github.com/imag
 
 ### Corrigé
 
-- Le schéma de pipeline v2 accepte les métadonnées de catalogue des templates (`domain`, `author`, `tags`, …) ; `cadastre_topology_cleanup` et `reseau_topology_prep` ne passent plus de paramètres inconnus à `topology_check` / `connectivity_check`.
+- Le schéma de pipeline v2 accepte les métadonnées de catalogue des templates (`domain`, `author`, `tags`, …) ; `cadastre_topology_cleanup` et `reseau_topology_prep` ne passent plus de paramètres inconnus à `topology_check` / `connectivity_check` ; `risques_ppri_exposition` reste refusé (bloc `triggers` hors v2) et la plupart des templates métier restent à rendre exécutables (#507). Six templates perdent leur badge Pro ; surfaces des deux nouveaux templates mesurées en EPSG:2154 (elles étaient fausses d'un facteur 1,9).
 
 ### Documentation
 

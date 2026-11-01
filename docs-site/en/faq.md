@@ -78,7 +78,7 @@ The same JSON rules run on either engine. You choose the engine at execution tim
 
 ### Is GISPulse production-ready?
 
-Yes. **GISPulse v2.5.1** is the current stable release: 144 capabilities, 16 FR/BE data sources, 22 business workflows, 3,600+ tests, multi-backend DuckDB / PostGIS engine, Prometheus metrics, RBAC, SSO (OIDC / SAML), audit logging and S3 storage. The CLI, REST API, Python SDK, QGIS plugin and MCP server are shipped; ArcGIS Pro consumes GISPulse through OGC API Features. v2.0.0 added the two-regime ExtensionHub (code plugins + data packs), the worldwide geo aggregator (4 fetchers), and the MCP server.
+Yes. **GISPulse v2.5.1** is the current stable release: 144 capabilities, 22 FR/BE data sources, 20+ business workflows, 3,600+ tests, multi-backend DuckDB / PostGIS engine, Prometheus metrics, RBAC, SSO (OIDC / SAML), audit logging and S3 storage. The CLI, REST API, Python SDK, QGIS plugin and MCP server are shipped; ArcGIS Pro consumes GISPulse through OGC API Features. v2.0.0 added the two-regime ExtensionHub (code plugins + data packs), the worldwide geo aggregator (4 fetchers), and the MCP server.
 
 | Component | Status |
 |-----------|--------|
@@ -92,12 +92,11 @@ Yes. **GISPulse v2.5.1** is the current stable release: 144 capabilities, 16 FR/
 
 ### How do I deploy GISPulse?
 
-Four deployment modes:
+Three deployment modes:
 
 1. **pip install** — `pip install gispulse` for CLI and SDK usage
 2. **Docker** — `docker-compose` with Caddy, Prometheus, Grafana
 3. **Kubernetes** — Helm chart for scalable deployments
-4. **Desktop** — Tauri app for standalone usage
 
 ### Can I migrate from FME?
 

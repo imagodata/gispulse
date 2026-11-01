@@ -5,7 +5,7 @@
 <h1 align="center">GISPulse — French &amp; Belgian open geodata, ready to run.</h1>
 
 <p align="center">
-  <strong>22 open-data sources (cadastre, DVF, PLU/GPU, BAN, Géorisques, INSEE, IGN, RNB, BDNB… and GRB/PICC/UrbIS/Statbel for Belgium), 20+ ready-made business workflows (ZAN land-take, PLU/CNIG validation, flood-risk exposure, DVF market, FTTH hotspots, SDIS coverage…), 144 spatial capabilities, DuckDB inside — no server needed.<br>Save in QGIS, your rules fire.</strong>
+  <strong>22 open-data sources (cadastre, DVF, PLU/GPU, BAN, Géorisques, INSEE, IGN, RNB, BDNB… and GRB/PICC/UrbIS/Statbel for Belgium), 20+ business workflow templates (ZAN land-take, PLU/CNIG validation, flood-risk exposure, DVF market, FTTH hotspots, SDIS coverage…), 144 spatial capabilities, DuckDB inside — no server needed.<br>Save in QGIS, your rules fire.</strong>
 </p>
 
 [![PyPI version](https://img.shields.io/pypi/v/gispulse.svg)](https://pypi.org/project/gispulse/)
@@ -26,10 +26,10 @@ Under the hood, GISPulse is a **declarative spatial engine** (rules-as-config). 
 ```bash
 pipx install gispulse                          # isolated CLI, DuckDB included
 gispulse demo list                             # bundled offline demos
-gispulse demo run cadastre_topology_cleanup    # runs on bundled data, no download, no server
+gispulse demo run cadastre_topology_cleanup    # fetches the 7 MB Muret sample once, no server
 ```
 
-`gispulse demo run <template> [--out DIR]` writes its outputs under `--out DIR` so you can open them in QGIS. `cadastre_topology_cleanup` ships fully offline.
+`gispulse demo run <template> [--out DIR]` writes its outputs under `--out DIR` so you can open them in QGIS. Samples are fetched once from the release tag on GitHub and cached under `~/.cache/gispulse/demo`; from a repository checkout they are read from `examples/` with no download. Four demo templates are verified end to end: `cadastre_topology_cleanup`, `risques_inondation_parcelles`, `services_aires_influence` and `reseau_topology_prep` (the last one needs `pip install "gispulse[network]"`). The other templates are reference designs that expect the French datasets they name — see [#507](https://github.com/imagodata/gispulse/issues/507) for the work to make every template runnable.
 
 ## What's in the box
 
@@ -51,7 +51,7 @@ Each source is a plugin that knows where the data lives, how to page through it,
 
 The GRB/PICC/UrbIS road-crossings evidence builders (grade-separated vs ground, with coverage and exclusion artifacts in EPSG:31370) ship in the core. See [`docs/SOURCE_PLUGIN_GUIDE.md`](docs/SOURCE_PLUGIN_GUIDE.md) to write your own.
 
-### Ready-made business workflows
+### Business workflow templates
 
 20+ pipeline templates in [`templates/`](templates/) (index: [`templates/INDEX.md`](templates/INDEX.md)). List them with `gispulse template list`, copy one with `gispulse template use <name>`.
 
@@ -401,6 +401,31 @@ gispulse telemetry --status    # Check current setting
 gispulse telemetry --disable   # Opt out
 GISPULSE_TELEMETRY=0           # Disable via env var (CI-friendly)
 ```
+
+## Deployment
+
+- Local team without source mounts: `docker compose -f docker-compose.local.yml up -d` (PostGIS 16 on 5433, API on 8001).
+- Production VPS: `cd deploy && cp .env.example .env && docker compose -f docker-compose.prod.yml up -d` (Caddy auto-TLS, 4 API workers, Prometheus, Grafana, daily PostgreSQL backups).
+- Details: [deployment guide](https://imagodata.github.io/gispulse/guide/deployment).
+
+## Development
+
+```bash
+pip install -e ".[dev]"     # Install with dev dependencies
+make test                   # Full test suite
+make lint                   # ruff check (locked ruff version)
+make format                 # ruff format
+pre-commit install          # Install git hooks (ruff, secret detection)
+```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Python 3.12+, PEP 8 via ruff, type hints, tests required.
+
+## Related projects
+
+- **FilterMate** — spatial preparation, filtering, and export capabilities
+- **FibreFlow** — FTTH design and calculation pipelines
 
 ## Documentation, community, license
 

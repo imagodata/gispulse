@@ -13,7 +13,7 @@ The authoritative version of this file lives at [`CHANGELOG.md`](https://github.
 
 ### Added
 
-- `gispulse demo list|run`: bundled offline demos (`cadastre_topology_cleanup`, `risques_inondation_parcelles`, `services_aires_influence`, `reseau_topology_prep`) run by the same executor as `gispulse run`; samples resolve from `examples/`, a per-user cache or the release tag (SHA-256 verified). Two small Community templates on the Muret samples.
+- `gispulse demo list|run`: demos on the Muret samples (read from `examples/` in a checkout, otherwise fetched once from the release tag) (`cadastre_topology_cleanup`, `risques_inondation_parcelles`, `services_aires_influence`, `reseau_topology_prep`) run by the same executor as `gispulse run`; samples resolve from `examples/`, a per-user cache or the release tag (SHA-256 verified). Two small Community templates on the Muret samples.
 
 ### Changed
 
@@ -22,7 +22,7 @@ The authoritative version of this file lives at [`CHANGELOG.md`](https://github.
 
 ### Fixed
 
-- The pipeline v2 schema accepts the catalogue metadata carried by the templates (`domain`, `author`, `tags`, …); `cadastre_topology_cleanup` and `reseau_topology_prep` no longer pass unknown parameters to `topology_check` / `connectivity_check`.
+- The pipeline v2 schema accepts the catalogue metadata carried by the templates (`domain`, `author`, `tags`, …); `cadastre_topology_cleanup` and `reseau_topology_prep` no longer pass unknown parameters to `topology_check` / `connectivity_check`; `risques_ppri_exposition` is still rejected (non-v2 `triggers` block) and most business templates remain to be made runnable (#507). Six templates lose their Pro badge; surfaces in the two new templates are measured in EPSG:2154 (they were off by 1.9×).
 
 ### Documentation
 

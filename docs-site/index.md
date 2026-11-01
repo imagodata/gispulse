@@ -111,7 +111,7 @@ features:
   <span class="gp-badge gp-badge-license">Open source AGPL-3.0</span>
   <span class="gp-badge gp-badge-formats">16+ formats</span>
   <span class="gp-badge gp-badge-tests">3 600+ tests</span>
-  <span class="gp-badge gp-badge-deploy">4 modes de deploiement</span>
+  <span class="gp-badge gp-badge-deploy">3 modes de deploiement</span>
   <span class="gp-badge gp-badge-python">Python 3.12+</span>
 </div>
 <div class="gp-stats-row">

@@ -9,23 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `gispulse demo list|run`: bundled offline demos (`cadastre_topology_cleanup`,
+- `gispulse demo list|run`: demos on the bundled Muret samples (`cadastre_topology_cleanup`,
   `risques_inondation_parcelles`, `services_aires_influence`,
-  `reseau_topology_prep`). `demo list` shows which templates ship a sample
+  `reseau_topology_prep` — the last one needs the `[network]` extra). `demo list` shows which templates ship a sample
   (`demo:` block in `templates/manifest.yml`, the single source of truth);
   `demo run <template> [--out DIR] [--param STEP.PARAM=VALUE] [--force]`
   stages the sample, runs the template through the regular pipeline executor
   and writes every leaf step as a layer of
-  `./gispulse-demo/<template>/<template>.gpkg`, next to a replayable
-  `pipeline.json`. Samples resolve from `--data-dir`, the repository
-  `examples/`, or a per-user cache (`~/.cache/gispulse/demo`) filled from the
-  release tag on GitHub with SHA-256 verification — neither `examples/` nor
-  `templates/` ships in the wheel.
+  `./gispulse-demo/<template>/<template>.gpkg`, next to the resolved
+  `pipeline.json` (`gispulse run … -r pipeline.json` replays it and writes the
+  final step). `--force` only removes a directory a previous demo created.
+  Samples, manifest and templates resolve from `--data-dir`, a repository
+  checkout (`examples/`, `templates/`), or a per-user cache
+  (`~/.cache/gispulse/demo/<ref>/`, `$XDG_CACHE_HOME` honoured) filled from the
+  release tag on GitHub (`main` for non-release versions); samples are SHA-256
+  checked against the manifest — neither `examples/` nor `templates/` ships in
+  the wheel.
 - Two small Community templates that run on the bundled Muret samples:
   `risques_inondation_parcelles` (parcels x flood zoning, surface per risk
   level) and `services_aires_influence` (Voronoi catchments of OSM amenities).
-- `PipelineResult.step_results` (`SessionManager.run_pipeline_v2`): every
-  step's output, not only the last one.
+- `PipelineResult.step_results` (`SessionManager.run_pipeline_v2(…, keep_step_results=True)`):
+  every executed step's output, not only the last one. Off by default so
+  `gispulse run` and the portal keep their memory profile; `demo run` turns it on.
 - `server.json` (MCP registry manifest for `io.github.imagodata/gispulse`) and
   `docs/distribution/` (MCP registry publishing, data.gouv.fr reuse sheets,
   Q4 2026 distribution roadmap in `docs/roadmap-distribution-2026-q4.md`).
@@ -40,14 +45,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scoped to operations (PostGIS/hybrid engine, cluster-grade ESB triggers, DAG
   executor, visual editor, monitoring, cron pipelines). The generic
   `enforce_feature` / `check_tier` gate is unchanged and still blocks Pro-only
-  features in Community.
+  features in Community. Side effect: these capabilities no longer validate the
+  licence key when `GISPULSE_TIER=pro` is set; licence checks remain at the Pro
+  entry points (PostGIS engine, ESB triggers, scheduler, routers).
 - **QGIS plugin ready for plugins.qgis.org.** The plugin folder now ships a
   `LICENSE` file (mandatory on the QGIS plugin repository since June 2024 —
   previous ZIPs could not be uploaded), `experimental=False` so it shows in
   the default plugin catalogue, and `homepage` points to the documentation
   site. `release.yml` gains an optional `publish-qgis-plugin` job
-  (`scripts/upload_qgis_plugin.py`, XML-RPC `plugin.upload`) that runs when
-  the `OSGEO_USERNAME` / `OSGEO_PASSWORD` secrets are set. Maintainer guide
+  (`scripts/upload_qgis_plugin.py`, XML-RPC `plugin.upload`) whose upload
+  steps run only when the `OSGEO_USERNAME` / `OSGEO_PASSWORD` secrets are set. Maintainer guide
   rewritten in `qgis_plugin/PUBLISHING.md`; install docs no longer link to a
   private issue.
 
@@ -60,11 +67,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pipeline v2 schema accepts the catalogue metadata carried by the bundled
   templates (`domain`, `author`, `tags`, `inputs_notes`, `requires_pro`,
   `requires_plugins`); `gispulse run -r templates/<x>.json` no longer fails
-  with "Additional properties are not allowed".
+  with "Additional properties are not allowed" for the bundled templates —
+  except `risques_ppri_exposition`, whose `triggers` block is not v2. Most
+  business templates still name French reference datasets and call
+  `calculate` / `spatial_aggregate` with parameters those capabilities do not
+  accept; making every template runnable is tracked in #507.
 - `cadastre_topology_cleanup`: `topology_check` has no `tolerance` parameter;
   `reseau_topology_prep`: `connectivity_check` has no `tolerance`,
   `check_dangling` or `check_isolated` parameter. The executor rejected both
   templates at that step.
+- Six templates (`energie_solaire_toiture`, `mobilite_accessibilite_services`,
+  `reseau_expansion_resilience`, `retail_huff_chalandise`, `sante_apl_deserts`,
+  `securite_sdis_couverture`) were still flagged `requires_pro` and shown with a
+  Pro badge in the gallery although every capability they use is Community.
+- `area_length` on an already projected layer measured in EPSG:3857 (surfaces
+  off by ~1.9× at this latitude) in the two new templates; they now pass the
+  metric CRS explicitly, and `risques_inondation_parcelles` reports the exposed
+  surface (overlay) per parcel and per risk level instead of whole-parcel areas.
+- `PipelineResult.rules_applied` counted the DAG's input and reference nodes as
+  steps, so `gispulse run` reported more steps than the pipeline declares.
 
 ### Documentation
 
@@ -77,6 +98,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the README, pricing pages, FAQ and community page. ArcGIS Pro is
   documented as an OGC API Features consumer.
 - Pricing pages: raster and network are Community; Pro lists operations only.
+- `postgis_sql` (never tier-gated) is listed as Community in the pricing tables,
+  the configuration guide and the CLI guide; `gispulse demo` documented in the
+  CLI guide (FR/EN); the ArcGIS add-in pages, their sidebar entries and the
+  Tauri "Mode 4" install section are removed.
 
 ## [2.5.1] - 2026-10-01
 

@@ -142,6 +142,5 @@ Le sens inverse : un trigger GISPulse fire et POST le payload vers un endpoint G
 
 ## Voir aussi
 
-- [Add-in ArcGIS Pro natif](../plugins/arcgis) — UX intégrée + dataset browser
 - [Integration matrix](https://github.com/imagodata/gispulse/blob/main/docs/INTEGRATION_MATRIX.md)
 - [Triggers Guide](https://github.com/imagodata/gispulse/blob/main/docs/TRIGGERS_GUIDE.md) — webhook payload, retries, HMAC

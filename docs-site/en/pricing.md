@@ -140,7 +140,7 @@ AGPL-3.0 license. Open-source.
 | 144 capabilities (vector, attributes, classification, stats, topology, network, raster, 3D pointcloud) | yes | yes | yes | yes |
 | Raster (`rasterio`, 6 caps) | yes | yes | yes | yes |
 | Network (`networkx`, routing, resilience) | yes | yes | yes | yes |
-| `postgis_sql` (parameterised SQL) | — | yes | yes | yes |
+| `postgis_sql` (parameterised SQL) | yes | yes | yes | yes |
 | Custom capabilities (entry-points) | — | — | — | yes |
 | **Orchestration** | | | | |
 | DAG executor | — | yes | yes | yes |

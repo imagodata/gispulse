@@ -30,6 +30,7 @@ gispulse --help
 | `jobs` | Manage jobs (list / status / cancel) |
 | `marketplace` | Capability marketplace (list / search / install) |
 | `template` | Project templates (list / use) |
+| `demo` | Demos on bundled samples (list, run) |
 | `telemetry` | Opt-in anonymous telemetry (status / enable / disable) |
 
 ---
@@ -417,6 +418,31 @@ gispulse marketplace list                 # installed + available
 gispulse marketplace search <keyword>
 gispulse marketplace install <package>
 ```
+
+---
+
+## `gispulse demo`
+
+Runs a business template on a bundled sample (Muret, Haute-Garonne) so you can watch the engine work in under a minute.
+
+```bash
+# List the demos (templates with a sample) and the other templates
+gispulse demo list
+
+# Run a demo; outputs land in ./gispulse-demo/<template>/<template>.gpkg
+gispulse demo run cadastre_topology_cleanup
+gispulse demo run risques_inondation_parcelles --out /tmp/flood --force
+gispulse demo run reseau_topology_prep -p "connectivite_avant_merge.return_components=true"   # needs pip install "gispulse[network]"
+```
+
+| Option | Description |
+|--------|-------------|
+| `--out`, `-o DIR` | Output directory (default `./gispulse-demo/<template>/`) |
+| `--param`, `-p STEP.PARAM=VALUE` | Override a step parameter (value parsed as JSON when possible) |
+| `--force` | Overwrite an output directory created by a previous demo |
+| `--data-dir DIR` | Local root holding `examples/` and `templates/` (a repository checkout) |
+
+Samples, manifest and templates resolve from `--data-dir`, then a repository checkout, then the user cache `~/.cache/gispulse/demo/<ref>/` filled once from the release tag on GitHub (samples SHA-256 checked). Neither `examples/` nor `templates/` ships in the wheel.
 
 ---
 

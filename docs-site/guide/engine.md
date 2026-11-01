@@ -1,13 +1,13 @@
 ---
 title: Lancer le moteur
-description: Faire tourner le moteur GISPulse en headless (API REST + WebSocket, sans SPA) avec `gispulse engine`. Cas d'usage serveur, sidecar Tauri, intégration tierce.
+description: Faire tourner le moteur GISPulse en headless (API REST + WebSocket, sans SPA) avec `gispulse engine`. Cas d'usage serveur, sidecar d'application desktop, intégration tierce.
 ---
 
 # Lancer le moteur (`gispulse engine`)
 
 Le moteur GISPulse est un serveur FastAPI qui expose les pipelines de règles, les triggers ESB, les datasets et les WebSockets d'évènements. La commande `gispulse engine` le lance **en mode headless** — pas de SPA monté, juste l'API.
 
-> **Quand utiliser `gispulse engine` plutôt que `gispulse portal` ?** Quand vous n'avez pas besoin du workbench visuel : pipelines automatisés, sidecar de l'app desktop Tauri, backend pour un portail hébergé séparément, intégration tierce qui consomme l'API REST. Pour un workflow d'édition visuelle sur poste, utilisez plutôt [`gispulse portal`](/guide/portal-local).
+> **Quand utiliser `gispulse engine` plutôt que `gispulse portal` ?** Quand vous n'avez pas besoin du workbench visuel : pipelines automatisés, sidecar d'une application desktop, backend pour un portail hébergé séparément, intégration tierce qui consomme l'API REST. Pour un workflow d'édition visuelle sur poste, utilisez plutôt [`gispulse portal`](/guide/portal-local).
 
 ## Commande
 
@@ -17,7 +17,7 @@ gispulse engine [OPTIONS]
 
 | Option | Défaut | Description |
 |--------|--------|-------------|
-| `--port`, `-p` | `0` (auto) | Port d'écoute. `0` = port libre auto-détecté (utile pour sidecar Tauri). |
+| `--port`, `-p` | `0` (auto) | Port d'écoute. `0` = port libre auto-détecté (utile pour un sidecar). |
 | `--host` | `127.0.0.1` | Hôte d'écoute. Mettre `0.0.0.0` pour exposer en LAN ou derrière un reverse proxy. |
 | `--engine`, `-e` | `duckdb` | Backend spatial : `duckdb` (local), `postgis` (serveur), `hybrid` (Pro, mix des deux). |
 | `--data-dir`, `-d` | `~/.gispulse/data` | Répertoire des datasets uploadés. |
@@ -25,7 +25,7 @@ gispulse engine [OPTIONS]
 
 ### Démarrage et mode "ready"
 
-Au boot, `gispulse engine` émet une ligne JSON sur stdout pour permettre à un parent process (Tauri, supervisor, script) de récupérer port et PID :
+Au boot, `gispulse engine` émet une ligne JSON sur stdout pour permettre à un parent process (application desktop, supervisor, script) de récupérer port et PID :
 
 ```
 GISPULSE_READY:{"port": 8001, "host": "127.0.0.1", "engine": "duckdb", "pid": 12345}
@@ -146,7 +146,7 @@ Les deux commandes lancent le même `create_app()` FastAPI. La seule différence
 
 | Commande | Mount SPA | Auth par défaut | Cas d'usage |
 |---|---|---|---|
-| `gispulse engine` | non | activable via env | serveur, sidecar Tauri, intégration tierce |
+| `gispulse engine` | non | activable via env | serveur, sidecar desktop, intégration tierce |
 | `gispulse portal` | oui (`/portal`) | désactivée (localhost) | poste de travail, onboarding visuel |
 
 Vous pouvez tout à fait :

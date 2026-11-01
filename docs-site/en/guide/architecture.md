@@ -164,7 +164,6 @@ Switching engines is a runtime decision: `--engine duckdb` or `--engine postgis`
 GISPulse supports external entry points:
 
 - **QGIS Plugin** — dock widgets for datasets, jobs, scenarios, and triggers. Uses QThread workers for background execution.
-- **ArcGIS Add-in** — dockpanes with geoprocessing tools that call the GISPulse API.
 - **Tauri Desktop** — standalone React + MapLibre GL JS application.
 
 All plugins communicate with GISPulse through the REST API or the Python SDK. They never access the engine directly.

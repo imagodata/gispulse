@@ -283,7 +283,6 @@ Toutes les features Community, plus :
 - Monitoring / métriques (Prometheus)
 - Pipelines cron
 - Logs d'audit
-- Capability `postgis_sql` (SQL paramétré)
 - Jusqu'à 5 clés API, 50 datasets, 1 instance
 
 Pour activer une licence Pro :
