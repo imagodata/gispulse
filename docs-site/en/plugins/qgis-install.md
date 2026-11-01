@@ -71,8 +71,8 @@ gispulse --version
 
 ## Step 2 — install the plugin
 
-Until the [plugins.qgis.org](https://plugins.qgis.org) submission is
-finalised ([#v1.4-8](https://github.com/imagodata/gispulse-enterprise/issues/474)),
+The plugin is being published on [plugins.qgis.org](https://plugins.qgis.org).
+Until it shows up in the QGIS plugin manager,
 install the ZIP **from the GitHub Release**:
 
 1. Download `gispulse-qgis-plugin-<version>.zip` from the

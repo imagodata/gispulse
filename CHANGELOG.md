@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **QGIS plugin ready for plugins.qgis.org.** The plugin folder now ships a
+  `LICENSE` file (mandatory on the QGIS plugin repository since June 2024 —
+  previous ZIPs could not be uploaded), `experimental=False` so it shows in
+  the default plugin catalogue, and `homepage` points to the documentation
+  site. `release.yml` gains an optional `publish-qgis-plugin` job
+  (`scripts/upload_qgis_plugin.py`, XML-RPC `plugin.upload`) that runs when
+  the `OSGEO_USERNAME` / `OSGEO_PASSWORD` secrets are set. Maintainer guide
+  rewritten in `qgis_plugin/PUBLISHING.md`; install docs no longer link to a
+  private issue.
+
 ## [2.5.1] - 2026-10-01
 
 The PICC and UrbIS source plugins move to 0.2.0 and now declare

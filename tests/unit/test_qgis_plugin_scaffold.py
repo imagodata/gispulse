@@ -91,7 +91,7 @@ def test_build_zip_produces_installable_archive(tmp_path: Path) -> None:
     assert all(n.startswith("gispulse/") for n in names), (
         "ZIP root folder must be 'gispulse/' for QGIS Plugin Manager"
     )
-    for required in ("gispulse/metadata.txt", "gispulse/__init__.py", "gispulse/icon.png"):
+    for required in ("gispulse/metadata.txt", "gispulse/__init__.py", "gispulse/icon.png", "gispulse/LICENSE"):
         assert required in names, f"missing {required} in ZIP"
     # PUBLISHING.md is a maintainer-only guide; shipping it would clutter
     # the QGIS Plugin Manager listing and confuse users.
@@ -107,7 +107,7 @@ def test_metadata_has_required_qgis_fields() -> None:
     parser.read(PLUGIN_DIR / "metadata.txt", encoding="utf-8")
     g = parser["general"]
     assert g["category"] == "Vector"
-    assert g["experimental"] in ("True", "true")
+    assert g["experimental"] in ("False", "false")
     assert "changelog" in g
     # Description must be a single line under the QGIS 512-char cap.
     assert len(g["description"]) <= 512
