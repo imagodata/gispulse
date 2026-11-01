@@ -53,6 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- CI lint runs the locked ruff: the `dev` extra now requires `ruff>=0.15.11,<0.16`
+  (the version in `uv.lock`) instead of `<1.0`, so `pip install -e ".[dev]"` on the
+  runners no longer picks a newer ruff whose rules the codebase was never checked
+  against (the `test (3.12)` and `plugins` jobs on `main` were red for that reason).
 - The pipeline v2 schema accepts the catalogue metadata carried by the bundled
   templates (`domain`, `author`, `tags`, `inputs_notes`, `requires_pro`,
   `requires_plugins`); `gispulse run -r templates/<x>.json` no longer fails
